@@ -15,6 +15,8 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 | ✒️ **Journal** | Gratitude, reflections and free entries, plus a mood-per-day month strip |
 | 🪙 **Finance** | Income/expense log, monthly balance, 6-month income-vs-expense chart, category breakdown |
 | 📚 **Books** | Shelf with want-to-read / reading / read, star ratings, "currently reading" on the dashboard |
+| 🍽️ **Meals** | Weekly meal planner (breakfast/lunch/dinner per day) plus a shopping list; today's plate on the dashboard |
+| 💪 **Workout** | Log sessions by type and minutes, weekly stats, 7-day minutes chart; movement summary on the dashboard |
 | 🧩 **Widgets** | Build your own dashboard widgets: counters (water 💧), daily trackers (sleep hours), checklists, sticky notes |
 | ✨ **Sage, the AI assistant** | Floating chat that adds habits/tasks/goals/expenses/books, logs journal entries, builds new widgets, switches themes and reports your progress |
 
@@ -47,3 +49,8 @@ python3 -m http.server 8080
 ```
 
 Then open http://localhost:8080.
+
+### GitHub Pages
+
+A workflow at `.github/workflows/pages.yml` deploys the app automatically on every push to `main`. After the first merge, the site appears at `https://<your-username>.github.io/Bushdio-90/`. (If the first run reports Pages isn't enabled, flip Settings → Pages → Source to **GitHub Actions** and re-run it.)
+

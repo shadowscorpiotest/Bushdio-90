@@ -22,6 +22,14 @@ const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satu
 const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const niceDate = (dateIso) => new Date(dateIso + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 
+function weekDates() {
+  // Monday..Sunday of the current week, as ISO dates
+  const t = todayIso();
+  const mondayOffset = (new Date().getDay() + 6) % 7;
+  const monday = addDays(t, -mondayOffset);
+  return [...Array(7)].map((_, i) => addDays(monday, i));
+}
+
 function daysUntil(dateIso) {
   const diff = Math.round((new Date(dateIso + "T12:00:00") - new Date(todayIso() + "T12:00:00")) / DAY_MS);
   if (diff === 0) return "today";
@@ -46,6 +54,9 @@ function defaultState() {
     finance: [],     // {id,type,amount,category,note,date}
     books: [],       // {id,title,author,status,rating,emoji}
     widgets: [],     // {id,type,title,emoji,config,data}
+    meals: {},       // {date: {breakfast,lunch,dinner}}
+    shopping: [],    // {id,text,done}
+    workouts: [],    // {id,date,type,duration,note}
   };
 }
 
@@ -228,6 +239,7 @@ function renderAll() {
   const renderer = {
     dashboard: renderDashboard, habits: renderHabits, goals: renderGoals,
     planner: renderPlanner, journal: renderJournal, finance: renderFinance, books: renderBooks,
+    meals: renderMeals, workout: renderWorkout,
   }[currentView];
   renderer && renderer();
 }
@@ -394,6 +406,49 @@ function widgetHTML(w) {
   </div>`;
 }
 
+/* ---------- meals & workout partials ---------- */
+const MEAL_SLOTS = [["breakfast", "🍳 Breakfast"], ["lunch", "🥗 Lunch"], ["dinner", "🍲 Dinner"]];
+
+function mealsForDate(d) { return state.meals[d] || {}; }
+function setMeal(dateIso, slot, text) {
+  state.meals[dateIso] = state.meals[dateIso] || {};
+  if (text && text.trim()) state.meals[dateIso][slot] = text.trim();
+  else delete state.meals[dateIso][slot];
+  if (!Object.keys(state.meals[dateIso]).length) delete state.meals[dateIso];
+  save(); renderAll();
+}
+function addShoppingItem(text) {
+  text = String(text || "").trim();
+  if (!text) return;
+  state.shopping.push({ id: uid(), text, done: false });
+  save(); renderAll(); toast("Added to shopping list 🧺");
+}
+function addWorkout({ type, duration = 0, note = "", date = null }) {
+  type = String(type || "Workout").trim();
+  state.workouts.push({ id: uid(), date: date || todayIso(), type, duration: +duration || 0, note });
+  save(); renderAll(); toast(`Workout logged: ${type} 💪`);
+}
+function workoutsThisWeek() {
+  const week = new Set(weekDates().filter(d => d <= todayIso()));
+  return state.workouts.filter(w => week.has(w.date));
+}
+
+function shoppingListHTML(limit = 0) {
+  let items = state.shopping;
+  if (limit) items = items.filter(x => !x.done).slice(0, limit);
+  const list = items.length ? `<ul class="check-list">` + items.map(x => `
+    <li class="check-item ${x.done ? "done" : ""}">
+      <input type="checkbox" data-action="toggle-shopping" data-id="${x.id}" ${x.done ? "checked" : ""}>
+      <span class="label">${esc(x.text)}</span>
+      <button class="del" data-action="del-shopping" data-id="${x.id}">✕</button>
+    </li>`).join("") + `</ul>` : `<p class="empty">Shopping list is empty.</p>`;
+  return list + `
+    <form class="add-inline" data-form="add-shopping">
+      <input type="text" name="text" placeholder="Add item…" required>
+      <button type="submit">＋</button>
+    </form>`;
+}
+
 /* ---------- dashboard ---------- */
 function renderDashboard() {
   const t = todayIso();
@@ -457,6 +512,15 @@ function renderDashboard() {
       </div>
       <div class="affirmation">${esc(affirmationOfDay())}</div>
       <div class="card">
+        <h3><span>🍽️ Today's plate</span><span class="h3-actions"><button class="btn" style="padding:4px 10px;font-size:12px" data-action="go" data-view="meals">Open →</button></span></h3>
+        ${MEAL_SLOTS.map(([slot, label]) => {
+          const val = mealsForDate(t)[slot];
+          return `<button class="meal-slot ${val ? "filled" : ""}" data-action="edit-meal" data-date="${t}" data-slot="${slot}">
+            <span class="meal-label">${label}</span><span class="meal-text">${val ? esc(val) : "＋ plan"}</span></button>`;
+        }).join("")}
+        ${state.shopping.filter(x => !x.done).length ? `<p style="font-size:12px;color:var(--ink-soft);margin:8px 0 0">🧺 ${state.shopping.filter(x => !x.done).length} item${state.shopping.filter(x => !x.done).length === 1 ? "" : "s"} on the shopping list</p>` : ""}
+      </div>
+      <div class="card">
         <h3>📖 Currently reading</h3>
         ${reading ? `
           <div style="display:flex;gap:12px;align-items:center">
@@ -507,6 +571,17 @@ function renderDashboard() {
           </div>
         </div>
         <div style="margin-top:8px">${habitChecklistHTML()}</div>
+      </div>
+      <div class="card">
+        <h3><span>💪 Movement</span><span class="h3-actions"><button class="btn" style="padding:4px 10px;font-size:12px" data-action="go" data-view="workout">Open →</button></span></h3>
+        ${(() => {
+          const wk = workoutsThisWeek();
+          const last = [...state.workouts].sort((a, b) => b.date.localeCompare(a.date))[0];
+          return `<div style="font-size:13px;color:var(--ink-soft)">
+            <div><b style="font-family:var(--font-display);font-size:20px;color:var(--ink)">${wk.length}</b> workout${wk.length === 1 ? "" : "s"} this week · <b>${wk.reduce((a, w) => a + w.duration, 0)}</b> min</div>
+            ${last ? `<div style="margin-top:4px">Last: ${esc(last.type)} · ${last.duration} min · ${niceDate(last.date)}</div>` : `<div style="margin-top:4px">No sessions yet — start today 🌱</div>`}
+          </div>`;
+        })()}
       </div>
       ${state.widgets.map(widgetHTML).join("")}
     </div>
@@ -737,6 +812,94 @@ function renderFinance() {
         <span class="tx-amount ${x.type === "income" ? "pos" : "neg"}">${x.type === "income" ? "+" : "−"}${money(x.amount)}</span>
         <button class="del" style="opacity:.5;border:none;background:none;color:var(--ink-faint)" data-action="del-tx" data-id="${x.id}">✕</button>
       </li>`).join("")}</ul>` : `<p class="empty">Log your first income or expense.</p>`}
+  </div>`;
+}
+
+/* ---------- meals view ---------- */
+function renderMeals() {
+  const dates = weekDates();
+  const t = todayIso();
+  $("#view-meals").innerHTML = `
+  <div class="section-head">
+    <h2>🍽️ Meal Planner</h2>
+    <span class="sub">click any slot to plan a meal — tap again to change it</span>
+  </div>
+  <div class="card">
+    <div class="week-board">${dates.map((d, i) => `
+      <div class="week-day ${d === t ? "today" : ""}">
+        <h4>${DAY_NAMES[i].slice(0, 3)} <span style="opacity:.6">${d.slice(8)}</span></h4>
+        ${MEAL_SLOTS.map(([slot, label]) => {
+          const val = mealsForDate(d)[slot];
+          return `
+          <button class="meal-slot ${val ? "filled" : ""}" data-action="edit-meal" data-date="${d}" data-slot="${slot}">
+            <span class="meal-label">${label}</span>
+            <span class="meal-text">${val ? esc(val) : "＋ plan"}</span>
+          </button>`;
+        }).join("")}
+      </div>`).join("")}
+    </div>
+  </div>
+  <div class="card">
+    <h3>🧺 Shopping List</h3>
+    ${shoppingListHTML()}
+    ${state.shopping.some(x => x.done) ? `<div style="text-align:right;margin-top:8px"><button class="btn" style="padding:4px 10px;font-size:12px" data-action="clear-shopping">Clear checked</button></div>` : ""}
+  </div>`;
+}
+
+/* ---------- workout view ---------- */
+function renderWorkout() {
+  const t = todayIso();
+  const week = workoutsThisWeek();
+  const weekMin = week.reduce((a, w) => a + w.duration, 0);
+  const days7 = [...Array(7)].map((_, i) => addDays(t, i - 6));
+  const mins = days7.map(d => state.workouts.filter(w => w.date === d).reduce((a, w) => a + w.duration, 0));
+  const maxM = Math.max(...mins, 1);
+  const recent = [...state.workouts].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
+  const typeEmoji = { strength: "🏋️", cardio: "🏃", yoga: "🧘", walk: "🚶", sports: "⚽", other: "💪" };
+
+  $("#view-workout").innerHTML = `
+  <div class="section-head">
+    <h2>💪 Workout</h2>
+    <span class="sub">move a little every day — your body is where you live</span>
+  </div>
+  <div class="dash-stats">
+    <div class="stat"><span class="stat-label">📅 This week</span><div class="stat-value">${week.length}</div><span class="stat-note">workout${week.length === 1 ? "" : "s"}</span></div>
+    <div class="stat"><span class="stat-label">⏱️ Minutes this week</span><div class="stat-value">${weekMin}</div><span class="stat-note">across ${week.length} sessions</span></div>
+    <div class="stat"><span class="stat-label">🏆 All-time sessions</span><div class="stat-value">${state.workouts.length}</div><span class="stat-note">keep stacking!</span></div>
+  </div>
+  <div class="card">
+    <h3>Log a workout</h3>
+    <form data-form="add-workout" style="display:flex;gap:8px;flex-wrap:wrap">
+      <select name="type" style="background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;padding:8px">
+        <option value="Strength">🏋️ Strength</option><option value="Cardio">🏃 Cardio</option>
+        <option value="Yoga">🧘 Yoga</option><option value="Walk">🚶 Walk</option>
+        <option value="Sports">⚽ Sports</option><option value="Other">💪 Other</option>
+      </select>
+      <input type="number" name="duration" min="1" placeholder="minutes" required style="width:100px;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;padding:8px">
+      <input type="text" name="note" placeholder="note (optional)…" style="flex:1;min-width:140px;background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;padding:8px">
+      <input type="date" name="date" value="${t}" style="background:var(--bg-soft);border:1px solid var(--border);border-radius:10px;padding:8px">
+      <button class="btn primary" type="submit">＋ Log</button>
+    </form>
+  </div>
+  <div class="card">
+    <h3>Minutes — last 7 days</h3>
+    <div class="bars">${days7.map((d, i) => `
+      <div class="bar-group">
+        <div class="bar accent" style="height:${Math.max(3, Math.round(100 * mins[i] / maxM))}%" data-v="${mins[i]} min — ${niceDate(d)}"></div>
+        <span class="bar-label">${weekdayShort[new Date(d + "T12:00:00").getDay()]}</span>
+      </div>`).join("")}
+    </div>
+  </div>
+  <div class="card">
+    <h3>Recent sessions</h3>
+    ${recent.length ? `<ul class="tx-list">${recent.map(w => `
+      <li>
+        <span>${typeEmoji[w.type.toLowerCase()] || "💪"}</span>
+        <span>${esc(w.type)}${w.note ? ` — <span style="color:var(--ink-soft)">${esc(w.note)}</span>` : ""}</span>
+        <span class="tx-date">${niceDate(w.date)}</span>
+        <span class="tx-amount">${w.duration} min</span>
+        <button class="del" style="opacity:.5;border:none;background:none;color:var(--ink-faint)" data-action="del-workout" data-id="${w.id}">✕</button>
+      </li>`).join("")}</ul>` : `<p class="empty">No workouts yet — log your first session above 💪</p>`}
   </div>`;
 }
 
@@ -1008,6 +1171,8 @@ function stateSummary() {
     `This month: income ${money(fin.income)}, expenses ${money(fin.expense)}, balance ${money(fin.balance)}.`,
     `Books reading: ${state.books.filter(b => b.status === "reading").map(b => b.title).join(", ") || "none"}.`,
     `Widgets: ${state.widgets.map(w => `${w.title} (${w.type})`).join(", ") || "none"}.`,
+    `Workouts this week: ${workoutsThisWeek().length} (${workoutsThisWeek().reduce((a, w) => a + w.duration, 0)} min).`,
+    `Meals planned today: ${Object.entries(mealsForDate(t)).map(([k, v]) => `${k}: ${v}`).join(", ") || "none"}. Shopping list: ${state.shopping.filter(x => !x.done).length} open items.`,
   ].join("\n");
 }
 
@@ -1018,6 +1183,8 @@ const HELP_TEXT = `I'm Sage 🌿 — I help you run your Life OS. Try:
 • "add expense 45 food" / "add income 3000 salary"
 • "add book Dune by Frank Herbert"
 • "gratitude: my morning coffee"
+• "add workout Yoga 30 min" · "plan dinner: pasta night"
+• "add eggs to the shopping list"
 • "create a water tracker" or "create a checklist widget called Evening routine"
 • "how am I doing?" for a progress report
 • "dark mode" / "light mode"
@@ -1062,6 +1229,12 @@ function runAction(a) {
       case "addBook": state.books.push({ id: uid(), title: a.title, author: a.author || "", emoji: a.emoji || "📕", status: a.status || "toread", rating: 0 }); save(); renderAll(); return `Added book "${a.title}"`;
       case "addJournal": addJournal(a.type || "entry", a.text); return "Journal entry saved";
       case "addWidget": addWidget(a); return `Created widget "${a.title}"`;
+      case "addWorkout": addWorkout(a); return `Logged ${a.type} (${a.duration || 0} min)`;
+      case "addShopping": (a.items || [a.text]).filter(Boolean).forEach(addShoppingItem); return `Added to the shopping list`;
+      case "setMeal": {
+        const d = typeof a.day === "number" ? weekDates()[Math.max(0, Math.min(6, a.day))] : (a.date || todayIso());
+        setMeal(d, a.meal, a.text); return `Planned ${a.meal}: ${a.text}`;
+      }
       case "setTheme": state.settings.theme = a.mode === "dark" ? "dark" : "light"; save(); applyTheme(); return `Theme set to ${a.mode}`;
       case "setName": state.settings.name = a.name; save(); renderAll(); return `Nice to meet you, ${a.name}!`;
       default: return null;
@@ -1094,6 +1267,10 @@ function localIntent(text) {
   if (/water tracker/.test(l)) return { actions: [{ action: "addWidget", type: "counter", title: "Water", emoji: "💧", target: 8, unit: "glasses" }] };
   if ((m = s.match(/^(?:create|make|build) (?:a |an )?(counter|tracker|checklist|note)(?: widget)?(?: (?:called|named|for) (.+?))?(?: target (\d+))?$/i)))
     return { actions: [{ action: "addWidget", type: m[1].toLowerCase(), title: m[2] || (m[1][0].toUpperCase() + m[1].slice(1)), target: +m[3] || 0 }] };
+  if ((m = s.match(/^add (?:a )?workout:? (.+?)(?:\s+(\d+)\s*min(?:ute)?s?)?$/i))) return { actions: [{ action: "addWorkout", type: m[1], duration: +m[2] || 30 }] };
+  if ((m = s.match(/^add (.+?) to (?:the |my )?shopping list$/i)) || (m = s.match(/^shopping[:\-]?\s*(.+)$/i)))
+    return { actions: m[1].split(/,\s*/).map(text => ({ action: "addShopping", items: [text] })) };
+  if ((m = s.match(/^plan (breakfast|lunch|dinner)[:\-]?\s*(.+)$/i))) return { actions: [{ action: "setMeal", meal: m[1].toLowerCase(), text: m[2], day: (new Date().getDay() + 6) % 7 }] };
   if (/^(dark|night) ?mode/.test(l)) return { actions: [{ action: "setTheme", mode: "dark" }] };
   if (/^(light|cream|day) ?mode/.test(l)) return { actions: [{ action: "setTheme", mode: "light" }] };
   if ((m = s.match(/^(?:set )?(?:my )?name (?:is |to )?(.+)$/i))) return { actions: [{ action: "setName", name: m[1] }] };
@@ -1114,6 +1291,9 @@ Available actions:
 - {"action":"addBook","title":str,"author":str,"emoji":str,"status":"toread"|"reading"|"read"}
 - {"action":"addJournal","type":"gratitude"|"reflection"|"entry","text":str}
 - {"action":"addWidget","type":"counter"|"tracker"|"checklist"|"note","title":str,"emoji":str,"target":num,"unit":str,"items":[str]}
+- {"action":"addWorkout","type":str,"duration":num,"note":str,"date":"YYYY-MM-DD"}
+- {"action":"setMeal","day":0-6,"meal":"breakfast"|"lunch"|"dinner","text":str}  (day 0=Monday of the current week)
+- {"action":"addShopping","items":[str]}
 - {"action":"setTheme","mode":"light"|"dark"}
 
 Design new dashboard widgets generously when the user wants to track something new. When asked to plan a week, create tasks across days 0-6. Keep replies to 1-3 sentences, warm and specific. If no action is needed, return an empty actions array.`;
@@ -1234,6 +1414,16 @@ document.addEventListener("click", (e) => {
     if (b) { b.rating = (b.rating || 0) % 5 + 1; save(); renderAll(); }
   }
   else if (a === "shelf-filter") { shelfFilter = el.dataset.filter; renderBooks(); }
+  else if (a === "edit-meal") {
+    const d = el.dataset.date, slot = el.dataset.slot;
+    const cur = mealsForDate(d)[slot] || "";
+    const val = prompt(`${slot[0].toUpperCase() + slot.slice(1)} on ${niceDate(d)}:`, cur);
+    if (val !== null) setMeal(d, slot, val);
+  }
+  else if (a === "toggle-shopping") { const x = state.shopping.find(s => s.id === id); if (x) { x.done = !x.done; save(); renderAll(); } }
+  else if (a === "del-shopping") { state.shopping = state.shopping.filter(s => s.id !== id); save(); renderAll(); }
+  else if (a === "clear-shopping") { state.shopping = state.shopping.filter(s => !s.done); save(); renderAll(); }
+  else if (a === "del-workout") { state.workouts = state.workouts.filter(w => w.id !== id); save(); renderAll(); }
   else if (a === "widget-inc" || a === "widget-dec") {
     const w = state.widgets.find(x => x.id === id);
     if (w) { const t = todayIso(); w.data[t] = Math.max(0, (w.data[t] || 0) + (a === "widget-inc" ? 1 : -1)); save(); renderAll(); }
@@ -1313,6 +1503,8 @@ document.addEventListener("submit", (e) => {
     const g = state.goals.find(x => x.id === form.dataset.goal);
     if (g) { g.milestones.push({ id: uid(), text: f.get("text"), done: false }); save(); renderAll(); }
   }
+  else if (kind === "add-shopping") addShoppingItem(f.get("text"));
+  else if (kind === "add-workout") addWorkout({ type: f.get("type"), duration: f.get("duration"), note: f.get("note") || "", date: f.get("date") || todayIso() });
   else if (kind === "widget-track") {
     const w = state.widgets.find(x => x.id === form.dataset.id);
     if (w) { w.data[todayIso()] = +f.get("value") || 0; save(); renderAll(); }
