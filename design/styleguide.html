@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bushido OS — Visual Style Guide</title>
+<style>
+  :root{
+    --paper-0:#F7F4EE; --paper-1:#FFFEFA; --paper-2:#ECE8E0;
+    --ink-0:#17161A; --ink-1:#4A4843; --ink-2:#8B877E; --line:#DAD5CB;
+    --shu:#B43A2B; --shu-deep:#8E2E22; --shu-wash:#F3E4E0;
+    --pine:#41594A; --ai:#3B4A66; --kin:#A98F5E;
+    --sans:-apple-system,"SF Pro Text","Inter","Helvetica Neue",Helvetica,Arial,sans-serif;
+    --serif:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho","Times New Roman",Georgia,serif;
+    --mono:"SF Mono","JetBrains Mono",ui-monospace,"Cascadia Mono",Menlo,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--paper-0);color:var(--ink-0);font-family:var(--sans);font-size:17px;line-height:1.53;-webkit-font-smoothing:antialiased}
+  .page{max-width:1040px;margin:0 auto;padding:0 32px 120px}
+  a{color:var(--ai);text-decoration:none}
+
+  /* ---------- shared ---------- */
+  .eyebrow{font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+  .section{margin-top:96px}
+  .section-head{display:flex;align-items:baseline;gap:16px;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:32px}
+  .section-head .num{font-family:var(--mono);font-size:13px;color:var(--shu)}
+  .section-head h2{font-size:28px;font-weight:600;letter-spacing:-.01em}
+  .note{font-size:15px;color:var(--ink-1);max-width:680px;margin-bottom:32px}
+  .sheet{background:var(--paper-1);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(23,22,26,.06);padding:20px}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ---------- hero ---------- */
+  .hero{padding:96px 0 0;position:relative}
+  .hero .wordmark{font-size:15px;font-weight:600;letter-spacing:.12em}
+  .hero h1{font-family:var(--serif);font-weight:300;font-size:56px;line-height:1.15;letter-spacing:-.01em;margin:48px 0 24px;max-width:720px}
+  .hero p.sub{color:var(--ink-1);max-width:560px}
+  .hero .enso-hero{position:absolute;right:0;top:96px;opacity:.9}
+  .seal{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;background:var(--shu);color:#FFFEFA;border-radius:6px;font-family:var(--serif);font-size:24px;line-height:1;box-shadow:0 1px 2px rgba(23,22,26,.12)}
+  .hero .creed{margin-top:48px;display:flex;align-items:center;gap:16px}
+  .hero .creed span{font-family:var(--serif);font-size:19px;color:var(--ink-1)}
+
+  /* ---------- palette ---------- */
+  .swatch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px}
+  .swatch{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--paper-1)}
+  .swatch .chip{height:96px}
+  .swatch .meta{padding:12px 14px}
+  .swatch .meta b{display:block;font-size:15px;font-weight:600}
+  .swatch .meta code{font-family:var(--mono);font-size:13px;color:var(--ink-2)}
+  .swatch .meta i{display:block;font-style:normal;font-size:13px;color:var(--ink-2);margin-top:2px}
+
+  /* ---------- typography ---------- */
+  .type-row{display:grid;grid-template-columns:200px 1fr;gap:24px;padding:24px 0;border-bottom:1px solid var(--line);align-items:baseline}
+  .type-row:last-child{border-bottom:none}
+  .type-meta{font-family:var(--mono);font-size:13px;color:var(--ink-2);line-height:1.6}
+
+  /* ---------- icons ---------- */
+  .icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:16px}
+  .icon-cell{background:var(--paper-1);border:1px solid var(--line);border-radius:12px;padding:24px 12px 16px;text-align:center}
+  .icon-cell svg{display:block;margin:0 auto 12px;stroke:var(--ink-0);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+  .icon-cell span{font-size:13px;color:var(--ink-1)}
+
+  /* ---------- moodboard ---------- */
+  .mood-grid{display:grid;grid-template-columns:repeat(6,1fr);grid-auto-rows:120px;gap:12px}
+  .mood{border-radius:12px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:14px;font-size:13px;letter-spacing:.04em;overflow:hidden;position:relative}
+  .mood.tall{grid-row:span 2}.mood.wide{grid-column:span 2}
+  .m-label{position:relative;z-index:2}
+
+  /* ---------- components ---------- */
+  .demo-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  @media(max-width:760px){.demo-grid{grid-template-columns:1fr}.hero .enso-hero{display:none}.type-row{grid-template-columns:1fr}}
+  .demo h4{font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0 0 16px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;height:52px;padding:0 28px;border-radius:8px;font-family:var(--sans);font-size:17px;font-weight:600;border:none;cursor:pointer;transition:background .15s ease-out}
+  .btn-primary{background:var(--shu);color:#FFFEFA}.btn-primary:hover{background:var(--shu-deep)}
+  .btn-secondary{background:var(--paper-1);color:var(--ink-0);border:1px solid var(--line)}
+  .btn-ghost{background:transparent;color:var(--ink-1)}
+  .btn-destructive{background:transparent;color:var(--shu)}
+  .btn-disabled{background:var(--paper-2);color:var(--ink-2);cursor:not-allowed}
+  .btn-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+
+  .habit{display:flex;align-items:center;gap:16px;height:56px;padding:0 4px;border-bottom:1px solid var(--line);cursor:pointer;position:relative}
+  .habit:last-child{border-bottom:none}
+  .habit .name{flex:1;font-size:17px}
+  .habit .sched{font-family:var(--mono);font-size:13px;color:var(--ink-2)}
+  .habit.done .name{color:var(--ink-1)}
+  .habit.missed::before{content:"";position:absolute;left:-20px;top:16px;bottom:16px;width:3px;background:var(--shu);border-radius:2px}
+  .enso-check circle{fill:none;stroke:var(--ink-0);stroke-width:1.6;stroke-linecap:round;
+    stroke-dasharray:56 18;stroke-dashoffset:0;transform:rotate(-58deg);transform-origin:center;transition:stroke-dasharray .4s ease-out}
+  .habit.done .enso-check circle{stroke-dasharray:74 0}
+  .habit.done .enso-check{filter:none}
+
+  .tally{display:flex;align-items:flex-end;gap:3px;height:28px}
+  .tally i{width:2.5px;height:18px;background:var(--ink-0);border-radius:1px}
+  .tally i.ten{height:26px}
+
+  .campaign{display:flex;gap:2px;align-items:center}
+  .campaign i{flex:1;height:14px;border-radius:1px;background:var(--line)}
+  .campaign i.kept{background:var(--ink-0)}
+  .campaign i.miss{background:var(--shu)}
+  .campaign i.mile{background:var(--kin)}
+
+  .skill{margin-top:20px}
+  .skill .lbl{display:flex;justify-content:space-between;font-size:13px;color:var(--ink-1);margin-bottom:8px}
+  .skill .lbl .mono b{color:var(--ink-0);font-weight:500}
+  .skill .track{height:2px;background:var(--paper-2);border-radius:1px;position:relative}
+  .skill .fill{position:absolute;left:0;top:0;bottom:0;background:var(--ai);border-radius:1px}
+
+  .field label{display:block;font-size:13px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin-bottom:8px}
+  .field input{width:100%;height:48px;background:var(--paper-2);border:none;border-bottom:1.5px solid transparent;border-radius:8px 8px 0 0;padding:0 16px;font-family:var(--sans);font-size:17px;color:var(--ink-0);outline:none;transition:border-color .15s ease-out}
+  .field input:focus{border-bottom-color:var(--ink-0)}
+
+  .precept{border-left:2px solid var(--shu);padding:4px 0 4px 20px;margin:8px 0}
+  .precept p{font-family:var(--serif);font-weight:300;font-size:22px;line-height:1.4;color:var(--ink-1)}
+  .precept span{display:block;margin-top:10px;font-family:var(--mono);font-size:13px;color:var(--ink-2)}
+
+  .tabbar{display:flex;border-top:1px solid var(--line);background:var(--paper-1);border-radius:0 0 12px 12px}
+  .tabbar .tab{flex:1;text-align:center;padding:12px 0 14px;position:relative;color:var(--ink-2);font-size:13px;font-weight:500;cursor:pointer}
+  .tabbar .tab svg{display:block;margin:0 auto 4px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+  .tabbar .tab.active{color:var(--ink-0)}
+  .tabbar .tab.active::before{content:"";position:absolute;top:-1px;left:25%;right:25%;height:2px;background:var(--ink-0)}
+
+  .stat .big{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:34px;font-weight:500;line-height:40px}
+  .stat .delta{font-family:var(--mono);font-size:13px;color:var(--pine)}
+  .stat .cap{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin-bottom:6px}
+
+  footer{margin-top:120px;border-top:1px solid var(--line);padding-top:24px;display:flex;justify-content:space-between;align-items:center;color:var(--ink-2);font-size:13px}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============ HERO ============ -->
+  <header class="hero">
+    <div class="wordmark">BUSHIDO OS</div>
+    <svg class="enso-hero" width="150" height="150" viewBox="0 0 150 150" aria-hidden="true">
+      <circle cx="75" cy="75" r="60" fill="none" stroke="#17161A" stroke-width="7"
+              stroke-linecap="round" stroke-dasharray="330 47" transform="rotate(-58 75 75)"/>
+    </svg>
+    <h1>Not a planner.<br>A Life Operating System.</h1>
+    <p class="sub">Ninety days. Body, language, mind, discipline. Calm on the surface, severe underneath — Apple meets Muji meets the dōjō.</p>
+    <div class="creed">
+      <div class="seal" title="dō — the Way">道</div>
+      <span>Every choice has a long-term consequence.</span>
+    </div>
+  </header>
+
+  <!-- ============ PALETTE ============ -->
+  <section class="section" id="palette">
+    <div class="section-head"><span class="num">02</span><h2>Color — Paper &amp; Ink</h2></div>
+    <p class="note">Two neutrals do 95% of the work. One vermilion does the rest — the seal, the next action, the acknowledged miss. Never twice in one component, never more than ~5% of a screen.</p>
+    <div class="swatch-grid">
+      <div class="swatch"><div class="chip" style="background:#F7F4EE"></div><div class="meta"><b>Washi</b><code>#F7F4EE</code><i>App background</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#FFFEFA;border-bottom:1px solid var(--line)"></div><div class="meta"><b>Rice</b><code>#FFFEFA</code><i>Cards, raised surfaces</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#ECE8E0"></div><div class="meta"><b>Stone</b><code>#ECE8E0</code><i>Wells, inputs</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#17161A"></div><div class="meta"><b>Sumi</b><code>#17161A</code><i>Primary ink</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#4A4843"></div><div class="meta"><b>Charcoal</b><code>#4A4843</code><i>Secondary text</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#8B877E"></div><div class="meta"><b>Ash</b><code>#8B877E</code><i>Tertiary, disabled</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#B43A2B"></div><div class="meta"><b>Vermilion</b><code>#B43A2B</code><i>The Seal — one per screen</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#8E2E22"></div><div class="meta"><b>Lacquer</b><code>#8E2E22</code><i>Pressed vermilion</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#F3E4E0"></div><div class="meta"><b>Blossom wash</b><code>#F3E4E0</code><i>Tint behind vermilion</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#41594A"></div><div class="meta"><b>Pine</b><code>#41594A</code><i>Kept promises</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#3B4A66"></div><div class="meta"><b>Aizome indigo</b><code>#3B4A66</code><i>Focus &amp; study</i></div></div>
+      <div class="swatch"><div class="chip" style="background:#A98F5E"></div><div class="meta"><b>Old gold</b><code>#A98F5E</code><i>30 / 60 / 90 milestones only</i></div></div>
+    </div>
+  </section>
+
+  <!-- ============ TYPOGRAPHY ============ -->
+  <section class="section" id="type">
+    <div class="section-head"><span class="num">03</span><h2>Typography</h2></div>
+    <p class="note">Three voices: a grotesk runs the machine, a mincho serif carries the philosophy (once per screen at most), and a tabular mono tells the truth about numbers.</p>
+    <div class="sheet">
+      <div class="type-row"><div class="type-meta">display · 40/44<br>Mincho Light</div><div style="font-family:var(--serif);font-weight:300;font-size:40px;line-height:44px">Day 90. The circle closes.</div></div>
+      <div class="type-row"><div class="type-meta">title-1 · 28/34<br>Grotesk Semibold</div><div style="font-size:28px;line-height:34px;font-weight:600">Today</div></div>
+      <div class="type-row"><div class="type-meta">title-2 · 22/28<br>Grotesk Semibold</div><div style="font-size:22px;line-height:28px;font-weight:600">Morning training</div></div>
+      <div class="type-row"><div class="type-meta">headline · 17/24<br>Grotesk Semibold</div><div style="font-weight:600">German — C1 track</div></div>
+      <div class="type-row"><div class="type-meta">body · 17/26<br>Grotesk Regular</div><div>Discipline is remembering what you want. The system holds the standard so you can spend your will on the work itself.</div></div>
+      <div class="type-row"><div class="type-meta">caption · 13/18<br>Medium · caps +8%</div><div class="eyebrow">Deep work · Block 2</div></div>
+      <div class="type-row"><div class="type-meta">data-lg · 34/40<br>Mono Medium, tabular</div><div class="mono" style="font-size:34px;line-height:40px;font-weight:500">62.4 kg&nbsp;&nbsp;·&nbsp;&nbsp;Day 34&nbsp;&nbsp;·&nbsp;&nbsp;7.5 → 8.0</div></div>
+      <div class="type-row"><div class="type-meta">data-sm · 13/18<br>Mono Regular</div><div class="mono" style="font-size:13px;color:var(--ink-2)">06:00 — 07:30 · 90 min · −0.3 this week</div></div>
+    </div>
+  </section>
+
+  <!-- ============ ICONS ============ -->
+  <section class="section" id="icons">
+    <div class="section-head"><span class="num">04</span><h2>Kamon Icons</h2></div>
+    <p class="note">24 px grid, 1.5 px stroke, round caps. Soft outer silhouettes, precise interiors. One idea per icon — no fills except the closed ensō.</p>
+    <div class="icon-grid">
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke-dasharray="42 12" transform="rotate(-58 12 12)"/></svg><span>Today · Ensō</span></div>
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><path d="M6 3 C15 6 15 18 6 21"/><path d="M6 3 L6 21"/><path d="M13.4 12 L17.5 12"/></svg><span>Body · Bow</span></div>
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><path d="M12 3 C11 8 12.5 13 12 17 C11.8 18.6 11 20 9.5 21"/></svg><span>Mind · Brush</span></div>
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><path d="M4 9 L15 9 L20 13 L20 15 L4 15 Z"/></svg><span>Craft · Whetstone</span></div>
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><path d="M9 6.5 L15 6.5"/><path d="M7 11.5 L17 11.5"/><path d="M5 16.5 L19 16.5"/></svg><span>Discipline · Stones</span></div>
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><path d="M5 5 L11 6.5 L11 19 L5 17.5 Z"/><path d="M19 5 L13 6.5 L13 19 L19 17.5 Z"/></svg><span>Review · Screen</span></div>
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><path d="M4 9 L20 9"/><circle cx="12" cy="14" r="1.4" fill="currentColor" stroke="none"/></svg><span>Settings · Balance</span></div>
+      <div class="icon-cell"><svg width="28" height="28" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="#17161A" stroke="none"/></svg><span>Complete</span></div>
+    </div>
+  </section>
+
+  <!-- ============ MOODBOARD ============ -->
+  <section class="section" id="mood">
+    <div class="section-head"><span class="num">06</span><h2>Moodboard</h2></div>
+    <p class="note">Warm paper worlds give the temperature, Swiss grids give the skeleton, the athlete's log gives the honesty, Apple gives the finish. Anything that doesn't sit on all boards stays out.</p>
+    <div class="mood-grid">
+      <div class="mood tall wide" style="background:#F7F4EE">
+        <svg style="position:absolute;inset:0" width="100%" height="100%" viewBox="0 0 340 250" preserveAspectRatio="xMidYMid slice">
+          <circle cx="170" cy="122" r="82" fill="none" stroke="#17161A" stroke-width="10" stroke-linecap="round" stroke-dasharray="450 65" transform="rotate(-58 170 122)" opacity="0.92"/>
+        </svg>
+        <span class="m-label" style="color:var(--ink-2)">Sumi ink · the open ensō</span>
+      </div>
+      <div class="mood wide" style="background:#ECE8E0">
+        <svg style="position:absolute;inset:0" width="100%" height="100%" viewBox="0 0 340 120" preserveAspectRatio="none">
+          <g stroke="#DAD5CB" stroke-width="2"><path d="M0 22 H340"/><path d="M0 44 H340"/><path d="M0 66 H340"/><path d="M0 88 H340"/></g>
+          <circle cx="258" cy="55" r="20" fill="#F7F4EE" stroke="#C9C4BA" stroke-width="1.5"/>
+        </svg>
+        <span class="m-label" style="color:var(--ink-2)">Raked gravel · Ryōan-ji</span>
+      </div>
+      <div class="mood" style="background:#B43A2B;color:#F3E4E0"><span class="m-label">Hanko vermilion</span></div>
+      <div class="mood" style="background:#17161A;color:#8E8A82"><span class="m-label">Night dōjō</span></div>
+      <div class="mood wide" style="background:#FFFEFA">
+        <svg style="position:absolute;inset:0" width="100%" height="100%" viewBox="0 0 340 120" preserveAspectRatio="none">
+          <g stroke="#DAD5CB" stroke-width="1"><path d="M40 0 V120"/><path d="M120 0 V120"/><path d="M200 0 V120"/><path d="M280 0 V120"/></g>
+          <rect x="40" y="24" width="160" height="10" fill="#17161A"/><rect x="40" y="44" width="112" height="6" fill="#8B877E"/><rect x="40" y="58" width="132" height="6" fill="#8B877E"/>
+        </svg>
+        <span class="m-label" style="color:var(--ink-2)">Swiss grid · Müller-Brockmann</span>
+      </div>
+      <div class="mood" style="background:#3B4A66;color:#DDE2EC"><span class="m-label">Aizome · deep work</span></div>
+      <div class="mood" style="background:#41594A;color:#DDE5DF"><span class="m-label">Pine · kept</span></div>
+      <div class="mood" style="background:#A98F5E;color:#F7F4EE"><span class="m-label">Old gold · day 90</span></div>
+      <div class="mood wide" style="background:#ECE8E0">
+        <svg style="position:absolute;inset:0" width="100%" height="100%" viewBox="0 0 340 120" preserveAspectRatio="none">
+          <g stroke="#17161A" stroke-width="2.5" stroke-linecap="round">
+            <path d="M28 92 V44"/><path d="M40 92 V48"/><path d="M52 92 V40"/><path d="M64 92 V52"/><path d="M76 92 V36"/>
+            <path d="M100 92 V46"/><path d="M112 92 V42"/><path d="M124 92 V50"/>
+          </g>
+          <g stroke="#B43A2B" stroke-width="2.5" stroke-linecap="round"><path d="M88 92 V72"/></g>
+          <text x="150" y="88" font-family="ui-monospace,monospace" font-size="12" fill="#8B877E">the training log does not lie</text>
+        </svg>
+        <span class="m-label" style="color:var(--ink-2)"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ COMPONENTS ============ -->
+  <section class="section" id="components">
+    <div class="section-head"><span class="num">09</span><h2>Components</h2></div>
+    <p class="note">Radius 8–12, one shadow level, hairline borders. One vermilion element per screen: the next action. Tap a habit row below — completion draws the ensō shut.</p>
+
+    <div class="demo-grid">
+      <div class="sheet demo">
+        <h4>Buttons</h4>
+        <div class="btn-row">
+          <button class="btn btn-primary">Begin Block 2</button>
+          <button class="btn btn-secondary">Reschedule</button>
+          <button class="btn btn-ghost">Skip</button>
+        </div>
+        <div class="btn-row" style="margin-top:16px">
+          <button class="btn btn-destructive">Remove habit</button>
+          <button class="btn btn-disabled" disabled>Locked until Day 30</button>
+        </div>
+      </div>
+
+      <div class="sheet demo">
+        <h4>The Daily Precept</h4>
+        <div class="precept">
+          <p>Fall seven times, stand up eight.</p>
+          <span>Day 34 · 七転び八起き</span>
+        </div>
+      </div>
+
+      <div class="sheet demo">
+        <h4>Habit rows — “Promises” <span style="text-transform:none;letter-spacing:0">(tap to close the ensō)</span></h4>
+        <div class="habit done" onclick="this.classList.toggle('done')">
+          <svg class="enso-check" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>
+          <span class="name">Fasted walk, 40 min</span><span class="sched">06:00</span>
+        </div>
+        <div class="habit" onclick="this.classList.toggle('done')">
+          <svg class="enso-check" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>
+          <span class="name">German — 25 new cards</span><span class="sched">12:30</span>
+        </div>
+        <div class="habit missed" onclick="this.classList.toggle('done')">
+          <svg class="enso-check" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>
+          <span class="name">IELTS writing task</span><span class="sched">18:00</span>
+        </div>
+      </div>
+
+      <div class="sheet demo">
+        <h4>Numbers are sacred</h4>
+        <div style="display:flex;gap:48px">
+          <div class="stat"><div class="cap">Body</div><div class="big">62.4</div><div class="delta">−0.3 kg this week</div></div>
+          <div class="stat"><div class="cap">Streak</div><div class="big">12</div><div class="delta">days kept · 81 of 90</div></div>
+          <div class="stat"><div class="cap">IELTS</div><div class="big">7.5</div><div class="delta" style="color:var(--ai)">→ 8.0</div></div>
+        </div>
+        <div class="tally" style="margin-top:20px" aria-label="12 day tally">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="ten"></i><i></i><i></i>
+        </div>
+      </div>
+
+      <div class="sheet demo" style="grid-column:1/-1">
+        <h4>The 90-day campaign — always visible, all at once</h4>
+        <div class="campaign" id="campaign" aria-label="90 day progress"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:10px" class="mono">
+          <span style="font-size:13px;color:var(--ink-2)">Day 1</span>
+          <span style="font-size:13px;color:var(--ink-0)">Day 34 · on pace</span>
+          <span style="font-size:13px;color:var(--ink-2)">Day 90</span>
+        </div>
+        <div class="skill"><div class="lbl"><span>German · C1 track</span><span class="mono"><b>B2.2</b> → C1</span></div><div class="track"><div class="fill" style="width:64%"></div></div></div>
+        <div class="skill"><div class="lbl"><span>IELTS · Band 8 track</span><span class="mono"><b>7.5</b> → 8.0</span></div><div class="track"><div class="fill" style="width:78%"></div></div></div>
+      </div>
+
+      <div class="sheet demo">
+        <h4>Inputs</h4>
+        <div class="field"><label>Morning weight</label><input class="mono" placeholder="62.4" inputmode="decimal"></div>
+        <div class="field" style="margin-top:20px"><label>Evening review</label><input placeholder="What did today cost or pay?"></div>
+      </div>
+
+      <div class="demo">
+        <h4>Navigation — four kamon, no badges</h4>
+        <div class="sheet" style="padding:0;overflow:hidden">
+          <div style="padding:20px"><span class="eyebrow">Today · Day 34</span>
+            <div style="font-size:22px;font-weight:600;margin-top:6px">The work is waiting.</div></div>
+          <div class="tabbar">
+            <div class="tab active"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke-dasharray="42 12" transform="rotate(-58 12 12)"/></svg>Today</div>
+            <div class="tab"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M6 3 C15 6 15 18 6 21"/><path d="M6 3 L6 21"/><path d="M13.4 12 L17.5 12"/></svg>Body</div>
+            <div class="tab"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 3 C11 8 12.5 13 12 17 C11.8 18.6 11 20 9.5 21"/></svg>Mind</div>
+            <div class="tab"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M5 5 L11 6.5 L11 19 L5 17.5 Z"/><path d="M19 5 L13 6.5 L13 19 L19 17.5 Z"/></svg>Review</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sheet demo" style="grid-column:1/-1">
+        <h4>Charts — one line, one truth</h4>
+        <svg width="100%" height="180" viewBox="0 0 960 180" preserveAspectRatio="none" role="img" aria-label="Weight trend chart">
+          <g stroke="#DAD5CB" stroke-width="1"><path d="M60 30 H940"/><path d="M60 80 H940"/><path d="M60 130 H940"/></g>
+          <path d="M60 108 H940" stroke="#3B4A66" stroke-width="1" stroke-dasharray="4 5"/>
+          <path d="M60 44 L170 52 L280 48 L390 66 L500 62 L610 84 L720 92 L830 96 L920 104"
+                fill="none" stroke="#17161A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="920" cy="104" r="4" fill="#B43A2B"/>
+          <g font-family="ui-monospace,monospace" font-size="12" fill="#8B877E">
+            <text x="8" y="34">64.0</text><text x="8" y="112">62.0</text><text x="8" y="134">61.5</text>
+            <text x="60" y="168">Day 1</text><text x="880" y="168">Day 34</text>
+            <text x="850" y="98" fill="#B43A2B">62.4</text>
+            <text x="72" y="102" fill="#3B4A66">target</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="sheet demo">
+        <h4>Empty state</h4>
+        <div style="text-align:center;padding:24px 0">
+          <svg width="36" height="36" viewBox="0 0 24 24" style="stroke:var(--ink-2);fill:none;stroke-width:1.5;stroke-linecap:round"><circle cx="12" cy="12" r="8.5" stroke-dasharray="42 12" transform="rotate(-58 12 12)"/></svg>
+          <div style="font-size:13px;color:var(--ink-2);margin-top:12px">Nothing scheduled. Rest is training too.</div>
+        </div>
+      </div>
+
+      <div class="sheet demo" style="background:var(--shu-wash);border-color:#E4CFC9">
+        <h4 style="color:#9A5348">Error state</h4>
+        <p style="font-size:15px">Your review didn’t save — the connection dropped.</p>
+        <button class="btn btn-ghost" style="color:var(--shu);padding-left:0;height:auto;margin-top:8px">Try again</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PHILOSOPHY ============ -->
+  <section class="section" id="philosophy">
+    <div class="section-head"><span class="num">10</span><h2>Philosophy</h2></div>
+    <div class="sheet" style="padding:48px;max-width:760px">
+      <p style="font-family:var(--serif);font-weight:300;font-size:26px;line-height:1.5;color:var(--ink-0)">Where a habit app gamifies, Bushido OS dignifies. There are no points, because you are not playing. There is a seal, because you are signing your name to a day.</p>
+      <p style="margin-top:24px;color:var(--ink-1)">Discipline is a design problem. Calm paper lowers the cost of showing up; one vermilion action removes deliberation; mono numbers that never flatter build the self-trust that streaks are made of. Every choice has a long-term consequence — the design’s choice is restraint, and its consequence is trust.</p>
+      <div style="margin-top:32px;text-align:right"><span class="seal">道</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Bushido OS · Design System v1.0</span>
+    <span class="mono">90 days · paper &amp; ink</span>
+  </footer>
+</div>
+
+<script>
+  // 90-day campaign bar: kept / missed / future, gold milestone markers at 30/60/90
+  const c = document.getElementById('campaign');
+  const missed = new Set([9, 17, 26]);
+  for (let d = 1; d <= 90; d++) {
+    const i = document.createElement('i');
+    if (d === 30 || d === 60 || d === 90) i.className = 'mile';
+    else if (d <= 34) i.className = missed.has(d) ? 'miss' : 'kept';
+    c.appendChild(i);
+  }
+</script>
+</body>
+</html>
