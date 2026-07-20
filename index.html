@@ -2,144 +2,68 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Life OS — Your all-in-one planner</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LifeHub — Your Life OS</title>
+<meta name="description" content="All your life. All in one place. Habits, health, learning, projects and more — with XP, streaks and badges.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%236a5ae0'/><path d='M50 78 C50 56 38 48 24 46 C26 66 38 76 50 78 Z M50 78 C50 52 64 42 78 40 C76 64 62 76 50 78 Z' fill='white'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-<header class="topbar">
-  <div class="topbar-inner">
-    <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
-        <circle cx="24" cy="24" r="22" class="mark-bg"/>
-        <path d="M24 36 C24 26 18 22 12 21 C13 30 18 35 24 36 Z" class="mark-leaf"/>
-        <path d="M24 36 C24 24 30 19 37 18 C36 29 30 35 24 36 Z" class="mark-leaf2"/>
-        <path d="M24 36 L24 14" class="mark-stem"/>
-      </svg>
-      <div class="brand-text">
-        <span class="brand-title">Life OS</span>
-        <span class="brand-sub">organize your life.</span>
-      </div>
-    </div>
-    <nav class="tabs" id="tabs">
-      <button class="tab active" data-view="dashboard">🏡 Dashboard</button>
-      <button class="tab" data-view="habits">🌱 Habits</button>
-      <button class="tab" data-view="goals">🎯 Goals</button>
-      <button class="tab" data-view="planner">📅 Planner</button>
-      <button class="tab" data-view="journal">✒️ Journal</button>
-      <button class="tab" data-view="meals">🍽️ Meals</button>
-      <button class="tab" data-view="workout">💪 Workout</button>
-      <button class="tab" data-view="finance">🪙 Finance</button>
-      <button class="tab" data-view="books">📚 Books</button>
-    </nav>
-    <div class="topbar-actions">
-      <div class="streak-badge" id="streakBadge" title="Perfect-day streak: every habit done, day after day">
-        <span class="flame">🔥</span><span id="streakBadgeNum">0</span>
-      </div>
-      <button class="icon-btn" id="themeToggle" title="Toggle light / dark theme">🌙</button>
-      <button class="icon-btn" id="settingsBtn" title="Settings">⚙️</button>
-    </div>
-  </div>
-</header>
+<div class="app" id="app">
 
-<div class="hero" id="hero">
-  <svg class="hero-art" viewBox="0 0 1200 190" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-    <!-- sky wash -->
-    <rect x="0" y="0" width="1200" height="190" class="h-sky"/>
-    <circle cx="990" cy="52" r="34" class="h-sun"/>
-    <circle cx="990" cy="52" r="46" class="h-sun-halo"/>
-    <!-- hills -->
-    <path d="M0 150 Q220 96 460 138 T1200 128 V190 H0 Z" class="h-hill1"/>
-    <path d="M0 168 Q330 122 640 158 T1200 152 V190 H0 Z" class="h-hill2"/>
-    <!-- desk with items -->
-    <g class="h-desk">
-      <rect x="300" y="132" width="270" height="10" rx="5" class="h-desk-top"/>
-      <!-- books -->
-      <rect x="322" y="106" width="14" height="26" rx="2" class="h-book1"/>
-      <rect x="338" y="98"  width="14" height="34" rx="2" class="h-book2"/>
-      <rect x="354" y="112" width="14" height="20" rx="2" class="h-book3"/>
-      <!-- coffee -->
-      <rect x="470" y="108" width="30" height="24" rx="4" class="h-mug"/>
-      <path d="M500 113 q12 4 0 14" class="h-mug-handle"/>
-      <path d="M478 100 q3 -6 0 -10 M488 100 q3 -6 0 -10" class="h-steam"/>
-      <!-- candle -->
-      <rect x="530" y="112" width="12" height="20" rx="3" class="h-candle"/>
-      <path d="M536 106 q4 -7 0 -10 q-4 5 0 10" class="h-flame"/>
-    </g>
-    <!-- big plant -->
-    <g class="h-plant">
-      <path d="M660 132 q-4 -34 -28 -48 q26 2 34 30 q4 -38 30 -52 q-6 36 -22 54 q16 -20 40 -22 q-16 26 -44 38 Z" class="h-leaves"/>
-      <path d="M652 132 h44 l-6 34 h-32 Z" class="h-pot"/>
-    </g>
-    <!-- moon doodles -->
-    <path d="M840 40 a13 13 0 1 0 12 20 a10 10 0 1 1 -12 -20 Z" class="h-moon"/>
-    <g class="h-stars">
-      <path d="M792 70 l2.6 6 6 2.6 -6 2.6 -2.6 6 -2.6 -6 -6 -2.6 6 -2.6 Z"/>
-      <path d="M905 96 l2 4.6 4.6 2 -4.6 2 -2 4.6 -2 -4.6 -4.6 -2 4.6 -2 Z"/>
-      <circle cx="1090" cy="110" r="3"/>
-      <circle cx="760" cy="34" r="2.5"/>
-    </g>
-  </svg>
-  <div class="hero-text">
-    <h1 id="heroGreeting">Good day 🌿</h1>
-    <p class="hero-quote">“<span id="heroQuote">Dream it. Believe it. Do it.</span>”</p>
-    <p class="hero-date" id="heroDate"></p>
+  <!-- Desktop / tablet sidebar -->
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+    <div class="side-brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48"><rect width="48" height="48" rx="14" class="mark-bg"/><path d="M24 37 C24 26 18 22 11 21 C12 31 18 36 24 37 Z M24 37 C24 24 31 19 37 18 C36 30 30 36 24 37 Z" class="mark-leaf"/></svg>
+      </span>
+      <span class="brand-text">
+        <strong>LifeHub</strong>
+        <small>your life OS</small>
+      </span>
+    </div>
+    <nav class="side-nav" id="sideNav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+
+  <div class="shell">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="menuBtn" aria-label="Open navigation"></button>
+      <div class="topbar-title">
+        <h1 id="pageTitle">Dashboard</h1>
+        <p id="pageSub"></p>
+      </div>
+      <div class="topbar-actions">
+        <button class="chip chip-streak" id="streakChip" data-nav="progress" title="Perfect-day streak"></button>
+        <button class="chip chip-level" id="levelChip" data-nav="profile" title="Your level and XP"></button>
+        <button class="icon-btn" id="themeBtn" aria-label="Toggle light / dark theme"></button>
+        <button class="avatar-btn" id="avatarBtn" data-nav="profile" aria-label="Open profile"></button>
+      </div>
+    </header>
+
+    <main class="view" id="view" tabindex="-1"></main>
   </div>
 </div>
 
-<main id="main">
-  <section id="view-dashboard" class="view active"></section>
-  <section id="view-habits" class="view"></section>
-  <section id="view-goals" class="view"></section>
-  <section id="view-planner" class="view"></section>
-  <section id="view-journal" class="view"></section>
-  <section id="view-meals" class="view"></section>
-  <section id="view-workout" class="view"></section>
-  <section id="view-finance" class="view"></section>
-  <section id="view-books" class="view"></section>
-</main>
+<!-- Mobile bottom navigation -->
+<nav class="bottomnav" id="bottomNav" aria-label="Quick navigation"></nav>
 
-<footer class="footer">
-  <p><em>“Your dreams are not random — they are whispers from your future self. Every small step you take today is shaping the life you once imagined.”</em></p>
-</footer>
-
-<!-- AI assistant -->
-<button class="fab" id="assistantFab" title="Open your AI assistant">
-  <svg viewBox="0 0 40 40" aria-hidden="true">
-    <path d="M20 4 l3.2 9.6 L33 17 l-9.8 3.4 L20 30 l-3.2 -9.6 L7 17 l9.8 -3.4 Z" class="fab-star"/>
-    <path d="M31 26 l1.5 4 4 1.5 -4 1.5 -1.5 4 -1.5 -4 -4 -1.5 4 -1.5 Z" class="fab-star2"/>
-  </svg>
-</button>
-
-<aside class="assistant" id="assistant" aria-hidden="true">
-  <div class="assistant-head">
-    <div>
-      <strong>✨ Sage</strong>
-      <span class="assistant-sub">your Life OS assistant</span>
-    </div>
-    <button class="icon-btn" id="assistantClose" title="Close">✕</button>
-  </div>
-  <div class="assistant-log" id="assistantLog"></div>
-  <div class="assistant-chips" id="assistantChips">
-    <button data-msg="How am I doing?">📊 How am I doing?</button>
-    <button data-msg="Create a water tracker widget">💧 Water tracker</button>
-    <button data-msg="Add habit Stretch 🧘">🧘 New habit</button>
-    <button data-msg="What can you do?">❓ Help</button>
-  </div>
-  <form class="assistant-input" id="assistantForm">
-    <input type="text" id="assistantText" placeholder="Ask Sage to build or track anything…" autocomplete="off">
-    <button type="submit">Send</button>
-  </form>
-</aside>
-
-<!-- generic modal -->
+<!-- Modal -->
 <div class="modal-backdrop" id="modalBackdrop" hidden>
   <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
 </div>
 
-<div class="toast" id="toast" hidden></div>
+<!-- Mobile nav drawer -->
+<div class="drawer-backdrop" id="drawerBackdrop" hidden>
+  <aside class="drawer" id="drawer" aria-label="All areas"></aside>
+</div>
+
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
+<div class="tip" id="tip" hidden></div>
 
 <script src="app.js"></script>
 </body>

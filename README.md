@@ -1,56 +1,46 @@
-# 🌿 Life OS — your all-in-one life planner
+# 🌿 LifeHub — your Life OS
 
-A cozy, Notion-inspired **operating system for your life**: one dashboard where everything you track comes together, with detail pages underneath — and a built-in AI assistant that can extend the app for you.
+**All your life. All in one place.** A gamified life operating system: habits, health, workouts, nutrition, learning, reading, movies, university, career prep, projects, social life, memories and journaling — tied together with XP, levels, streaks, daily missions and badges.
 
-No server, no account, no build step. Open `index.html` (or host the folder anywhere, e.g. GitHub Pages) and everything is saved privately in your browser.
+No server, no account, no build step. Open `index.html` (or host the folder anywhere, e.g. GitHub Pages) and everything is saved privately in your browser's local storage.
 
-## ✨ What's inside
+## ✨ Life areas
 
 | Area | What it does |
 |---|---|
-| 🏡 **Dashboard** | Everything on one page: stats row, vision board, today's tasks, habits ring, weekly planner, upcoming events, finance snapshot, bookshelf, mood, gratitude, custom widgets |
-| 🌱 **Habits** | Daily check-offs, per-habit 🔥 current & 🏆 best streaks, a **perfect-day streak** (all habits done, day after day), a 20-week consistency heatmap and 7-day completion chart |
-| 🎯 **Goals** | Vision-board cards with milestones, progress bars, categories, and your "why" |
-| 📅 **Planner** | Monday–Sunday weekly board plus today's task list and important dated events |
-| ✒️ **Journal** | Gratitude, reflections and free entries, plus a mood-per-day month strip |
-| 🪙 **Finance** | Income/expense log, monthly balance, 6-month income-vs-expense chart, category breakdown |
-| 📚 **Books** | Shelf with want-to-read / reading / read, star ratings, "currently reading" on the dashboard |
-| 🍽️ **Meals** | Weekly meal planner (breakfast/lunch/dinner per day) plus a shopping list; today's plate on the dashboard |
-| 💪 **Workout** | Log sessions by type and minutes, weekly stats, 7-day minutes chart; movement summary on the dashboard |
-| 🧩 **Widgets** | Build your own dashboard widgets: counters (water 💧), daily trackers (sleep hours), checklists, sticky notes |
-| ✨ **Sage, the AI assistant** | Floating chat that adds habits/tasks/goals/expenses/books, logs journal entries, builds new widgets, switches themes and reports your progress |
+| 🏠 **Dashboard** | Greeting, level & XP bar, day streak, today's missions (auto-completing, each worth XP), life-area grid with live progress, weekly snapshot |
+| 🎯 **Habit Tracker** | Daily check-offs, per-habit streaks, week strip, perfect-day streak with flame |
+| ❤️ **Health** | Steps ring vs. goal, water counter, sleep log, mood picker, steps-per-week chart with goal line |
+| 💪 **Workout** | Weekly workout goal, workout plan you check off per day, week overview |
+| 🍎 **Nutrition** | Calorie goal, macro donut (protein / carbs / fats), daily meal checklist with kcal & macros |
+| 🎓 **Skills & Education** | Monthly study-hours goal, courses with progress, one-tap study logging |
+| 📚 **Reading** | Yearly book goal, Reading / Wishlist / Completed shelves, page progress, ratings |
+| 🎬 **Movies & Series** | Watchlist → Watching → Completed pipeline with ratings |
+| 🏛️ **University** | Weekly study-hours goal, tasks with due dates and overdue indicators |
+| 💼 **Work Preparation** | Career-readiness ring and checklist (resume, LinkedIn, portfolio…) |
+| 🚀 **Projects** | Project cards with status and progress; shipping one earns big XP |
+| 🫂 **Social** | Weekly connection goals (family calls, meetups…) with per-week counters |
+| 📸 **Memories** | A wall of memory cards with dates and notes |
+| ✒️ **Journal** | Daily entry with mood and tags, past-entry timeline |
+| 📊 **Progress** | Totals, per-area progress, XP-per-day chart, 16-week habit-consistency heatmap |
+| ⚡ **Integrations** | Placeholder toggles for Calendar / Notion / Fit / Spotify / YouTube |
+| 👤 **Profile** | Avatar & name, badge gallery (17 badges), theme, JSON export / import / reset |
 
-Two hand-crafted themes — **Cream** (light) ☀️ and **Cocoa** (dark) 🌙 — with a hand-drawn illustrated header.
+## 🕹️ Gamification
 
-## 🤖 The assistant
+- **XP** for nearly everything: habits (+10), workouts (+20), finishing a book (+50), shipping a project (+60), journal entries, meals, study time…
+- **Levels** with a rising XP curve, shown everywhere.
+- **Daily missions** that complete themselves as you live your day and pay bonus XP.
+- **Badges** — 17 achievements from *First step* to *Iron will* (30-day perfect streak).
+- **Streaks** — a perfect day means every habit checked; keep the flame alive.
 
-Sage works out of the box with built-in commands (type `help` in the chat):
+## 🖥️ Design
 
-```
-add habit Stretch 🧘
-add task Buy groceries on friday
-add expense 45 food
-create a water tracker
-how am I doing?
-```
+- Responsive: sidebar navigation on desktop, bottom tab bar + quick-add sheet + area drawer on mobile.
+- Light & dark themes (auto-follows your system, one-tap toggle).
+- Accessible: keyboard focus styles, aria labels, 44px touch targets, reduced-motion support, colorblind-validated chart palette.
+- Hand-drawn SVG icon set, no icon fonts, no dependencies — plain HTML/CSS/JS.
 
-For full natural-language mode (planning your week, designing widgets, open conversation), add an **Anthropic API key** in ⚙️ Settings. The key is stored only in your browser and calls Claude directly.
+## 🔒 Your data
 
-## 💾 Your data
-
-- Stored in `localStorage` under `lifeos-v1` — private to your browser.
-- ⚙️ Settings → **Export** downloads a JSON backup; **Import** restores it on any device.
-
-## 🚀 Running it
-
-```bash
-# any static server works — or just double-click index.html
-python3 -m http.server 8080
-```
-
-Then open http://localhost:8080.
-
-### GitHub Pages
-
-A workflow at `.github/workflows/pages.yml` deploys the app automatically on every push to `main`. After the first merge, the site appears at `https://<your-username>.github.io/Bushdio-90/`. (If the first run reports Pages isn't enabled, flip Settings → Pages → Source to **GitHub Actions** and re-run it.)
-
+Everything lives in `localStorage` under the `lifehub-v1` key. Use **Profile → Export JSON** for backups and **Import** to restore.
