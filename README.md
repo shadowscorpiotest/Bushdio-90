@@ -9,7 +9,7 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 | Area | What it does |
 |---|---|
 | 🏠 **Dashboard** | Greeting, level & XP bar, day streak, today's missions (auto-completing, each worth XP), life-area grid with live progress, weekly snapshot |
-| 🎯 **Habit Tracker** | Daily check-offs, per-habit streaks, week strip, perfect-day streak with flame. **Navigate to any day**, add a **note** of what you did, attach **milestones**, link a habit to a **Goal**, and mark a habit as a workout to **log it straight into the Workout section** |
+| 🎯 **Habit Tracker** | Three habit **types** — *build* (checkbox), *amount* (reach a target like 2L / 20 pages), and *avoid* (break a bad habit, shows days clean). Set a **cadence** (daily / specific weekdays / N× per week) that streaks respect, a **why** for each habit, and **skip / rest days** that don't break the chain. **Navigate any day**, add per-day **notes**, see a **4-week completion history + %**, attach **milestones**, link to a **Goal**, and mark a habit as a workout to **log it into the Workout section** |
 | ❤️ **Health** | Steps ring vs. goal, water counter, sleep log, mood picker, steps-per-week chart with goal line |
 | 💪 **Workout** | Weekly goal, a plan with **categories** (Calisthenics / Strength / Cardio / Mobility / Yoga) and sets×reps, and **per-day sessions** you can navigate back and forth. Each session takes a note plus **photo & video uploads** so you can rewatch a lift and track progress over time |
 | 🍎 **Nutrition** | Calorie goal, macro donut (protein / carbs / fats), daily meal checklist with kcal & macros |
