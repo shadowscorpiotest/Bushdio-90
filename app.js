@@ -77,6 +77,13 @@ const I = (() => {
     clock:     w('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.4 2"/>'),
     sliders:   w('<path d="M4.5 21v-6.5M4.5 10V3M12 21V11.5M12 7.5V3M19.5 21v-4.5M19.5 12V3M2 14.5h5M9.5 7.5h5M17 16.5h5"/>'),
     menu:      w('<path d="M4 7h16M4 12h16M4 17h16"/>'),
+    chevL:     w('<path d="M15 5l-7 7 7 7"/>'),
+    chevR:     w('<path d="M9 5l7 7-7 7"/>'),
+    play:      w('<path d="M7 5v14l11-7-11-7Z"/>'),
+    link:      w('<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>'),
+    tv:        w('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 21h8M12 3l4 3H8l4-3Z"/>'),
+    calc:      w('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h4M8 15h.01M12 15h.01M8 19h.01M12 19h.01M16 15v4"/>'),
+    cart:      w('<path d="M3 4h2l2.4 12.5a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.2L21 8H6"/><circle cx="9.5" cy="20.5" r="1.3"/><circle cx="17.5" cy="20.5" r="1.3"/>'),
     spark:     w('<path d="M12 3.5 13.7 9 19 10.7 13.7 12.4 12 18l-1.7-5.6L5 10.7 10.3 9 12 3.5Z"/><path d="M18.6 15.6l.8 2.4 2.4.8-2.4.8-.8 2.4-.8-2.4-2.4-.8 2.4-.8.8-2.4Z"/>'),
     download:  w('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>'),
     upload:    w('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 8 5-5 5 5M12 3v12"/>'),
@@ -122,16 +129,18 @@ let state = null;
 
 function defaultState() {
   return {
-    profile: { name: "", avatar: "🌱", theme: "auto", onboarded: false },
+    profile: { name: "", avatar: "🌱", theme: "auto", onboarded: false, apiKey: "", metrics: null },
     xp: 0,
     xpLog: {},                 // {date: xp gained}
     claimed: {},               // {date: {missionId:true}}
     badges: {},                // {badgeId: dateEarned}
     visited: {},               // {viewId: true}
-    habits: [],                // {id,name,emoji,log:{date:true}}
+    goals: [],                 // {id,title,emoji,milestones:[{id,text,done}]}
+    todos: [],                 // {id,text,done,date}
+    habits: [],                // {id,name,emoji,kind,goalId,milestones,log:{date:{done,note,workoutId}}}
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
-    workout: { weeklyGoal: 5, plan: [], log: {} },  // log[date]=[planIds]
-    nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70 }, meals: [], log: {} },
+    workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [] },  // log[date]=[planIds]; sessions:[{id,date,category,planId,note,exercises,media}]
+    nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70 }, meals: [], log: {}, shopping: [] },
     skills: { monthlyHours: 10, courses: [], log: {} }, // log[date]=minutes
     reading: { yearlyGoal: 12, books: [], log: {} },
     media: [],                 // {id,title,type,status,rating}
@@ -154,11 +163,11 @@ function defaultState() {
 function seedState(s) {
   const t = todayIso();
   s.habits = [
-    { id: uid(), name: "Morning meditation", emoji: "🧘", log: {} },
-    { id: uid(), name: "Workout",            emoji: "💪", log: {} },
-    { id: uid(), name: "Read 20 min",        emoji: "📖", log: {} },
-    { id: uid(), name: "Learn something new",emoji: "💡", log: {} },
-    { id: uid(), name: "No sugar",           emoji: "🍬", log: {} },
+    { id: uid(), name: "Morning meditation", emoji: "🧘", kind: "", goalId: null, milestones: [], log: {} },
+    { id: uid(), name: "Workout",            emoji: "💪", kind: "workout", goalId: null, milestones: [], log: {} },
+    { id: uid(), name: "Read 20 min",        emoji: "📖", kind: "", goalId: null, milestones: [], log: {} },
+    { id: uid(), name: "Learn something new",emoji: "💡", kind: "", goalId: null, milestones: [], log: {} },
+    { id: uid(), name: "No sugar",           emoji: "🍬", kind: "", goalId: null, milestones: [], log: {} },
   ];
   // a gentle history so charts aren't empty on first run
   for (let i = 1; i <= 10; i++) {
@@ -169,11 +178,11 @@ function seedState(s) {
     s.health.log[d] = { steps: 5200 + ((i * 997) % 5800), water: +(1 + (i % 4) * 0.35).toFixed(2), sleep: 6.5 + (i % 3) * 0.7, mood: ["🙂","😄","😌","🥱"][i % 4] };
   }
   s.workout.plan = [
-    { id: uid(), name: "Leg day",    emoji: "🦵", minutes: 45 },
-    { id: uid(), name: "Upper body", emoji: "🏋️", minutes: 45 },
-    { id: uid(), name: "Cardio",     emoji: "🏃", minutes: 30 },
-    { id: uid(), name: "Yoga",       emoji: "🧘", minutes: 20 },
-    { id: uid(), name: "Full body",  emoji: "🔥", minutes: 45 },
+    { id: uid(), name: "Calisthenics", emoji: "🤸", category: "Calisthenics", minutes: 40, sets: 4, reps: 12 },
+    { id: uid(), name: "Leg day",      emoji: "🦵", category: "Strength", minutes: 45, sets: 4, reps: 10 },
+    { id: uid(), name: "Upper body",   emoji: "🏋️", category: "Strength", minutes: 45, sets: 4, reps: 10 },
+    { id: uid(), name: "Cardio",       emoji: "🏃", category: "Cardio", minutes: 30, sets: 0, reps: 0 },
+    { id: uid(), name: "Yoga",         emoji: "🧘", category: "Yoga", minutes: 20, sets: 0, reps: 0 },
   ];
   s.nutrition.meals = [
     { id: uid(), slot: "Breakfast", name: "Oatmeal, banana & nuts",       kcal: 420, protein: 16, carbs: 62, fats: 13 },
@@ -232,10 +241,25 @@ function seedState(s) {
   return s;
 }
 
+/* ensure nested fields exist on states saved before a feature shipped */
+function migrate(s) {
+  s.profile = s.profile || {};
+  if (s.profile.apiKey == null) s.profile.apiKey = "";
+  if (s.profile.metrics === undefined) s.profile.metrics = null;
+  s.goals = s.goals || [];
+  s.todos = s.todos || [];
+  s.workout = s.workout || {};
+  s.workout.sessions = s.workout.sessions || [];
+  s.nutrition = s.nutrition || {};
+  s.nutrition.shopping = s.nutrition.shopping || [];
+  (s.habits || []).forEach(h => { h.milestones = h.milestones || []; });
+  return s;
+}
+
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    state = raw ? Object.assign(defaultState(), JSON.parse(raw)) : seedState(defaultState());
+    state = migrate(raw ? Object.assign(defaultState(), JSON.parse(raw)) : seedState(defaultState()));
   } catch { state = seedState(defaultState()); }
   save();
 }
@@ -245,6 +269,92 @@ function save() {
     toast("Storage is full — try removing a book cover or two");
     return false;
   }
+}
+
+/* ================= media store (IndexedDB — for photos & video) ================= */
+const MEDIA_DB = "lifehub-media";
+let _mdb = null;
+const _urlCache = {};
+function mediaDB() {
+  return new Promise((res, rej) => {
+    if (_mdb) return res(_mdb);
+    if (!("indexedDB" in window)) return rej(new Error("no-idb"));
+    const r = indexedDB.open(MEDIA_DB, 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains("blobs")) r.result.createObjectStore("blobs"); };
+    r.onsuccess = () => { _mdb = r.result; res(_mdb); };
+    r.onerror = () => rej(r.error);
+  });
+}
+async function mediaPut(blob) {
+  const id = "md_" + uid();
+  const db = await mediaDB();
+  await new Promise((res, rej) => {
+    const tx = db.transaction("blobs", "readwrite");
+    tx.objectStore("blobs").put(blob, id);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+  return id;
+}
+async function mediaGet(id) {
+  const db = await mediaDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("blobs", "readonly");
+    const rq = tx.objectStore("blobs").get(id);
+    rq.onsuccess = () => res(rq.result || null); rq.onerror = () => rej(rq.error);
+  });
+}
+async function mediaDelete(id) {
+  try {
+    const db = await mediaDB();
+    await new Promise((res) => { const tx = db.transaction("blobs", "readwrite"); tx.objectStore("blobs").delete(id); tx.oncomplete = res; tx.onerror = res; });
+  } catch {}
+  if (_urlCache[id]) { URL.revokeObjectURL(_urlCache[id]); delete _urlCache[id]; }
+}
+/* swap [data-media] hosts for <img>/<video> from IndexedDB, after each render */
+async function hydrateMedia() {
+  for (const host of $$("[data-media]")) {
+    const id = host.dataset.media;
+    if (host.dataset.hydrated === id) continue;
+    host.dataset.hydrated = id;
+    try {
+      let url = _urlCache[id];
+      if (!url) {
+        const blob = await mediaGet(id);
+        if (!blob) { host.innerHTML = `<span class="media-missing">media unavailable</span>`; continue; }
+        url = URL.createObjectURL(blob); _urlCache[id] = url;
+      }
+      host.innerHTML = host.dataset.mediaKind === "video"
+        ? `<video src="${url}" controls playsinline preload="metadata"></video>`
+        : `<img src="${url}" alt="" loading="lazy">`;
+    } catch { host.innerHTML = `<span class="media-missing">media unavailable</span>`; }
+  }
+}
+/* read a File into IndexedDB; images are downscaled unless they're already small */
+function storeMediaFile(file, cb) {
+  if (!file) return;
+  const kind = file.type.startsWith("video") ? "video" : "image";
+  if (kind === "video" && file.size > 60 * 1024 * 1024) { toast("That video is over 60MB — try a shorter clip"); return; }
+  const finish = (blob) => mediaPut(blob).then(id => cb({ id, kind })).catch(() => toast("Couldn't save that media"));
+  if (kind === "image") {
+    processCover(file, (dataUrl) => fetch(dataUrl).then(r => r.blob()).then(finish), 900);
+  } else {
+    finish(file);
+  }
+}
+
+/* ================= day navigation (Habits / Workout / Skills) ================= */
+function dayCursor(view) { state._cursor = state._cursor || {}; return state._cursor[view] || todayIso(); }
+function setCursor(view, d) { state._cursor = state._cursor || {}; state._cursor[view] = d; }
+function dayNav(view) {
+  const d = dayCursor(view), atToday = d >= todayIso();
+  return `<div class="day-nav">
+    <button class="icon-btn ghost" data-action="day-prev" data-view="${view}" aria-label="Previous day">${I.chevL}</button>
+    <div class="day-nav-lbl">
+      <b>${d === todayIso() ? "Today" : niceDate(d, { weekday: "short", month: "short", day: "numeric" })}</b>
+      ${d !== todayIso() ? `<button class="btn tiny ghost" data-action="day-today" data-view="${view}">Jump to today</button>` : ""}
+    </div>
+    <button class="icon-btn ghost" data-action="day-next" data-view="${view}" ${atToday ? "disabled" : ""} aria-label="Next day">${I.chevR}</button>
+  </div>`;
 }
 
 /* ================= gamification ================= */
@@ -268,7 +378,23 @@ function addXp(n, label) {
 }
 
 /* ----- streaks ----- */
-const habitDone = (h, d) => !!h.log[d];
+/* a log entry is either legacy `true` or `{done, note, workoutId}` */
+function habitEntry(h, d) { const v = h.log[d]; return v === true ? { done: true } : (v || null); }
+const habitDone = (h, d) => { const e = habitEntry(h, d); return !!(e && e.done); };
+function ensureHabitEntry(h, d) {
+  let e = h.log[d];
+  if (e === true) e = { done: true };
+  if (!e || typeof e !== "object") e = { done: false };
+  h.log[d] = e;
+  return e;
+}
+function toggleHabit(id) {
+  const h = state.habits.find(x => x.id === id); if (!h) return;
+  const d = dayCursor("habits");
+  if (habitDone(h, d)) { delete h.log[d]; }
+  else { const e = ensureHabitEntry(h, d); e.done = true; if (d === todayIso()) addXp(10, h.name); }
+  save();
+}
 const isPerfectDay = (d) => state.habits.length > 0 && state.habits.every(h => habitDone(h, d));
 function perfectStreak() {
   let s = 0, d = todayIso();
@@ -724,38 +850,111 @@ function vDashboard() {
 }
 
 /* ---------- habits ---------- */
+function goalProgress(g) {
+  const tot = g.milestones.length, done = g.milestones.filter(m => m.done).length;
+  return { done, tot, pct: tot ? Math.round(100 * done / tot) : 0 };
+}
 function vHabits() {
-  const t = todayIso(), week = weekDates();
-  const doneToday = state.habits.filter(h => habitDone(h, t)).length;
-  const pct = state.habits.length ? Math.round(100 * doneToday / state.habits.length) : 0;
+  const d = dayCursor("habits"), week = weekDates();
+  const isToday = d === todayIso();
+  const doneCount = state.habits.filter(h => habitDone(h, d)).length;
+  const pct = state.habits.length ? Math.round(100 * doneCount / state.habits.length) : 0;
   return `
   <div class="grid">
-    ${card("span2", `
+    ${card("span2", dayNav("habits") + `
       <div class="week-strip">
-        ${week.map((d, i) => `
-          <div class="wday ${d === t ? "today" : ""} ${d > t ? "future" : ""}">
-            <small>${WD_SHORT[i]}</small><b>${+d.slice(-2)}</b>
-            <span class="wdot ${isPerfectDay(d) ? "full" : state.habits.some(h => habitDone(h, d)) ? "part" : ""}"></span>
-          </div>`).join("")}
+        ${week.map((wd, i) => `
+          <button class="wday ${wd === d ? "today" : ""} ${wd > todayIso() ? "future" : ""}" data-action="habit-day" data-d="${wd}">
+            <small>${WD_SHORT[i]}</small><b>${+wd.slice(-2)}</b>
+            <span class="wdot ${isPerfectDay(wd) ? "full" : state.habits.some(h => habitDone(h, wd)) ? "part" : ""}"></span>
+          </button>`).join("")}
       </div>
-      <div class="progress-line"><span>Daily progress</span>${barHtml(pct)}<b>${pct}%</b></div>`)}
+      <div class="progress-line"><span>${isToday ? "Today's" : "That day's"} progress</span>${barHtml(pct)}<b>${pct}%</b></div>`)}
 
-    ${card("span2", cardHead("Today's habits", addBtn("New habit", "habit-add")) + (state.habits.length ? `
-      <ul class="check-list">
-        ${state.habits.map(h => `
-          <li class="${habitDone(h, t) ? "done" : ""}">
+    ${card("span2", cardHead(isToday ? "Today's habits" : niceDate(d, { weekday: "long", month: "short", day: "numeric" }), addBtn("New habit", "habit-add")) + (state.habits.length ? `
+      <ul class="check-list habit-list">
+        ${state.habits.map(h => {
+          const e = habitEntry(h, d), done = !!(e && e.done);
+          return `<li class="${done ? "done" : ""}">
             <button class="checkbox" data-action="habit-toggle" data-id="${h.id}" aria-label="Toggle ${esc(h.name)}">${I.check}</button>
-            <span class="row-emoji">${esc(h.emoji)}</span>
-            <span class="row-txt"><b>${esc(h.name)}</b><small>${habitStreak(h)} day streak</small></span>
-            <span class="row-week">${week.map(d => `<i class="${habitDone(h, d) ? "on" : ""} ${d > t ? "future" : ""}"></i>`).join("")}</span>
-            <button class="icon-btn ghost" data-action="habit-edit" data-id="${h.id}" aria-label="Edit ${esc(h.name)}">${I.edit}</button>
-          </li>`).join("")}
+            <button class="row-emoji as-btn" data-action="habit-open" data-id="${h.id}" aria-label="Open ${esc(h.name)}">${esc(h.emoji)}</button>
+            <span class="row-txt open" data-action="habit-open" data-id="${h.id}">
+              <b>${esc(h.name)}${h.kind === "workout" ? ` <span class="mini-badge" aria-label="workout habit">${I.dumbbell}</span>` : ""}</b>
+              <small>${habitStreak(h)} day streak${e && e.note ? ` · noted` : ""}${done && e && e.workoutId ? ` · workout logged` : ""}</small>
+            </span>
+            <span class="row-week">${week.map(wd => `<i class="${habitDone(h, wd) ? "on" : ""} ${wd > todayIso() ? "future" : ""}"></i>`).join("")}</span>
+            <button class="icon-btn ghost" data-action="habit-open" data-id="${h.id}" aria-label="Details for ${esc(h.name)}">${I.chevR}</button>
+          </li>`;
+        }).join("")}
       </ul>` : emptyMsg("target", "No habits yet — build your first ritual.", addBtn("Add a habit", "habit-add"))))}
 
     ${card("streak-card", `
       <div class="streak-hero">${I.flame}<div><b>${perfectStreak()} days</b><small>current perfect streak</small></div></div>
-      <p class="soft">A perfect day = every habit checked. Keep the flame alive.</p>`)}
+      <p class="soft">A perfect day = every habit checked. Tap a habit to add notes, link a goal, or log a workout.</p>`)}
+
+    ${card("", cardHead("Goals", addBtn("New goal", "goal-add")) + (state.goals.length ? `
+      <ul class="goal-list">
+        ${state.goals.map(g => {
+          const gp = goalProgress(g);
+          return `<li data-action="goal-open" data-id="${g.id}">
+            <span class="row-emoji">${esc(g.emoji || "🎯")}</span>
+            <span class="row-txt open"><b>${esc(g.title)}</b><small>${gp.done}/${gp.tot} milestones</small>${barHtml(gp.pct, "#6a5ae0")}</span>
+            <b class="pct">${gp.pct}%</b>
+          </li>`;
+        }).join("")}
+      </ul>` : emptyMsg("target", "Set a goal your habits build toward.", addBtn("Add a goal", "goal-add"))))}
   </div>`;
+}
+
+function openHabitDetail(id) {
+  const h = state.habits.find(x => x.id === id);
+  if (!h) { closeModal(); return; }
+  const d = dayCursor("habits");
+  const e = habitEntry(h, d) || {}, done = !!e.done;
+  openModal(`
+    <header class="modal-head"><h3>${esc(h.emoji)} ${esc(h.name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      ${dayNav("habits")}
+      <button class="btn ${done ? "good" : "primary"} slim" data-action="habit-toggle-d" data-id="${h.id}">${done ? I.check + "Done — tap to undo" : "Mark done"}</button>
+      <label class="fld"><span>What did you do? · ${niceDate(d, { month: "short", day: "numeric" })}</span>
+        <textarea data-change="habit-note" data-id="${h.id}" placeholder="A line about how it went…" maxlength="600">${esc(e.note || "")}</textarea></label>
+      ${h.kind === "workout"
+        ? `<div class="pill-row">${e.workoutId ? `<span class="soft small">${I.check} Linked to a workout session</span><button class="btn tiny ghost" data-action="habit-goto-workout" data-id="${h.id}">Open workout</button>` : `<button class="btn ghost slim" data-action="habit-log-workout" data-id="${h.id}">${I.dumbbell}Log this as a workout session</button>`}</div>`
+        : `<button class="btn ghost slim" data-action="habit-make-workout" data-id="${h.id}">${I.dumbbell}This is a workout habit</button>`}
+      <div class="fld"><span>Milestones</span>
+        ${h.milestones.length ? `<ul class="ms-list">
+          ${h.milestones.map(m => `<li class="${m.done ? "done" : ""}"><button class="checkbox sm" data-action="ms-toggle" data-h="${h.id}" data-m="${m.id}" aria-label="Toggle milestone">${I.check}</button><span>${esc(m.text)}</span><button class="icon-btn ghost" data-action="ms-del" data-h="${h.id}" data-m="${m.id}" aria-label="Delete milestone">${I.x}</button></li>`).join("")}
+        </ul>` : `<p class="soft small">No milestones yet.</p>`}
+        <button class="btn tiny ghost" data-action="ms-add" data-id="${h.id}">${I.plus}Add milestone</button>
+      </div>
+      <label class="fld"><span>Part of a goal</span>
+        <select data-change="habit-goal" data-id="${h.id}">
+          <option value="">— none —</option>
+          ${state.goals.map(g => `<option value="${g.id}" ${h.goalId === g.id ? "selected" : ""}>${esc(g.emoji || "🎯")} ${esc(g.title)}</option>`).join("")}
+        </select>
+      </label>
+      <div class="pill-row"><button class="btn ghost" data-action="habit-edit" data-id="${h.id}">${I.edit}Edit</button><button class="btn danger" data-action="habit-del-d" data-id="${h.id}">${I.trash}Delete</button></div>
+    </div>`);
+}
+
+function openGoalDetail(id) {
+  const g = state.goals.find(x => x.id === id);
+  if (!g) { closeModal(); return; }
+  const gp = goalProgress(g);
+  const linked = state.habits.filter(h => h.goalId === g.id);
+  openModal(`
+    <header class="modal-head"><h3>${esc(g.emoji || "🎯")} ${esc(g.title)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <div class="progress-line"><span>${gp.done}/${gp.tot} milestones</span>${barHtml(gp.pct, "#6a5ae0")}<b>${gp.pct}%</b></div>
+      <div class="fld"><span>Milestones</span>
+        ${g.milestones.length ? `<ul class="ms-list">
+          ${g.milestones.map(m => `<li class="${m.done ? "done" : ""}"><button class="checkbox sm" data-action="gms-toggle" data-g="${g.id}" data-m="${m.id}" aria-label="Toggle milestone">${I.check}</button><span>${esc(m.text)}</span><button class="icon-btn ghost" data-action="gms-del" data-g="${g.id}" data-m="${m.id}" aria-label="Delete milestone">${I.x}</button></li>`).join("")}
+        </ul>` : `<p class="soft small">No milestones yet.</p>`}
+        <button class="btn tiny ghost" data-action="gms-add" data-id="${g.id}">${I.plus}Add milestone</button>
+      </div>
+      ${linked.length ? `<div class="fld"><span>Habits building this goal</span><div class="chip-wrap">${linked.map(h => `<span class="chip-genre">${esc(h.emoji)} ${esc(h.name)}</span>`).join("")}</div></div>` : `<p class="soft small">Link habits to this goal from a habit's detail view.</p>`}
+      <div class="pill-row"><button class="btn ghost" data-action="goal-edit" data-id="${g.id}">${I.edit}Edit</button><button class="btn danger" data-action="goal-del" data-id="${g.id}">${I.trash}Delete</button></div>
+    </div>`);
 }
 
 /* ---------- health ---------- */
@@ -794,31 +993,70 @@ function vHealth() {
 }
 
 /* ---------- workout ---------- */
+const WORKOUT_CATS = ["Calisthenics", "Strength", "Cardio", "Mobility", "Yoga"];
+const CAT_COLORS = { Calisthenics: "#12a594", Strength: "#f76b15", Cardio: "#e5484d", Mobility: "#7c66dc", Yoga: "#8e4ec6" };
+function removeSession(id) {
+  const s = state.workout.sessions.find(x => x.id === id);
+  if (!s) return;
+  (s.media || []).forEach(m => mediaDelete(m.id));
+  state.workout.sessions = state.workout.sessions.filter(x => x.id !== id);
+  Object.keys(state.workout.log).forEach(d => {
+    state.workout.log[d] = (state.workout.log[d] || []).filter(x => x !== id);
+    if (!state.workout.log[d].length) delete state.workout.log[d];
+  });
+  state.habits.forEach(h => Object.values(h.log).forEach(e => { if (e && typeof e === "object" && e.workoutId === id) delete e.workoutId; }));
+}
+function sessionCard(s) {
+  const c = CAT_COLORS[s.category] || "#f76b15";
+  return `<li class="session">
+    <div class="session-head">
+      <span class="chip-cat" style="--a:${c}">${esc(s.category || "Session")}</span>
+      ${s.planName ? `<b>${esc(s.planName)}</b>` : ""}
+      <span class="spacer"></span>
+      <button class="icon-btn ghost" data-action="session-note" data-id="${s.id}" aria-label="Edit note">${I.pen}</button>
+      <button class="icon-btn ghost" data-action="session-del" data-id="${s.id}" aria-label="Delete session">${I.trash}</button>
+    </div>
+    ${s.note ? `<p class="session-note">${esc(s.note)}</p>` : ""}
+    ${(s.media && s.media.length) ? `<div class="media-grid">
+      ${s.media.map(m => `<div class="media-item">
+        <span class="media-host" data-media="${m.id}" data-media-kind="${m.kind}"><span class="media-missing">loading…</span></span>
+        <button class="icon-btn ghost media-thumb-del" data-action="session-media-del" data-s="${s.id}" data-m="${m.id}" aria-label="Remove media">${I.x}</button>
+      </div>`).join("")}
+    </div>` : ""}
+    <label class="btn tiny ghost upload-btn"><input type="file" accept="image/*,video/*" hidden data-change="session-media" data-id="${s.id}"><span>${I.upload}Add photo / video</span></label>
+  </li>`;
+}
 function vWorkout() {
-  const t = todayIso(), doneToday = state.workout.log[t] || [];
+  const d = dayCursor("workout"), isToday = d === todayIso();
   const wk = workoutsThisWeek();
+  const daySessions = state.workout.sessions.filter(s => s.date === d);
   return `
   <div class="grid">
     ${card("span2", `
       <div class="goal-row">
         <div><p class="soft">This week</p><h3>${wk} / ${state.workout.weeklyGoal} workouts</h3>${barHtml(100 * wk / state.workout.weeklyGoal, "#f76b15")}</div>
         <span class="big-ic" style="--a:#f76b15">${I.trophy}</span>
+      </div>
+      <div class="week-strip small">
+        ${weekDates().map((wd, i) => `<button class="wday ${wd === d ? "today" : ""} ${wd > todayIso() ? "future" : ""}" data-action="workout-day" data-d="${wd}"><small>${WD_SHORT[i]}</small><span class="wdot ${(state.workout.log[wd] || []).length ? "full" : ""}"></span></button>`).join("")}
       </div>`)}
-    ${card("span2", cardHead("Workout plan", addBtn("Add workout", "workout-add")) + (state.workout.plan.length ? `
+
+    ${card("span2", cardHead("Workout plan", addBtn("Add to plan", "workout-add")) + (state.workout.plan.length ? `
       <ul class="check-list">
-        ${state.workout.plan.map(p => `
-          <li class="${doneToday.includes(p.id) ? "done" : ""}">
+        ${state.workout.plan.map(p => {
+          const on = state.workout.sessions.some(s => s.date === d && s.planId === p.id);
+          return `<li class="${on ? "done" : ""}">
             <button class="checkbox" data-action="workout-toggle" data-id="${p.id}" aria-label="Toggle ${esc(p.name)}">${I.check}</button>
             <span class="row-emoji">${esc(p.emoji)}</span>
-            <span class="row-txt"><b>${esc(p.name)}</b><small>${p.minutes} min</small></span>
+            <span class="row-txt"><b>${esc(p.name)}</b><small>${p.category ? esc(p.category) + " · " : ""}${p.minutes} min${p.sets ? ` · ${p.sets}×${p.reps || "?"}` : ""}</small></span>
             <button class="icon-btn ghost" data-action="workout-del" data-id="${p.id}" aria-label="Delete ${esc(p.name)}">${I.trash}</button>
-          </li>`).join("")}
+          </li>`;
+        }).join("")}
       </ul>` : emptyMsg("dumbbell", "No workouts in your plan yet.", addBtn("Add one", "workout-add"))))}
-    ${card("", cardHead("This week") + `
-      <div class="week-strip small">
-        ${weekDates().map((d, i) => `<div class="wday ${d === t ? "today" : ""} ${d > t ? "future" : ""}"><small>${WD_SHORT[i]}</small><span class="wdot ${(state.workout.log[d] || []).length ? "full" : ""}"></span></div>`).join("")}
-      </div>
-      <p class="soft">Check off any session on the day you do it — one session per day counts toward your weekly goal.</p>`)}
+
+    ${card("span2", cardHead((isToday ? "Today's" : "That day's") + " sessions", addBtn("Log session", "session-add")) + dayNav("workout") + (daySessions.length ? `
+      <ul class="session-list">${daySessions.map(sessionCard).join("")}</ul>`
+      : emptyMsg("activity", "No sessions logged for this day — check a plan item or log one, and attach a photo/video of your progress.", addBtn("Log a session", "session-add"))))}
   </div>`;
 }
 
@@ -984,13 +1222,13 @@ function openBookDetail(id) {
 }
 
 /* downscale an uploaded image to a data URL that's small enough for localStorage */
-function processCover(file, cb) {
+function processCover(file, cb, maxW = 240) {
   if (!file || !file.type.startsWith("image/")) { toast("Please choose an image file"); return; }
   const reader = new FileReader();
   reader.onload = () => {
     const img = new Image();
     img.onload = () => {
-      const maxW = 240, scale = Math.min(1, maxW / img.width);
+      const scale = Math.min(1, maxW / img.width);
       const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
       const c = document.createElement("canvas");
       c.width = w; c.height = h;
@@ -1266,6 +1504,7 @@ function render() {
   renderNav();
   renderTopbar();
   drawCharts();
+  hydrateMedia();
 }
 
 /* ================= modals / forms ================= */
@@ -1305,23 +1544,54 @@ const ACTIONS = {
   "quick-add": openQuickAdd,
   "go-journal": () => { closeModal(); go("journal"); },
 
+  /* day navigation (shared) */
+  "day-prev": (el) => { const v = el.dataset.view; setCursor(v, addDays(dayCursor(v), -1)); render(); },
+  "day-next": (el) => { const v = el.dataset.view; const nd = addDays(dayCursor(v), 1); if (nd <= todayIso()) { setCursor(v, nd); render(); } },
+  "day-today": (el) => { setCursor(el.dataset.view, todayIso()); render(); },
+
   /* habits */
   "habit-add": () => formModal("New habit",
-    fld("Name", txt("name", "e.g. Morning meditation")) + fld("Emoji", txt("emoji", "🧘", "🧘", false)), "habit-add"),
-  "habit-toggle": (el) => {
-    const h = state.habits.find(x => x.id === el.dataset.id), t = todayIso();
-    if (!h) return;
-    if (h.log[t]) delete h.log[t]; else { h.log[t] = true; addXp(10, h.name); }
-    save(); render();
+    fld("Name", txt("name", "e.g. Morning meditation")) + fld("Emoji", txt("emoji", "🧘", "🧘", false)) +
+    `<label class="check-inline"><input type="checkbox" name="kind"> <span>This is a workout habit (can log to Workout)</span></label>`, "habit-add"),
+  "habit-day": (el) => { if (el.dataset.d <= todayIso()) { setCursor("habits", el.dataset.d); render(); } },
+  "habit-open": (el) => openHabitDetail(el.dataset.id),
+  "habit-toggle": (el) => { toggleHabit(el.dataset.id); render(); },
+  "habit-toggle-d": (el) => { toggleHabit(el.dataset.id); render(); openHabitDetail(el.dataset.id); },
+  "habit-make-workout": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.kind = "workout"; save(); render(); openHabitDetail(h.id); } },
+  "habit-log-workout": (el) => {
+    const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
+    const d = dayCursor("habits");
+    const sess = { id: uid(), date: d, category: "Strength", planId: null, note: `From habit: ${h.name}`, exercises: [], media: [] };
+    state.workout.sessions.push(sess);
+    (state.workout.log[d] = state.workout.log[d] || []).push(sess.id);
+    const e = ensureHabitEntry(h, d); e.done = true; e.workoutId = sess.id;
+    if (d === todayIso()) addXp(20, "Workout");
+    save(); render(); openHabitDetail(h.id);
+    toast("Workout session created 💪");
   },
+  "habit-goto-workout": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = habitEntry(h, dayCursor("habits")); if (e && e.workoutId) setCursor("workout", dayCursor("habits")); closeModal(); go("workout"); } },
   "habit-edit": (el) => {
     const h = state.habits.find(x => x.id === el.dataset.id);
     formModal("Edit habit",
       fld("Name", txt("name", "", h.name)) + fld("Emoji", txt("emoji", "", h.emoji, false)) +
-      `<input type="hidden" name="id" value="${h.id}">
+      `<label class="check-inline"><input type="checkbox" name="kind" ${h.kind === "workout" ? "checked" : ""}> <span>Workout habit</span></label>
+       <input type="hidden" name="id" value="${h.id}">
        <button type="button" class="btn danger slim" data-action="habit-del" data-id="${h.id}">${I.trash}Delete habit</button>`, "habit-edit");
   },
   "habit-del": (el) => { state.habits = state.habits.filter(x => x.id !== el.dataset.id); save(); closeModal(); render(); },
+  "habit-del-d": (el) => { state.habits = state.habits.filter(x => x.id !== el.dataset.id); save(); closeModal(); render(); },
+  "ms-add": (el) => { const id = el.dataset.id; formModal("New milestone", fld("Milestone", txt("text", "e.g. 30-day streak")) + `<input type="hidden" name="hid" value="${id}">`, "ms-add"); },
+  "ms-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); const m = h && h.milestones.find(x => x.id === el.dataset.m); if (m) { m.done = !m.done; if (m.done) addXp(15, "Milestone"); save(); render(); openHabitDetail(h.id); } },
+  "ms-del": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.milestones = h.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openHabitDetail(h.id); } },
+
+  /* goals */
+  "goal-add": () => formModal("New goal", fld("Title", txt("title", "e.g. Run a half marathon")) + fld("Emoji", txt("emoji", "🎯", "🎯", false)), "goal-add"),
+  "goal-open": (el) => openGoalDetail(el.dataset.id),
+  "goal-edit": (el) => { const g = state.goals.find(x => x.id === el.dataset.id); formModal("Edit goal", fld("Title", txt("title", "", g.title)) + fld("Emoji", txt("emoji", "", g.emoji || "🎯", false)) + `<input type="hidden" name="id" value="${g.id}">`, "goal-edit"); },
+  "goal-del": (el) => { state.goals = state.goals.filter(x => x.id !== el.dataset.id); state.habits.forEach(h => { if (h.goalId === el.dataset.id) h.goalId = null; }); save(); closeModal(); render(); },
+  "gms-add": (el) => { const id = el.dataset.id; formModal("New milestone", fld("Milestone", txt("text", "e.g. Finish week 4")) + `<input type="hidden" name="gid" value="${id}">`, "gms-add"); },
+  "gms-toggle": (el) => { const g = state.goals.find(x => x.id === el.dataset.g); const m = g && g.milestones.find(x => x.id === el.dataset.m); if (m) { m.done = !m.done; if (m.done) addXp(15, "Milestone"); save(); render(); openGoalDetail(g.id); } },
+  "gms-del": (el) => { const g = state.goals.find(x => x.id === el.dataset.g); if (g) { g.milestones = g.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openGoalDetail(g.id); } },
 
   /* health */
   "steps-add": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.steps = (l.steps || 0) + +el.dataset.n; save(); render(); },
@@ -1333,15 +1603,32 @@ const ACTIONS = {
     fld("Sleep (h)", num("sleep", state.health.goals.sleep, 4, 0.5)), "health-goals"),
 
   /* workout */
-  "workout-add": () => formModal("Add workout",
-    fld("Name", txt("name", "e.g. Leg day")) + fld("Minutes", num("minutes", 45, 5, 5)) + fld("Emoji", txt("emoji", "🏋️", "🏋️", false)), "workout-add"),
+  "workout-day": (el) => { if (el.dataset.d <= todayIso()) { setCursor("workout", el.dataset.d); render(); } },
+  "workout-add": () => formModal("Add to plan",
+    fld("Name", txt("name", "e.g. Pull-ups")) +
+    fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option>${c}</option>`).join("")}</select>`) +
+    `<div class="fld-row">${fld("Minutes", num("minutes", 30, 1, 5))}${fld("Sets", num("sets", 0, 0))}${fld("Reps", num("reps", 0, 0))}</div>` +
+    fld("Emoji", txt("emoji", "🏋️", "🏋️", false)), "workout-add"),
   "workout-toggle": (el) => {
-    const t = todayIso(); const arr = state.workout.log[t] = state.workout.log[t] || [];
-    const i = arr.indexOf(el.dataset.id);
-    if (i >= 0) arr.splice(i, 1); else { arr.push(el.dataset.id); addXp(20, "Workout"); }
+    const p = state.workout.plan.find(x => x.id === el.dataset.id); if (!p) return;
+    const d = dayCursor("workout");
+    const existing = state.workout.sessions.find(s => s.date === d && s.planId === p.id);
+    if (existing) { removeSession(existing.id); }
+    else {
+      const sess = { id: uid(), date: d, category: p.category || "Strength", planId: p.id, planName: p.name, note: "", exercises: [], media: [] };
+      state.workout.sessions.push(sess);
+      (state.workout.log[d] = state.workout.log[d] || []).push(sess.id);
+      if (d === todayIso()) addXp(20, "Workout");
+    }
     save(); render();
   },
   "workout-del": (el) => { state.workout.plan = state.workout.plan.filter(p => p.id !== el.dataset.id); save(); render(); },
+  "session-add": () => formModal("Log a session",
+    fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option>${c}</option>`).join("")}</select>`) +
+    fld("What did you do?", `<textarea name="note" placeholder="Sets, reps, how it felt…" maxlength="600"></textarea>`), "session-add"),
+  "session-note": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (s) formModal("Session note", fld("Notes", `<textarea name="note" maxlength="600">${esc(s.note || "")}</textarea>`) + `<input type="hidden" name="id" value="${s.id}">`, "session-note"); },
+  "session-del": (el) => { removeSession(el.dataset.id); save(); render(); },
+  "session-media-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s); if (s) { s.media = (s.media || []).filter(m => m.id !== el.dataset.m); mediaDelete(el.dataset.m); save(); render(); } },
 
   /* nutrition */
   "meal-add": () => formModal("Add meal",
@@ -1512,10 +1799,16 @@ function ensureJournal() {
 
 /* form submits */
 const SUBMITS = {
-  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", log: {} }); },
-  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; } },
+  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", kind: f.kind ? "workout" : "", goalId: null, milestones: [], log: {} }); },
+  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.kind = f.kind ? "workout" : ""; } },
+  "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
+  "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", milestones: [] }); },
+  "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; } },
+  "gms-add": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) g.milestones.push({ id: uid(), text: f.text, done: false }); },
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
-  "workout-add": (f) => { state.workout.plan.push({ id: uid(), name: f.name, minutes: +f.minutes, emoji: f.emoji || "🏋️" }); },
+  "workout-add": (f) => { state.workout.plan.push({ id: uid(), name: f.name, category: f.category || "", minutes: +f.minutes, sets: +f.sets || 0, reps: +f.reps || 0, emoji: f.emoji || "🏋️" }); },
+  "session-add": (f) => { const d = dayCursor("workout"); const sess = { id: uid(), date: d, category: f.category || "Strength", planId: null, planName: "", note: f.note || "", exercises: [], media: [] }; state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
+  "session-note": (f) => { const s = state.workout.sessions.find(x => x.id === f.id); if (s) s.note = f.note; },
   "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats }); },
   "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats }; },
   "skills-goal": (f) => { state.skills.monthlyHours = +f.hours; },
@@ -1540,6 +1833,12 @@ const SUBMITS = {
 /* changes (inputs) */
 const CHANGES = {
   "sleep-set": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.sleep = clamp(+el.value || 0, 0, 24); save(); render(); },
+  "habit-note": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.note = el.value.slice(0, 600); save(); } },
+  "habit-goal": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.goalId = el.value || null; save(); } },
+  "session-media": (el) => {
+    const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (!s) return;
+    storeMediaFile(el.files[0], (ref) => { s.media = s.media || []; s.media.push(ref); save(); render(); toast(`${ref.kind === "video" ? "Video" : "Photo"} added 📎`); });
+  },
   "book-page-set": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
     if (b) { b.page = clamp(+el.value || 0, 0, b.pages); state.reading.log[todayIso()] = true; save(); render(); openBookDetail(b.id); }

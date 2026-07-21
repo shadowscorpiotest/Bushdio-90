@@ -497,9 +497,77 @@ li.done .row-txt b { color: var(--ink-3); text-decoration: line-through; }
 
 /* ---------- streak card ---------- */
 .streak-hero { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.streak-hero svg { width: 38px; height: 38px; color: #f76b15; }
+.streak-hero svg { width: 38px; height: 38px; color: #f76b15; animation: flamePulse 2.2s ease-in-out infinite; transform-origin: center bottom; }
 .streak-hero b { font-size: 22px; font-weight: 800; display: block; }
 .streak-hero small { color: var(--ink-3); }
+
+/* ---------- habits & goals detail ---------- */
+.habit-list .row-emoji.as-btn { background: none; border: 0; cursor: pointer; }
+.row-txt.open { cursor: pointer; }
+.mini-badge { display: inline-grid; place-items: center; vertical-align: middle; }
+.mini-badge svg { width: 13px; height: 13px; color: #f76b15; }
+.wday { cursor: pointer; background: none; border: 1px solid transparent; }
+.check-inline { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.check-inline input { width: 17px; height: 17px; accent-color: var(--brand); }
+.ms-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.ms-list li { display: flex; align-items: center; gap: 9px; font-size: 14px; }
+.ms-list li.done span { text-decoration: line-through; color: var(--ink-3); }
+.ms-list li span { flex: 1; }
+.checkbox.sm { width: 22px; height: 22px; border-radius: 7px; }
+.checkbox.sm svg { width: 13px; height: 13px; }
+.ms-list li.done .checkbox.sm { background: var(--good); border-color: var(--good); color: #fff; }
+.goal-list { display: flex; flex-direction: column; }
+.goal-list li { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 10px; }
+.goal-list li:last-child { border-bottom: 0; }
+.goal-list li:hover { background: var(--surface-2); }
+.chip-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---------- day navigation ---------- */
+.day-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.day-nav-lbl { display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.day-nav-lbl b { font-size: 15px; }
+.day-nav .icon-btn[disabled] { opacity: .35; cursor: default; }
+
+/* ---------- media (photos & video from IndexedDB) ---------- */
+.media-host { display: block; border-radius: 12px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); }
+.media-host img, .media-host video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.media-host video { object-fit: contain; background: #000; }
+.media-missing { display: grid; place-items: center; height: 100%; min-height: 60px; color: var(--ink-3); font-size: 12px; }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+.media-item { position: relative; aspect-ratio: 1; }
+.media-item .media-host { position: absolute; inset: 0; width: 100%; height: 100%; }
+.media-thumb-del { position: absolute; top: 4px; right: 4px; z-index: 2; width: 26px; height: 26px; background: color-mix(in srgb, var(--surface) 78%, transparent); }
+.media-thumb-del svg { width: 14px; height: 14px; }
+
+/* ---------- workout sessions ---------- */
+.session-list { display: flex; flex-direction: column; gap: 12px; }
+.session { background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.session-head { display: flex; align-items: center; gap: 8px; }
+.session-head b { font-size: 14px; }
+.chip-cat { font-size: 11.5px; font-weight: 700; color: var(--a); background: color-mix(in srgb, var(--a) 15%, transparent); border-radius: 999px; padding: 3px 10px; }
+.session-note { font-size: 13.5px; color: var(--ink-2); margin: 8px 0; white-space: pre-wrap; }
+.session .media-grid { margin: 8px 0; }
+.upload-btn { cursor: pointer; margin-top: 4px; }
+.media-add-tile {
+  aspect-ratio: 1; border: 2px dashed var(--line); border-radius: 12px; background: var(--surface-2);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  color: var(--ink-3); font-size: 12px; cursor: pointer; transition: border-color .15s, color .15s;
+}
+.media-add-tile:hover { border-color: var(--brand); color: var(--brand); }
+.media-add-tile svg { width: 22px; height: 22px; }
+
+/* ---------- animations (auto-disabled under prefers-reduced-motion) ---------- */
+@keyframes flamePulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@keyframes checkPop { 0% { transform: scale(1); } 40% { transform: scale(1.28); } 100% { transform: scale(1); } }
+@keyframes cardIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes barGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.grid > .card { animation: cardIn .34s cubic-bezier(.2,.7,.3,1) both; }
+.grid > .card:nth-child(2) { animation-delay: .04s; }
+.grid > .card:nth-child(3) { animation-delay: .08s; }
+.grid > .card:nth-child(4) { animation-delay: .12s; }
+.grid > .card:nth-child(5) { animation-delay: .16s; }
+li.done .checkbox { animation: checkPop .3s ease; }
+.bar > span { transform-origin: left; }
 
 /* ---------- progress view ---------- */
 .totals { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
