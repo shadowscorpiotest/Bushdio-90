@@ -239,7 +239,13 @@ function load() {
   } catch { state = seedState(defaultState()); }
   save();
 }
-function save() { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+function save() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); return true; }
+  catch (e) {
+    toast("Storage is full — try removing a book cover or two");
+    return false;
+  }
+}
 
 /* ================= gamification ================= */
 function levelInfo(xp = state.xp) {
@@ -877,37 +883,126 @@ function vSkills() {
 }
 
 /* ---------- reading ---------- */
+function readingStats() {
+  const books = state.reading.books;
+  const done = books.filter(b => b.status === "done");
+  const pages = books.reduce((a, b) => a + (b.page || 0), 0);
+  const rated = done.filter(b => b.rating > 0);
+  const avg = rated.length ? (rated.reduce((a, b) => a + b.rating, 0) / rated.length).toFixed(1) : "—";
+  return { done: done.length, pages, avg, favs: books.filter(b => b.favorite).length };
+}
+function bookCover(b, cls = "") {
+  return b.cover
+    ? `<span class="book-cover ${cls}" style="background-image:url('${b.cover}')" role="img" aria-label="${esc(b.title)} cover"></span>`
+    : `<span class="book-cover ${cls}" aria-hidden="true">${esc(b.emoji || "📘")}</span>`;
+}
+function starRow(b) {
+  return `<div class="star-pick" role="group" aria-label="Rating">
+    ${[1, 2, 3, 4, 5].map(r => `<button class="star ${b.rating >= r ? "on" : ""}" data-action="book-rate" data-id="${b.id}" data-r="${r}" aria-label="${r} star${r > 1 ? "s" : ""}">★</button>`).join("")}
+    ${b.rating ? `<button class="star clear" data-action="book-rate" data-id="${b.id}" data-r="0" aria-label="Clear rating">✕</button>` : ""}
+  </div>`;
+}
+
 function vReading() {
-  const done = state.reading.books.filter(b => b.status === "done").length;
+  const st = readingStats();
   const tab = state._readingTab || "current";
   const tabs = [["current", "Reading"], ["wishlist", "Wishlist"], ["done", "Completed"]];
-  const books = state.reading.books.filter(b => b.status === tab);
+  const books = state.reading.books.filter(b => b.status === tab).sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0));
   return `
   <div class="grid">
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">Reading goal</p><h3>${done} / ${state.reading.yearlyGoal} books this year</h3>${barHtml(100 * done / state.reading.yearlyGoal, "#0091ff")}</div>
+        <div><p class="soft">Reading goal</p><h3>${st.done} / ${state.reading.yearlyGoal} books this year</h3>${barHtml(100 * st.done / state.reading.yearlyGoal, "#0091ff")}</div>
         <span class="big-ic" style="--a:#0091ff">${I.book}</span>
+      </div>
+      <div class="read-stats">
+        <div><b>${st.pages.toLocaleString()}</b><small>pages read</small></div>
+        <div><b>${st.avg}</b><small>avg rating</small></div>
+        <div><b>${st.favs}</b><small>favorites</small></div>
       </div>`)}
     ${card("span2", `
       <div class="tab-row">${tabs.map(([id, lbl]) => `<button class="tab ${tab === id ? "on" : ""}" data-action="reading-tab" data-id="${id}">${lbl}</button>`).join("")}
         <span class="spacer"></span>${addBtn("Add book", "book-add")}</div>
       ${books.length ? `<ul class="book-list">
-        ${books.map(b => `
-          <li>
-            <span class="book-cover" aria-hidden="true">${esc(b.emoji)}</span>
-            <span class="row-txt"><b>${esc(b.title)}</b><small>${esc(b.author)}</small>
-              ${b.status === "current" ? barHtml(100 * b.page / (b.pages || 1), "#0091ff") : ""}
-              ${b.status === "done" && b.rating ? `<small class="stars">${"★".repeat(b.rating)}${"☆".repeat(5 - b.rating)}</small>` : ""}
+        ${books.map(b => {
+          const pct = Math.round(100 * (b.page || 0) / (b.pages || 1));
+          return `<li class="book-row" data-action="book-open" data-id="${b.id}">
+            ${bookCover(b)}
+            <span class="row-txt">
+              <b>${esc(b.title)}${b.favorite ? ` <span class="fav-dot" aria-label="Favorite">♥</span>` : ""}</b>
+              <small>${esc(b.author)}${b.genre ? ` · ${esc(b.genre)}` : ""}</small>
+              ${b.status === "current" ? barHtml(pct, "#0091ff") : ""}
+              ${b.rating ? `<small class="stars">${"★".repeat(b.rating)}${"☆".repeat(5 - b.rating)}</small>` : ""}
             </span>
-            ${b.status === "current" ? `<span class="pct">${Math.round(100 * b.page / (b.pages || 1))}%</span>
-              <span class="pill-row"><button class="btn tiny" data-action="book-progress" data-id="${b.id}">${I.plus}pages</button>
-              <button class="btn tiny good" data-action="book-finish" data-id="${b.id}">Finish</button></span>` : ""}
-            ${b.status === "wishlist" ? `<button class="btn tiny" data-action="book-start" data-id="${b.id}">Start</button>` : ""}
-            <button class="icon-btn ghost" data-action="book-del" data-id="${b.id}" aria-label="Delete book">${I.trash}</button>
-          </li>`).join("")}
+            ${b.status === "current" ? `<span class="pct">${pct}%</span>` : ""}
+            <span class="row-open">${I.plus}</span>
+          </li>`;
+        }).join("")}
       </ul>` : emptyMsg("book", tab === "done" ? "No finished books yet — the first one is the sweetest." : "Nothing here yet.", addBtn("Add a book", "book-add"))}`)}
   </div>`;
+}
+
+function openBookDetail(id) {
+  const b = state.reading.books.find(x => x.id === id);
+  if (!b) { closeModal(); return; }
+  const pct = Math.round(100 * (b.page || 0) / (b.pages || 1));
+  openModal(`
+    <header class="modal-head"><h3>Book details</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body book-detail">
+      <div class="bd-top">
+        ${b.cover ? `<span class="bd-cover" style="background-image:url('${b.cover}')" role="img" aria-label="${esc(b.title)} cover"></span>` : `<span class="bd-cover ph">${esc(b.emoji || "📘")}</span>`}
+        <div class="bd-meta">
+          <h3 class="bd-title">${esc(b.title)}</h3>
+          <p class="soft">${esc(b.author || "")}</p>
+          ${b.genre ? `<span class="chip-genre">${esc(b.genre)}</span>` : ""}
+          ${starRow(b)}
+          <button class="btn tiny ${b.favorite ? "fav-on" : "ghost"}" data-action="book-fav" data-id="${b.id}">${I.heart}${b.favorite ? "Favorite" : "Add favorite"}</button>
+        </div>
+      </div>
+      <label class="cover-upload">
+        <input type="file" accept="image/*" data-change="book-cover-pick" data-id="${b.id}" hidden>
+        <span class="btn ghost slim">${I.upload}${b.cover ? "Change cover" : "Upload cover"}</span>
+        ${b.cover ? `<button type="button" class="btn ghost slim" data-action="book-cover-clear" data-id="${b.id}">${I.trash}Remove</button>` : ""}
+      </label>
+      ${b.status === "current" ? `
+        <div class="progress-line"><span>Page ${b.page || 0} / ${b.pages}</span>${barHtml(pct, "#0091ff")}<b>${pct}%</b></div>
+        <div class="pill-row">
+          <button class="btn tiny" data-action="book-page" data-id="${b.id}" data-d="-10">−10</button>
+          <button class="btn tiny" data-action="book-page" data-id="${b.id}" data-d="10">+10</button>
+          <button class="btn tiny" data-action="book-page" data-id="${b.id}" data-d="25">+25</button>
+          <input class="num-input" type="number" min="0" max="${b.pages}" value="${b.page || 0}" data-change="book-page-set" data-id="${b.id}" aria-label="Set current page">
+          <button class="btn tiny good" data-action="book-finish-d" data-id="${b.id}">Finish 🎉</button>
+        </div>` : ""}
+      ${b.status === "wishlist" ? `<button class="btn primary slim" data-action="book-start-d" data-id="${b.id}">${I.book}Start reading</button>` : ""}
+      ${b.status === "done" ? `<p class="soft">${I.check} Finished${b.finished ? ` · ${niceDate(b.finished)}` : ""}</p><button class="btn ghost slim" data-action="book-reread" data-id="${b.id}">Read again</button>` : ""}
+      <label class="fld"><span>Notes &amp; thoughts</span><textarea data-change="book-notes" data-id="${b.id}" placeholder="What did you think? Favorite quotes, takeaways…" maxlength="1200">${esc(b.notes || "")}</textarea></label>
+      <div class="pill-row">
+        <button class="btn ghost" data-action="book-edit" data-id="${b.id}">${I.edit}Edit details</button>
+        <button class="btn danger" data-action="book-del-d" data-id="${b.id}">${I.trash}Delete</button>
+      </div>
+    </div>`);
+}
+
+/* downscale an uploaded image to a data URL that's small enough for localStorage */
+function processCover(file, cb) {
+  if (!file || !file.type.startsWith("image/")) { toast("Please choose an image file"); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const maxW = 240, scale = Math.min(1, maxW / img.width);
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      try { cb(c.toDataURL("image/jpeg", 0.72)); }
+      catch { toast("Couldn't process that image"); }
+    };
+    img.onerror = () => toast("Couldn't read that image");
+    img.src = reader.result;
+  };
+  reader.onerror = () => toast("Couldn't read that file");
+  reader.readAsDataURL(file);
 }
 
 /* ---------- media ---------- */
@@ -1294,18 +1389,38 @@ const ACTIONS = {
   /* reading */
   "reading-tab": (el) => { state._readingTab = el.dataset.id; render(); },
   "book-add": () => formModal("Add book",
+    `<label class="cover-upload add">
+       <input type="file" accept="image/*" data-change="book-cover-new" hidden>
+       <span class="cover-preview" id="coverPreview">${I.upload}<i>Add cover</i></span>
+     </label>
+     <input type="hidden" name="cover" id="coverField">` +
     fld("Title", txt("title", "e.g. Atomic Habits")) + fld("Author", txt("author", "", "", false)) +
-    `<div class="fld-row">${fld("Pages", num("pages", 300, 1))}${fld("Emoji", txt("emoji", "📘", "📘", false))}</div>`, "book-add"),
-  "book-start": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); b.status = "current"; save(); render(); },
-  "book-progress": (el) => {
+    `<div class="fld-row">${fld("Pages", num("pages", 300, 1))}${fld("Genre", txt("genre", "e.g. Self-help", "", false))}</div>` +
+    fld("Emoji (used if no cover)", txt("emoji", "📘", "📘", false)), "book-add"),
+  "book-open": (el) => openBookDetail(el.dataset.id),
+  "book-rate": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.rating = +el.dataset.r; save(); checkBadges(); render(); openBookDetail(b.id); } },
+  "book-fav": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.favorite = !b.favorite; if (b.favorite) toast("Added to favorites ♥"); save(); render(); openBookDetail(b.id); } },
+  "book-page": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
-    formModal(`Update “${esc(b.title)}”`, fld(`Current page (of ${b.pages})`, num("page", b.page, 0)) + `<input type="hidden" name="id" value="${b.id}">`, "book-progress");
+    if (b) { b.page = clamp((b.page || 0) + +el.dataset.d, 0, b.pages); state.reading.log[todayIso()] = true; save(); render(); openBookDetail(b.id); }
   },
-  "book-finish": (el) => {
+  "book-start-d": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.status = "current"; b.started = todayIso(); save(); render(); openBookDetail(b.id); } },
+  "book-finish-d": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
-    formModal(`Finished “${esc(b.title)}” 🎉`, fld("Rating", `<select name="rating">${[5, 4, 3, 2, 1].map(r => `<option value="${r}">${"★".repeat(r)}</option>`).join("")}</select>`) + `<input type="hidden" name="id" value="${b.id}">`, "book-finish", "Celebrate");
+    if (b) { const was = b.status; b.status = "done"; b.page = b.pages; b.finished = todayIso(); if (was !== "done") addXp(50, `Finished ${b.title}`); state._readingTab = "done"; save(); checkBadges(); render(); openBookDetail(b.id); }
   },
-  "book-del": (el) => { state.reading.books = state.reading.books.filter(b => b.id !== el.dataset.id); save(); render(); },
+  "book-reread": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.status = "current"; b.page = 0; b.started = todayIso(); state._readingTab = "current"; save(); render(); openBookDetail(b.id); } },
+  "book-cover-clear": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.cover = null; save(); render(); openBookDetail(b.id); } },
+  "book-edit": (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id);
+    if (!b) return;
+    formModal("Edit book",
+      fld("Title", txt("title", "", b.title)) + fld("Author", txt("author", "", b.author, false)) +
+      `<div class="fld-row">${fld("Pages", num("pages", b.pages, 1))}${fld("Genre", txt("genre", "", b.genre || "", false))}</div>` +
+      fld("Emoji", txt("emoji", "", b.emoji || "📘", false)) +
+      `<input type="hidden" name="id" value="${b.id}">`, "book-edit");
+  },
+  "book-del-d": (el) => { state.reading.books = state.reading.books.filter(b => b.id !== el.dataset.id); save(); closeModal(); render(); toast("Book removed"); },
 
   /* media */
   "media-tab": (el) => { state._mediaTab = el.dataset.id; render(); },
@@ -1407,14 +1522,10 @@ const SUBMITS = {
   "uni-goal": (f) => { state.university.weeklyHours = +f.hours; },
   "course-add": (f) => { state.skills.courses.push({ id: uid(), name: f.name, progress: 0 }); },
   "uni-task-add": (f) => { state.university.tasks.push({ id: uid(), title: f.title, due: f.due, done: false }); },
-  "book-add": (f) => { state.reading.books.push({ id: uid(), title: f.title, author: f.author || "Unknown", emoji: f.emoji || "📘", status: "current", pages: +f.pages, page: 0, rating: 0 }); },
-  "book-progress": (f) => {
+  "book-add": (f) => { state.reading.books.push({ id: uid(), title: f.title, author: f.author || "Unknown", emoji: f.emoji || "📘", cover: f.cover || null, genre: f.genre || "", notes: "", favorite: false, status: "current", pages: +f.pages, page: 0, rating: 0, started: todayIso() }); },
+  "book-edit": (f) => {
     const b = state.reading.books.find(x => x.id === f.id);
-    if (b) { b.page = clamp(+f.page, 0, b.pages); state.reading.log[todayIso()] = true; }
-  },
-  "book-finish": (f) => {
-    const b = state.reading.books.find(x => x.id === f.id);
-    if (b) { b.status = "done"; b.page = b.pages; b.rating = +f.rating; addXp(50, `Finished ${b.title}`); }
+    if (b) { b.title = f.title; b.author = f.author || b.author; b.pages = Math.max(1, +f.pages); b.page = clamp(b.page, 0, b.pages); b.genre = f.genre || ""; b.emoji = f.emoji || b.emoji; }
   },
   "media-add": (f) => { state.media.push({ id: uid(), title: f.title, type: f.type, status: "watchlist", rating: 0 }); },
   "media-finish": (f) => { const m = state.media.find(x => x.id === f.id); if (m) { m.status = "done"; m.rating = +f.rating; addXp(10, `Finished ${m.title}`); } },
@@ -1429,6 +1540,29 @@ const SUBMITS = {
 /* changes (inputs) */
 const CHANGES = {
   "sleep-set": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.sleep = clamp(+el.value || 0, 0, 24); save(); render(); },
+  "book-page-set": (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id);
+    if (b) { b.page = clamp(+el.value || 0, 0, b.pages); state.reading.log[todayIso()] = true; save(); render(); openBookDetail(b.id); }
+  },
+  "book-notes": (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id);
+    if (b) { b.notes = el.value.slice(0, 1200); save(); }   // no re-render: keep the textarea focused
+  },
+  "book-cover-pick": (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id);
+    if (!b) return;
+    processCover(el.files[0], (dataUrl) => {
+      try { b.cover = dataUrl; save(); render(); openBookDetail(b.id); toast("Cover updated 📚"); }
+      catch { toast("That image is too large to save"); }
+    });
+  },
+  "book-cover-new": (el) => {
+    processCover(el.files[0], (dataUrl) => {
+      const field = $("#coverField"), preview = $("#coverPreview");
+      if (field) field.value = dataUrl;
+      if (preview) { preview.style.backgroundImage = `url('${dataUrl}')`; preview.classList.add("has-img"); preview.innerHTML = ""; }
+    });
+  },
 };
 
 /* ================= events ================= */
