@@ -1143,6 +1143,35 @@ function removeSession(id) {
   });
   state.habits.forEach(h => Object.values(h.log).forEach(e => { if (e && typeof e === "object" && e.workoutId === id) delete e.workoutId; }));
 }
+/* ----- exercise / PR helpers ----- */
+function setLabel(ex, set) {
+  if (ex.kind === "time") return `${set.seconds || 0}s`;
+  if (ex.kind === "distance") return `${set.distance || 0} ${set.unit || "km"}`;
+  return `${set.weight || 0}kg × ${set.reps || 0}`;
+}
+function exerciseNames() { const s = new Set(); state.workout.sessions.forEach(x => (x.exercises || []).forEach(e => s.add(e.name))); return [...s]; }
+function exerciseKind(name) { for (const s of state.workout.sessions) for (const e of (s.exercises || [])) if (e.name === name) return e.kind; return "reps"; }
+function prPrimary(name, kind) {
+  let best = 0;
+  state.workout.sessions.forEach(s => (s.exercises || []).forEach(e => { if (e.name !== name) return; (e.sets || []).forEach(set => { best = Math.max(best, kind === "reps" ? (set.weight || 0) : kind === "time" ? (set.seconds || 0) : (set.distance || 0)); }); }));
+  return best;
+}
+function prLabel(kind, v) { return kind === "reps" ? `${v} kg` : kind === "time" ? `${v}s` : `${v} km`; }
+function exerciseSessionBest(name, kind) {
+  const rows = [];
+  state.workout.sessions.forEach(s => {
+    let v = 0; (s.exercises || []).forEach(e => { if (e.name !== name) return; (e.sets || []).forEach(set => { v = Math.max(v, kind === "reps" ? (set.weight || 0) : kind === "time" ? (set.seconds || 0) : (set.distance || 0)); }); });
+    if (v > 0) rows.push({ date: s.date, value: v });
+  });
+  return rows.sort((a, b) => a.date < b.date ? -1 : 1);
+}
+function exerciseCard(s, ex) {
+  return `<div class="ex">
+    <div class="ex-head"><b>${esc(ex.name)}</b><span class="soft small">${(ex.sets || []).length} set${(ex.sets || []).length !== 1 ? "s" : ""}</span><span class="spacer"></span><button class="icon-btn ghost" data-action="ex-del" data-s="${s.id}" data-e="${ex.id}" aria-label="Delete exercise">${I.x}</button></div>
+    ${(ex.sets || []).length ? `<div class="set-wrap">${ex.sets.map((set, i) => `<span class="set-chip">${setLabel(ex, set)}<button data-action="set-del" data-s="${s.id}" data-e="${ex.id}" data-i="${i}" aria-label="Remove set">×</button></span>`).join("")}</div>` : ""}
+    <button class="btn tiny ghost" data-action="set-add" data-s="${s.id}" data-e="${ex.id}">${I.plus}Add set</button>
+  </div>`;
+}
 function sessionCard(s) {
   const c = CAT_COLORS[s.category] || "#f76b15";
   return `<li class="session">
@@ -1154,6 +1183,8 @@ function sessionCard(s) {
       <button class="icon-btn ghost" data-action="session-del" data-id="${s.id}" aria-label="Delete session">${I.trash}</button>
     </div>
     ${s.note ? `<p class="session-note">${esc(s.note)}</p>` : ""}
+    ${(s.exercises && s.exercises.length) ? `<div class="ex-list">${s.exercises.map(ex => exerciseCard(s, ex)).join("")}</div>` : ""}
+    <button class="btn tiny ghost" data-action="ex-add" data-id="${s.id}">${I.plus}Add exercise</button>
     ${(s.media && s.media.length) ? `<div class="media-grid">
       ${s.media.map(m => `<div class="media-item">
         <span class="media-host" data-media="${m.id}" data-media-kind="${m.kind}"><span class="media-missing">loading…</span></span>
@@ -1194,7 +1225,42 @@ function vWorkout() {
     ${card("span2", cardHead((isToday ? "Today's" : "That day's") + " sessions", addBtn("Log session", "session-add")) + dayNav("workout") + (daySessions.length ? `
       <ul class="session-list">${daySessions.map(sessionCard).join("")}</ul>`
       : emptyMsg("activity", "No sessions logged for this day — check a plan item or log one, and attach a photo/video of your progress.", addBtn("Log a session", "session-add"))))}
+
+    ${exerciseNames().length ? card("span2", cardHead("Exercises & personal records") + `
+      <ul class="ex-pr-list">
+        ${exerciseNames().map(name => {
+          const kind = exerciseKind(name);
+          const rows = exerciseSessionBest(name, kind).slice(-12);
+          const chartData = rows.map(r => ({ label: +r.date.slice(-2), value: r.value, tip: `${niceDate(r.date)} · ${prLabel(kind, r.value)}` }));
+          return `<li data-action="ex-history" data-name="${esc(name)}">
+            <div class="ex-pr-head"><b>${esc(name)}</b><span class="pr-badge">${I.trophy} PR ${prLabel(kind, prPrimary(name, kind))}</span></div>
+            ${chartData.length ? `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(chartData))}' data-color="#f76b15" data-h="86" data-label="${esc(name)} progress"></div>` : `<p class="soft small">Log a set to start tracking.</p>`}
+          </li>`;
+        }).join("")}
+      </ul>
+      <p class="chart-note">${I.chart} Tap an exercise for its full history. Bars show your best set per session.</p>`) : ""}
   </div>`;
+}
+
+function openExerciseHistory(name) {
+  const kind = exerciseKind(name);
+  const rows = exerciseSessionBest(name, kind);
+  const chartData = rows.map(r => ({ label: +r.date.slice(-2), value: r.value, tip: `${niceDate(r.date)} · ${prLabel(kind, r.value)}` }));
+  openModal(`
+    <header class="modal-head"><h3>${esc(name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <div class="pill-row"><span class="pr-badge">${I.trophy} Best ${prLabel(kind, prPrimary(name, kind))}</span><span class="soft small">${rows.length} session${rows.length !== 1 ? "s" : ""} logged</span></div>
+      ${chartData.length ? `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(chartData))}' data-color="#f76b15" data-h="150" data-label="${esc(name)} progress"></div>` : `<p class="soft">No sets logged yet.</p>`}
+      <div class="fld"><span>Session history</span>
+        <ul class="ex-hist-list">
+          ${state.workout.sessions.filter(s => (s.exercises || []).some(e => e.name === name)).sort((a, b) => b.date < a.date ? -1 : 1).map(s => {
+            const ex = s.exercises.find(e => e.name === name);
+            return `<li><b>${niceDate(s.date, { month: "short", day: "numeric", year: "numeric" })}</b> <span class="set-wrap">${(ex.sets || []).map(set => `<span class="set-chip">${setLabel(ex, set)}</span>`).join("")}</span></li>`;
+          }).join("")}
+        </ul>
+      </div>
+    </div>`);
+  drawCharts();
 }
 
 /* ---------- nutrition ---------- */
@@ -1763,6 +1829,22 @@ const ACTIONS = {
   "session-note": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (s) formModal("Session note", fld("Notes", `<textarea name="note" maxlength="600">${esc(s.note || "")}</textarea>`) + `<input type="hidden" name="id" value="${s.id}">`, "session-note"); },
   "session-del": (el) => { removeSession(el.dataset.id); save(); render(); },
   "session-media-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s); if (s) { s.media = (s.media || []).filter(m => m.id !== el.dataset.m); mediaDelete(el.dataset.m); save(); render(); } },
+  "ex-add": (el) => formModal("Add exercise",
+    fld("Exercise", txt("name", "e.g. Bench press")) +
+    fld("Measured in", `<select name="kind"><option value="reps">Weight × reps</option><option value="time">Time / hold (seconds)</option><option value="distance">Distance</option></select>`) +
+    `<input type="hidden" name="sid" value="${el.dataset.id}">`, "ex-add"),
+  "set-add": (el) => {
+    const s = state.workout.sessions.find(x => x.id === el.dataset.s), ex = s && (s.exercises || []).find(e => e.id === el.dataset.e);
+    if (!ex) return;
+    let fields;
+    if (ex.kind === "time") fields = fld("Seconds", num("seconds", 30, 0));
+    else if (ex.kind === "distance") fields = `<div class="fld-row">${fld("Distance", num("distance", 1, 0))}${fld("Unit", txt("unit", "km", "km", false))}</div>`;
+    else fields = `<div class="fld-row">${fld("Weight (kg)", num("weight", 20, 0))}${fld("Reps", num("reps", 8, 0))}</div>`;
+    formModal(`Add set · ${esc(ex.name)}`, fields + `<input type="hidden" name="sid" value="${s.id}"><input type="hidden" name="eid" value="${ex.id}"><input type="hidden" name="kind" value="${ex.kind}">`, "set-add");
+  },
+  "set-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s), ex = s && (s.exercises || []).find(e => e.id === el.dataset.e); if (ex) { ex.sets.splice(+el.dataset.i, 1); save(); render(); } },
+  "ex-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s); if (s) { s.exercises = (s.exercises || []).filter(e => e.id !== el.dataset.e); save(); render(); } },
+  "ex-history": (el) => openExerciseHistory(el.dataset.name),
 
   /* nutrition */
   "meal-add": () => formModal("Add meal",
@@ -1943,6 +2025,20 @@ const SUBMITS = {
   "workout-add": (f) => { state.workout.plan.push({ id: uid(), name: f.name, category: f.category || "", minutes: +f.minutes, sets: +f.sets || 0, reps: +f.reps || 0, emoji: f.emoji || "🏋️" }); },
   "session-add": (f) => { const d = dayCursor("workout"); const sess = { id: uid(), date: d, category: f.category || "Strength", planId: null, planName: "", note: f.note || "", exercises: [], media: [] }; state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
   "session-note": (f) => { const s = state.workout.sessions.find(x => x.id === f.id); if (s) s.note = f.note; },
+  "ex-add": (f) => { const s = state.workout.sessions.find(x => x.id === f.sid); if (s) { s.exercises = s.exercises || []; s.exercises.push({ id: uid(), name: f.name, kind: f.kind || "reps", sets: [] }); } },
+  "set-add": (f) => {
+    const s = state.workout.sessions.find(x => x.id === f.sid), ex = s && (s.exercises || []).find(e => e.id === f.eid);
+    if (!ex) return;
+    const before = prPrimary(ex.name, ex.kind);
+    let set;
+    if (f.kind === "time") set = { seconds: +f.seconds || 0 };
+    else if (f.kind === "distance") set = { distance: +f.distance || 0, unit: f.unit || "km" };
+    else set = { weight: +f.weight || 0, reps: +f.reps || 0 };
+    ex.sets.push(set);
+    const after = prPrimary(ex.name, ex.kind);
+    if (after > before && before > 0) toast(`New PR on ${ex.name} — ${prLabel(ex.kind, after)} 🏆`, "badge");
+    addXp(5, "Set logged");
+  },
   "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats }); },
   "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats }; },
   "skills-goal": (f) => { state.skills.monthlyHours = +f.hours; },
