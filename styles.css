@@ -569,6 +569,28 @@ li.done .row-txt b { color: var(--ink-3); text-decoration: line-through; }
 .session-note { font-size: 13.5px; color: var(--ink-2); margin: 8px 0; white-space: pre-wrap; }
 .session .media-grid { margin: 8px 0; }
 .upload-btn { cursor: pointer; margin-top: 4px; }
+
+/* exercises & sets */
+.ex-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.ex { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+.ex-head { display: flex; align-items: center; gap: 8px; }
+.ex-head b { font-size: 14px; }
+.set-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.set-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-variant-numeric: tabular-nums; }
+.set-chip button { color: var(--ink-3); font-size: 14px; line-height: 1; }
+.set-chip button:hover { color: var(--danger); }
+
+/* exercise PR list */
+.ex-pr-list { display: flex; flex-direction: column; gap: 14px; }
+.ex-pr-list li { cursor: pointer; border-radius: 12px; padding: 6px; transition: background .15s; }
+.ex-pr-list li:hover { background: var(--surface-2); }
+.ex-pr-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.ex-pr-head b { font-size: 14.5px; }
+.pr-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #f76b15; background: color-mix(in srgb, #f76b15 14%, transparent); border-radius: 999px; padding: 4px 10px; }
+.pr-badge svg { width: 13px; height: 13px; }
+.ex-hist-list { display: flex; flex-direction: column; gap: 8px; }
+.ex-hist-list li { display: flex; flex-direction: column; gap: 4px; font-size: 13px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.ex-hist-list li:last-child { border-bottom: 0; }
 .media-add-tile {
   aspect-ratio: 1; border: 2px dashed var(--line); border-radius: 12px; background: var(--surface-2);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
