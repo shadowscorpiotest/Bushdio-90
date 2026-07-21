@@ -521,6 +521,27 @@ li.done .row-txt b { color: var(--ink-3); text-decoration: line-through; }
 .goal-list li:last-child { border-bottom: 0; }
 .goal-list li:hover { background: var(--surface-2); }
 .chip-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+.habit-list.dim { opacity: .55; }
+.habit-list.dim li { border-bottom-color: transparent; }
+.rest-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); margin: 12px 0 2px; }
+.checkbox.avoid.kept { border-color: var(--good); color: var(--good); }
+.checkbox.avoid.slip { background: var(--danger); border-color: var(--danger); color: #fff; }
+.habit-why { font-style: italic; color: var(--ink-2); background: var(--surface-2); border-radius: 12px; padding: 8px 12px; font-size: 13.5px; }
+.chip-cad { font-size: 11.5px; font-weight: 700; color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 4px 11px; }
+.detail-control { display: flex; flex-direction: column; gap: 8px; }
+.avoid-control { align-items: flex-start; }
+.big-num { font-size: 30px; font-weight: 800; display: flex; align-items: baseline; gap: 8px; }
+.big-num span { font-size: 13px; font-weight: 500; color: var(--ink-3); }
+.wd-pick { display: flex; gap: 4px; flex-wrap: wrap; }
+.wd-pick input { position: absolute; opacity: 0; pointer-events: none; }
+.wd-pick span { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; font-size: 12px; font-weight: 600; background: var(--surface-2); border: 1.5px solid transparent; cursor: pointer; color: var(--ink-2); }
+.wd-pick input:checked + span { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+.hist-row { display: flex; gap: 3px; flex-wrap: wrap; }
+.hist-row .hc { width: 12px; height: 12px; border-radius: 3px; background: var(--heat-0); }
+.hist-row .hc.met { background: var(--good); }
+.hist-row .hc.miss { background: color-mix(in srgb, var(--danger) 40%, var(--heat-0)); }
+.hist-row .hc.skip { background: var(--brand-soft); }
+.hist-row .hc.off { background: transparent; border: 1px dashed var(--line); }
 
 /* ---------- day navigation ---------- */
 .day-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
