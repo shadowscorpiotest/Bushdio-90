@@ -142,6 +142,7 @@ function defaultState() {
     workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [] },  // log[date]=[planIds]; sessions:[{id,date,category,planId,note,exercises,media}]
     nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70 }, meals: [], log: {}, shopping: [] },
     skills: { monthlyHours: 10, courses: [], log: {} }, // log[date]=minutes
+    reflections: {},           // {date: text}
     reading: { yearlyGoal: 12, books: [], log: {} },
     media: [],                 // {id,title,type,status,rating}
     university: { weeklyHours: 20, tasks: [], log: {} },
@@ -253,6 +254,7 @@ function migrate(s) {
   s.workout.sessions = s.workout.sessions || [];
   s.nutrition = s.nutrition || {};
   s.nutrition.shopping = s.nutrition.shopping || [];
+  s.reflections = s.reflections || {};
   (s.habits || []).forEach(h => {
     h.milestones = h.milestones || [];
     h.type = h.type || "build";
@@ -470,6 +472,71 @@ function cadenceLabel(h) {
   if (c.mode === "days") return (c.days || []).length === 7 ? "Daily" : (c.days || []).map(i => WD_SHORT[i]).join(" ");
   return "Daily";
 }
+
+/* ----- templates / starter library ----- */
+const HABIT_TEMPLATES = [
+  { name: "Drink water", emoji: "💧", type: "quantity", target: 2, unit: "L", why: "Energy & focus." },
+  { name: "Meditate", emoji: "🧘", type: "build", why: "Calm mind." },
+  { name: "Read", emoji: "📖", type: "quantity", target: 20, unit: "pages" },
+  { name: "Walk", emoji: "🚶", type: "quantity", target: 10000, unit: "steps" },
+  { name: "Workout", emoji: "💪", type: "build", kind: "workout", cadence: { mode: "perWeek", perWeek: 4 } },
+  { name: "Stretch", emoji: "🤸", type: "build" },
+  { name: "No sugar", emoji: "🍬", type: "avoid" },
+  { name: "No smoking", emoji: "🚭", type: "avoid" },
+  { name: "No doomscrolling", emoji: "📵", type: "avoid" },
+  { name: "Journal", emoji: "✒️", type: "build" },
+  { name: "Sleep by 11pm", emoji: "😴", type: "build" },
+  { name: "Gratitude", emoji: "🙏", type: "build" },
+  { name: "Learn a language", emoji: "🗣️", type: "build" },
+  { name: "Take vitamins", emoji: "💊", type: "build" },
+  { name: "Cold shower", emoji: "🚿", type: "build" },
+  { name: "Call family", emoji: "📞", type: "build", cadence: { mode: "perWeek", perWeek: 2 } },
+];
+function openHabitLibrary() {
+  openModal(`
+    <header class="modal-head"><h3>Habit library</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body"><p class="soft small">Tap to add — you can tweak it afterwards.</p>
+      <div class="tmpl-grid">
+        ${HABIT_TEMPLATES.map((t, i) => `<button class="tmpl-item" data-action="habit-tmpl" data-i="${i}">
+          <span class="tmpl-emoji">${t.emoji}</span><b>${esc(t.name)}</b>
+          <small>${t.type === "quantity" ? `${t.target} ${esc(t.unit || "")}` : t.type === "avoid" ? "avoid" : "build"}</small>
+        </button>`).join("")}
+      </div>
+    </div>`);
+}
+
+const WORKOUT_TEMPLATES = [
+  { name: "Push day", category: "Strength", ex: ["Bench press", "Overhead press", "Incline DB press", "Triceps pushdown"] },
+  { name: "Pull day", category: "Strength", ex: ["Pull-ups", "Barbell row", "Lat pulldown", "Biceps curl"] },
+  { name: "Leg day", category: "Strength", ex: ["Squat", "Romanian deadlift", "Leg press", "Calf raise"] },
+  { name: "Full-body calisthenics", category: "Calisthenics", ex: ["Push-ups", "Pull-ups", "Dips", "Squats", "Plank"] },
+  { name: "Upper body", category: "Strength", ex: ["Bench press", "Row", "Overhead press", "Pull-ups"] },
+  { name: "Core & mobility", category: "Mobility", ex: ["Plank", "Hollow hold", "Hip openers", "Thoracic rotations"] },
+];
+function openWorkoutLibrary() {
+  openModal(`
+    <header class="modal-head"><h3>Routine library</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body"><p class="soft small">Adds a session for the selected day, pre-filled with these exercises — then log your sets.</p>
+      <div class="tmpl-list">
+        ${WORKOUT_TEMPLATES.map((t, i) => `<button class="tmpl-row" data-action="workout-tmpl" data-i="${i}">
+          <b>${esc(t.name)}</b><small>${t.ex.join(" · ")}</small>
+        </button>`).join("")}
+      </div>
+    </div>`);
+}
+
+/* ----- daily reflection ----- */
+const REFLECTION_PROMPTS = [
+  "What went well today?",
+  "What's one small win you're proud of?",
+  "What drained you — and what can you change tomorrow?",
+  "Who or what are you grateful for right now?",
+  "What did you learn about yourself today?",
+  "If today had a title, what would it be?",
+  "What's one thing you'll do differently tomorrow?",
+  "When did you feel most like yourself today?",
+];
+const reflectionOfDay = () => REFLECTION_PROMPTS[Math.floor(Date.now() / DAY_MS) % REFLECTION_PROMPTS.length];
 
 /* ----- rollups ----- */
 const healthToday = () => state.health.log[todayIso()] || {};
@@ -969,7 +1036,7 @@ function vHabits() {
       </div>
       <div class="progress-line"><span>${isToday ? "Today's" : "That day's"} progress</span>${barHtml(pct)}<b>${pct}%</b></div>`)}
 
-    ${card("span2", cardHead(isToday ? "Today's habits" : niceDate(d, { weekday: "long", month: "short", day: "numeric" }), addBtn("New habit", "habit-add")) + (state.habits.length ? `
+    ${card("span2", cardHead(isToday ? "Today's habits" : niceDate(d, { weekday: "long", month: "short", day: "numeric" }), `<button class="btn ghost tiny" data-action="habit-library">${I.grid}Library</button>${addBtn("New habit", "habit-add")}`) + (state.habits.length ? `
       <ul class="check-list habit-list">${due.map(h => habitRow(h, d)).join("") || `<p class="soft small" style="padding:8px 4px">Nothing scheduled for this day — enjoy the rest 🌤️</p>`}</ul>
       ${rest.length ? `<p class="rest-label">Not scheduled / resting</p><ul class="check-list habit-list dim">${rest.map(h => habitRow(h, d)).join("")}</ul>` : ""}`
       : emptyMsg("target", "No habits yet — build your first ritual.", addBtn("Add a habit", "habit-add"))))}
@@ -977,6 +1044,11 @@ function vHabits() {
     ${card("streak-card", `
       <div class="streak-hero">${I.flame}<div><b>${perfectStreak()} days</b><small>current perfect streak</small></div></div>
       <p class="soft">A perfect day = every habit that was <em>due</em> is done. Rest days and skips don't break your chain.</p>`)}
+
+    ${card("reflect-card", `
+      <div class="reflect-head">${I.spark}<span>Daily reflection</span></div>
+      <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
+      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[todayIso()] || "")}</textarea>`)}
 
     ${card("", cardHead("Goals", addBtn("New goal", "goal-add")) + (state.goals.length ? `
       <ul class="goal-list">
@@ -1209,7 +1281,7 @@ function vWorkout() {
         ${weekDates().map((wd, i) => `<button class="wday ${wd === d ? "today" : ""} ${wd > todayIso() ? "future" : ""}" data-action="workout-day" data-d="${wd}"><small>${WD_SHORT[i]}</small><span class="wdot ${(state.workout.log[wd] || []).length ? "full" : ""}"></span></button>`).join("")}
       </div>`)}
 
-    ${card("span2", cardHead("Workout plan", addBtn("Add to plan", "workout-add")) + (state.workout.plan.length ? `
+    ${card("span2", cardHead("Workout plan", `<button class="btn ghost tiny" data-action="workout-library">${I.grid}Routines</button>${addBtn("Add to plan", "workout-add")}`) + (state.workout.plan.length ? `
       <ul class="check-list">
         ${state.workout.plan.map(p => {
           const on = state.workout.sessions.some(s => s.date === d && s.planId === p.id);
@@ -1754,6 +1826,22 @@ const ACTIONS = {
 
   /* habits */
   "habit-add": () => formModal("New habit", habitFormFields(), "habit-add"),
+  "habit-library": openHabitLibrary,
+  "habit-tmpl": (el) => {
+    const t = HABIT_TEMPLATES[+el.dataset.i]; if (!t) return;
+    state.habits.push({ id: uid(), name: t.name, emoji: t.emoji || "✅", type: t.type || "build", target: t.target || 0, unit: t.unit || "", why: t.why || "", cadence: t.cadence || { mode: "daily" }, kind: t.kind || "", goalId: null, milestones: [], log: {} });
+    save(); render(); toast(`Added ${t.emoji} ${t.name}`);
+  },
+  "workout-library": openWorkoutLibrary,
+  "workout-tmpl": (el) => {
+    const t = WORKOUT_TEMPLATES[+el.dataset.i]; if (!t) return;
+    const d = dayCursor("workout");
+    const sess = { id: uid(), date: d, category: t.category || "Strength", planId: null, planName: t.name, note: "", exercises: t.ex.map(n => ({ id: uid(), name: n, kind: "reps", sets: [] })), media: [] };
+    state.workout.sessions.push(sess);
+    (state.workout.log[d] = state.workout.log[d] || []).push(sess.id);
+    if (d === todayIso()) addXp(20, "Workout");
+    save(); render(); toast(`${t.name} added — log your sets 💪`);
+  },
   "habit-day": (el) => { if (el.dataset.d <= todayIso()) { setCursor("habits", el.dataset.d); render(); } },
   "habit-open": (el) => openHabitDetail(el.dataset.id),
   "habit-toggle": (el) => { toggleHabit(el.dataset.id); render(); },
@@ -2066,6 +2154,7 @@ const CHANGES = {
   "habit-note": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.note = el.value.slice(0, 600); save(); } },
   "habit-goal": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.goalId = el.value || null; save(); } },
   "habit-amount": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const was = habitMet(h, dayCursor("habits")); const e = ensureHabitEntry(h, dayCursor("habits")); e.amount = Math.max(0, +el.value || 0); if (!was && habitMet(h, dayCursor("habits")) && dayCursor("habits") === todayIso()) addXp(10, h.name); save(); render(); openHabitDetail(h.id); } },
+  "reflection": (el) => { const v = el.value.trim(); if (v) state.reflections[todayIso()] = v.slice(0, 1000); else delete state.reflections[todayIso()]; save(); },
   "session-media": (el) => {
     const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (!s) return;
     storeMediaFile(el.files[0], (ref) => { s.media = s.media || []; s.media.push(ref); save(); render(); toast(`${ref.kind === "video" ? "Video" : "Photo"} added 📎`); });
