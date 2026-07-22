@@ -215,16 +215,16 @@ function seedState(s) {
     { id: uid(), name: "Digital Marketing",    progress: 20 },
   ];
   s.reading.books = [
-    { id: uid(), title: "Atomic Habits", author: "James Clear", emoji: "⚛️", status: "current", pages: 320, page: 218, rating: 0 },
-    { id: uid(), title: "Deep Work", author: "Cal Newport", emoji: "🎯", status: "current", pages: 296, page: 40, rating: 0 },
-    { id: uid(), title: "The Psychology of Money", author: "M. Housel", emoji: "🪙", status: "done", pages: 256, page: 256, rating: 5 },
-    { id: uid(), title: "How to Win Friends…", author: "D. Carnegie", emoji: "🤝", status: "wishlist", pages: 288, page: 0, rating: 0 },
+    { id: uid(), title: "Atomic Habits", author: "James Clear", emoji: "⚛️", status: "current", pages: 320, page: 218, rating: 0, genre: "Self-help", blurb: "Tiny changes, remarkable results — the science of building good habits.", recommenders: [] },
+    { id: uid(), title: "Deep Work", author: "Cal Newport", emoji: "🎯", status: "current", pages: 296, page: 40, rating: 0, genre: "Productivity", blurb: "Rules for focused success in a distracted world.", recommenders: ["Sara"] },
+    { id: uid(), title: "The Psychology of Money", author: "M. Housel", emoji: "🪙", status: "done", pages: 256, page: 256, rating: 5, genre: "Finance", blurb: "Timeless lessons on wealth, greed, and happiness.", recommenders: ["Alex", "Jordan"] },
+    { id: uid(), title: "How to Win Friends…", author: "D. Carnegie", emoji: "🤝", status: "wishlist", pages: 288, page: 0, rating: 0, genre: "Communication", blurb: "The classic on influence and human relationships.", recommenders: [] },
   ];
   s.media = [
-    { id: uid(), title: "Interstellar",    type: "Movie",  status: "watchlist", rating: 0 },
-    { id: uid(), title: "Breaking Bad",    type: "Series", status: "watching",  rating: 0 },
-    { id: uid(), title: "The Dark Knight", type: "Movie",  status: "done",      rating: 5 },
-    { id: uid(), title: "Stranger Things", type: "Series", status: "watching",  rating: 0 },
+    { id: uid(), title: "Interstellar",    type: "Movie",  status: "watchlist", rating: 0, emoji: "🚀", genre: "Sci-Fi", year: "2014", blurb: "A team travels through a wormhole in search of a new home for humanity.", director: "Christopher Nolan", cast: "M. McConaughey, A. Hathaway", recommenders: ["Sara"] },
+    { id: uid(), title: "Breaking Bad",    type: "Series", status: "watching",  rating: 0, emoji: "🧪", genre: "Crime Drama", year: "2008", blurb: "A chemistry teacher turns to making meth to secure his family's future.", season: 3, epsDone: 28, epTotal: 62, recommenders: ["Alex"] },
+    { id: uid(), title: "The Dark Knight", type: "Movie",  status: "done",      rating: 5, emoji: "🦇", genre: "Action", year: "2008", blurb: "Batman faces the Joker, a criminal mastermind bent on chaos.", director: "Christopher Nolan", cast: "C. Bale, H. Ledger", recommenders: [] },
+    { id: uid(), title: "Stranger Things", type: "Series", status: "watching",  rating: 0, emoji: "🔦", genre: "Sci-Fi Horror", year: "2016", blurb: "Kids in a small town uncover supernatural mysteries and secret experiments.", season: 2, epsDone: 12, epTotal: 34, recommenders: ["Jordan", "Sam"] },
   ];
   s.university.tasks = [
     { id: uid(), title: "Calculus assignment", due: addDays(t, 3), done: false },
@@ -297,6 +297,31 @@ function migrate(s) {
     if (g.note == null) g.note = "";
   });
   (s.todos || []).forEach(td => { if (td.time == null) td.time = ""; if (td.habitId == null) td.habitId = ""; });
+  s.reading = s.reading || { yearlyGoal: 12, books: [], log: {} };
+  (s.reading.books || []).forEach(b => {
+    if (b.blurb == null) b.blurb = "";
+    if (!Array.isArray(b.recommenders)) b.recommenders = [];
+    if (b.notes == null) b.notes = "";
+    if (b.genre == null) b.genre = "";
+  });
+  s.media = s.media || [];
+  s.media.forEach(m => {
+    if (m.cover == null) m.cover = null;
+    if (m.emoji == null) m.emoji = m.type === "Series" ? "📺" : "🎬";
+    if (m.genre == null) m.genre = "";
+    if (m.year == null) m.year = "";
+    if (m.blurb == null) m.blurb = "";
+    if (m.notes == null) m.notes = "";
+    if (m.favorite == null) m.favorite = false;
+    if (!Array.isArray(m.recommenders)) m.recommenders = [];
+    if (m.director == null) m.director = "";
+    if (m.cast == null) m.cast = "";
+    if (m.season == null) m.season = 1;
+    if (m.epsDone == null) m.epsDone = 0;
+    if (m.epTotal == null) m.epTotal = 0;
+    if (m.started == null) m.started = "";
+    if (m.finished == null) m.finished = "";
+  });
   return s;
 }
 
@@ -1722,11 +1747,69 @@ function bookCover(b, cls = "") {
     ? `<span class="book-cover ${cls}" style="background-image:url('${b.cover}')" role="img" aria-label="${esc(b.title)} cover"></span>`
     : `<span class="book-cover ${cls}" aria-hidden="true">${esc(b.emoji || "📘")}</span>`;
 }
-function starRow(b) {
+function starRow(b, action = "book-rate") {
   return `<div class="star-pick" role="group" aria-label="Rating">
-    ${[1, 2, 3, 4, 5].map(r => `<button class="star ${b.rating >= r ? "on" : ""}" data-action="book-rate" data-id="${b.id}" data-r="${r}" aria-label="${r} star${r > 1 ? "s" : ""}">★</button>`).join("")}
-    ${b.rating ? `<button class="star clear" data-action="book-rate" data-id="${b.id}" data-r="0" aria-label="Clear rating">✕</button>` : ""}
+    ${[1, 2, 3, 4, 5].map(r => `<button class="star ${b.rating >= r ? "on" : ""}" data-action="${action}" data-id="${b.id}" data-r="${r}" aria-label="${r} star${r > 1 ? "s" : ""}">★</button>`).join("")}
+    ${b.rating ? `<button class="star clear" data-action="${action}" data-id="${b.id}" data-r="0" aria-label="Clear rating">✕</button>` : ""}
   </div>`;
+}
+
+/* ---------- gallery shared helpers (Reading + Movies) ---------- */
+function nameColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${h} 62% 52%)`;
+}
+function recInitials(name) {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0] || "")[0] || "?").toUpperCase() + (parts.length > 1 ? (parts[parts.length - 1][0] || "").toUpperCase() : "");
+}
+/* small static avatar row shown on cards (max 4 + overflow count) */
+function recChips(list) {
+  if (!list || !list.length) return "";
+  const shown = list.slice(0, 4);
+  const extra = list.length - shown.length;
+  return `<div class="rec-row" aria-label="Recommended by ${esc(list.join(", "))}">
+    ${shown.map(n => `<span class="rec-chip" style="--rc:${nameColor(n)}" title="${esc(n)}">${esc(recInitials(n))}</span>`).join("")}
+    ${extra > 0 ? `<span class="rec-more">+${extra}</span>` : ""}
+  </div>`;
+}
+/* editable recommenders block for the detail modal */
+function recEditor(kind, id, list) {
+  return `<div class="rec-edit">
+    <span class="rec-label">${I.heart}Recommended by</span>
+    <div class="rec-chips">
+      ${(list || []).map((n, i) => `<span class="rec-chip lg"><span class="rec-ava" style="--rc:${nameColor(n)}">${esc(recInitials(n))}</span><em>${esc(n)}</em><button type="button" class="rec-x" data-action="rec-del" data-kind="${kind}" data-id="${id}" data-i="${i}" aria-label="Remove ${esc(n)}">${I.x}</button></span>`).join("") || `<small class="soft">No one yet — add who suggested it.</small>`}
+    </div>
+    <form class="rec-add" data-submit="rec-add">
+      <input type="hidden" name="kind" value="${kind}"><input type="hidden" name="id" value="${id}">
+      <input type="text" name="name" placeholder="Add a name…" maxlength="24" aria-label="Recommender name">
+      <button class="btn tiny" type="submit">${I.plus}Add</button>
+    </form>
+  </div>`;
+}
+function starsStatic(rating) {
+  return rating ? `<span class="gc-stars" aria-label="${rating} of 5 stars">${"★".repeat(rating)}<span class="off">${"★".repeat(5 - rating)}</span></span>` : "";
+}
+/* the poster gallery card, reused by Reading and Movies */
+function posterCard(o) {
+  const cover = o.cover
+    ? `<span class="gc-cover" style="background-image:url('${o.cover}')" role="img" aria-label="${esc(o.title)} cover"></span>`
+    : `<span class="gc-cover ph" aria-hidden="true">${esc(o.emoji || "📘")}</span>`;
+  return `<button class="gallery-card" data-action="${o.action}" data-id="${o.id}" aria-label="Open ${esc(o.title)}">
+    <span class="gc-poster">
+      ${cover}
+      ${o.favorite ? `<span class="gc-fav" aria-hidden="true">♥</span>` : ""}
+      ${o.badge ? `<span class="gc-badge">${o.badge}</span>` : ""}
+    </span>
+    <span class="gc-body">
+      <b class="gc-title">${esc(o.title)}</b>
+      ${o.sub ? `<small class="gc-sub">${esc(o.sub)}</small>` : ""}
+      ${starsStatic(o.rating)}
+      ${o.blurb ? `<small class="gc-blurb">${esc(o.blurb)}</small>` : ""}
+      ${recChips(o.recommenders)}
+    </span>
+  </button>`;
 }
 
 function vReading() {
@@ -1749,22 +1832,18 @@ function vReading() {
     ${card("span2", `
       <div class="tab-row">${tabs.map(([id, lbl]) => `<button class="tab ${tab === id ? "on" : ""}" data-action="reading-tab" data-id="${id}">${lbl}</button>`).join("")}
         <span class="spacer"></span>${addBtn("Add book", "book-add")}</div>
-      ${books.length ? `<ul class="book-list">
+      ${books.length ? `<div class="gallery">
         ${books.map(b => {
           const pct = Math.round(100 * (b.page || 0) / (b.pages || 1));
-          return `<li class="book-row" data-action="book-open" data-id="${b.id}">
-            ${bookCover(b)}
-            <span class="row-txt">
-              <b>${esc(b.title)}${b.favorite ? ` <span class="fav-dot" aria-label="Favorite">♥</span>` : ""}</b>
-              <small>${esc(b.author)}${b.genre ? ` · ${esc(b.genre)}` : ""}</small>
-              ${b.status === "current" ? barHtml(pct, "#0091ff") : ""}
-              ${b.rating ? `<small class="stars">${"★".repeat(b.rating)}${"☆".repeat(5 - b.rating)}</small>` : ""}
-            </span>
-            ${b.status === "current" ? `<span class="pct">${pct}%</span>` : ""}
-            <span class="row-open">${I.plus}</span>
-          </li>`;
+          const badge = b.status === "current" ? `${pct}%` : b.status === "done" ? "✓ Read" : "Wishlist";
+          return posterCard({
+            id: b.id, action: "book-open", cover: b.cover, emoji: b.emoji || "📘",
+            title: b.title, sub: [b.author, b.genre].filter(Boolean).join(" · "),
+            rating: b.rating, blurb: b.blurb, favorite: b.favorite, badge,
+            recommenders: b.recommenders,
+          });
         }).join("")}
-      </ul>` : emptyMsg("book", tab === "done" ? "No finished books yet — the first one is the sweetest." : "Nothing here yet.", addBtn("Add a book", "book-add"))}`)}
+      </div>` : emptyMsg("book", tab === "done" ? "No finished books yet — the first one is the sweetest." : "Nothing here yet.", addBtn("Add a book", "book-add"))}`)}
   </div>`;
 }
 
@@ -1801,7 +1880,9 @@ function openBookDetail(id) {
         </div>` : ""}
       ${b.status === "wishlist" ? `<button class="btn primary slim" data-action="book-start-d" data-id="${b.id}">${I.book}Start reading</button>` : ""}
       ${b.status === "done" ? `<p class="soft">${I.check} Finished${b.finished ? ` · ${niceDate(b.finished)}` : ""}</p><button class="btn ghost slim" data-action="book-reread" data-id="${b.id}">Read again</button>` : ""}
+      <label class="fld"><span>Blurb <small class="soft">— one line for the gallery card</small></span><input type="text" data-change="book-blurb" data-id="${b.id}" placeholder="A short hook or synopsis…" maxlength="140" value="${esc(b.blurb || "")}"></label>
       <label class="fld"><span>Notes &amp; thoughts</span><textarea data-change="book-notes" data-id="${b.id}" placeholder="What did you think? Favorite quotes, takeaways…" maxlength="1200">${esc(b.notes || "")}</textarea></label>
+      ${recEditor("book", b.id, b.recommenders)}
       <div class="pill-row">
         <button class="btn ghost" data-action="book-edit" data-id="${b.id}">${I.edit}Edit details</button>
         <button class="btn danger" data-action="book-del-d" data-id="${b.id}">${I.trash}Delete</button>
@@ -1832,25 +1913,104 @@ function processCover(file, cb, maxW = 240) {
 }
 
 /* ---------- media ---------- */
+function mediaSub(m) {
+  const bits = [m.type];
+  if (m.year) bits.push(m.year);
+  if (m.genre) bits.push(m.genre);
+  return bits.join(" · ");
+}
+function mediaStats() {
+  const done = state.media.filter(m => m.status === "done");
+  const rated = state.media.filter(m => m.rating > 0);
+  const avg = rated.length ? (rated.reduce((a, m) => a + m.rating, 0) / rated.length).toFixed(1) : "—";
+  return {
+    watching: state.media.filter(m => m.status === "watching").length,
+    done: done.length, avg, favs: state.media.filter(m => m.favorite).length,
+  };
+}
 function vMedia() {
   const tab = state._mediaTab || "watchlist";
   const tabs = [["watchlist", "Watchlist"], ["watching", "Watching"], ["done", "Completed"]];
-  const items = state.media.filter(m => m.status === tab);
+  const items = state.media
+    .filter(m => m.status === tab)
+    .sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0));
+  const st = mediaStats();
   return `
   <div class="grid">
     ${card("span2", `
+      <div class="goal-row">
+        <div><p class="soft">Movies &amp; series</p><h3>${st.done} completed${st.watching ? ` · ${st.watching} watching` : ""}</h3></div>
+        <span class="big-ic" style="--a:#d6409f">${I.film}</span>
+      </div>
+      <div class="read-stats">
+        <div><b>${st.watching}</b><small>watching now</small></div>
+        <div><b>${st.avg}</b><small>avg rating</small></div>
+        <div><b>${st.favs}</b><small>favorites</small></div>
+      </div>`)}
+    ${card("span2", `
       <div class="tab-row">${tabs.map(([id, lbl]) => `<button class="tab ${tab === id ? "on" : ""}" data-action="media-tab" data-id="${id}">${lbl}</button>`).join("")}
         <span class="spacer"></span>${addBtn("Add title", "media-add")}</div>
-      ${items.length ? `<ul class="media-list">
-        ${items.map(m => `
-          <li>
-            <span class="media-poster" aria-hidden="true">${m.type === "Series" ? "📺" : "🎬"}</span>
-            <span class="row-txt"><b>${esc(m.title)}</b><small>${m.type}${m.rating ? ` · ${"★".repeat(m.rating)}` : ""}</small></span>
-            ${tab !== "done" ? `<button class="btn tiny" data-action="media-advance" data-id="${m.id}">${tab === "watchlist" ? "Start" : "Finish"}</button>` : ""}
-            <button class="icon-btn ghost" data-action="media-del" data-id="${m.id}" aria-label="Delete title">${I.trash}</button>
-          </li>`).join("")}
-      </ul>` : emptyMsg("film", "Nothing here — add something to watch.", addBtn("Add a title", "media-add"))}`)}
+      ${items.length ? `<div class="gallery">
+        ${items.map(m => {
+          const isSeries = m.type === "Series";
+          const pct = isSeries && m.epTotal ? Math.round(100 * (m.epsDone || 0) / m.epTotal) : 0;
+          const badge = m.status === "done" ? "✓ Watched"
+            : isSeries && m.epTotal ? `S${m.season || 1} · ${pct}%`
+            : m.status === "watching" ? "Watching" : "Watchlist";
+          return posterCard({
+            id: m.id, action: "media-open", cover: m.cover, emoji: m.emoji || (isSeries ? "📺" : "🎬"),
+            title: m.title, sub: mediaSub(m), rating: m.rating, blurb: m.blurb,
+            favorite: m.favorite, badge, recommenders: m.recommenders,
+          });
+        }).join("")}
+      </div>` : emptyMsg("film", "Nothing here — add something to watch.", addBtn("Add a title", "media-add"))}`)}
   </div>`;
+}
+
+function openMediaDetail(id) {
+  const m = state.media.find(x => x.id === id);
+  if (!m) { closeModal(); return; }
+  const isSeries = m.type === "Series";
+  const pct = isSeries && m.epTotal ? Math.round(100 * (m.epsDone || 0) / m.epTotal) : 0;
+  openModal(`
+    <header class="modal-head"><h3>${isSeries ? "Series" : "Movie"} details</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body book-detail">
+      <div class="bd-top">
+        ${m.cover ? `<span class="bd-cover" style="background-image:url('${m.cover}')" role="img" aria-label="${esc(m.title)} cover"></span>` : `<span class="bd-cover ph">${esc(m.emoji || (isSeries ? "📺" : "🎬"))}</span>`}
+        <div class="bd-meta">
+          <h3 class="bd-title">${esc(m.title)}</h3>
+          <p class="soft">${esc(mediaSub(m))}</p>
+          ${m.director ? `<p class="soft">Dir. ${esc(m.director)}</p>` : ""}
+          ${m.cast ? `<p class="soft cast">${esc(m.cast)}</p>` : ""}
+          ${starRow(m, "media-rate")}
+          <button class="btn tiny ${m.favorite ? "fav-on" : "ghost"}" data-action="media-fav" data-id="${m.id}">${I.heart}${m.favorite ? "Favorite" : "Add favorite"}</button>
+        </div>
+      </div>
+      <label class="cover-upload">
+        <input type="file" accept="image/*" data-change="media-cover-pick" data-id="${m.id}" hidden>
+        <span class="btn ghost slim">${I.upload}${m.cover ? "Change poster" : "Upload poster"}</span>
+        ${m.cover ? `<button type="button" class="btn ghost slim" data-action="media-cover-clear" data-id="${m.id}">${I.trash}Remove</button>` : ""}
+      </label>
+      ${isSeries ? `
+        <div class="progress-line"><span>Season ${m.season || 1} · Episode ${m.epsDone || 0}${m.epTotal ? ` / ${m.epTotal}` : ""}</span>${m.epTotal ? barHtml(pct, "#d6409f") : ""}${m.epTotal ? `<b>${pct}%</b>` : ""}</div>
+        <div class="pill-row">
+          <button class="btn tiny" data-action="media-ep" data-id="${m.id}" data-d="-1">−1 ep</button>
+          <button class="btn tiny good" data-action="media-ep" data-id="${m.id}" data-d="1">+1 ep</button>
+          <input class="num-input" type="number" min="0" value="${m.epsDone || 0}" data-change="media-ep-set" data-id="${m.id}" aria-label="Episodes watched">
+          <span class="soft ep-of">of</span>
+          <input class="num-input" type="number" min="0" value="${m.epTotal || 0}" data-change="media-eptotal-set" data-id="${m.id}" aria-label="Total episodes">
+        </div>` : ""}
+      ${m.status === "watchlist" ? `<button class="btn primary slim" data-action="media-advance" data-id="${m.id}">${I.film}Start watching</button>` : ""}
+      ${m.status === "watching" ? `<button class="btn good slim" data-action="media-advance" data-id="${m.id}">${I.check}Mark completed 🎉</button>` : ""}
+      ${m.status === "done" ? `<p class="soft">${I.check} Completed${m.finished ? ` · ${niceDate(m.finished)}` : ""}</p><button class="btn ghost slim" data-action="media-rewatch" data-id="${m.id}">Watch again</button>` : ""}
+      <label class="fld"><span>Blurb <small class="soft">— one line for the gallery card</small></span><input type="text" data-change="media-blurb" data-id="${m.id}" placeholder="A short hook or synopsis…" maxlength="140" value="${esc(m.blurb || "")}"></label>
+      <label class="fld"><span>Review &amp; thoughts</span><textarea data-change="media-notes" data-id="${m.id}" placeholder="What did you think? Favorite scenes, takeaways…" maxlength="1200">${esc(m.notes || "")}</textarea></label>
+      ${recEditor("media", m.id, m.recommenders)}
+      <div class="pill-row">
+        <button class="btn ghost" data-action="media-edit" data-id="${m.id}">${I.edit}Edit details</button>
+        <button class="btn danger" data-action="media-del-d" data-id="${m.id}">${I.trash}Delete</button>
+      </div>
+    </div>`);
 }
 
 /* ---------- university ---------- */
@@ -2350,15 +2510,64 @@ const ACTIONS = {
   },
   "book-del-d": (el) => { state.reading.books = state.reading.books.filter(b => b.id !== el.dataset.id); save(); closeModal(); render(); toast("Book removed"); },
 
+  /* recommenders (shared by books + media) */
+  "rec-del": (el) => {
+    const list = el.dataset.kind === "media"
+      ? (state.media.find(x => x.id === el.dataset.id) || {}).recommenders
+      : (state.reading.books.find(x => x.id === el.dataset.id) || {}).recommenders;
+    if (!list) return;
+    list.splice(+el.dataset.i, 1);
+    save();
+    (el.dataset.kind === "media" ? openMediaDetail : openBookDetail)(el.dataset.id);
+  },
+
   /* media */
   "media-tab": (el) => { state._mediaTab = el.dataset.id; render(); },
-  "media-add": () => formModal("Add to watchlist",
-    fld("Title", txt("title", "e.g. Interstellar")) + fld("Type", `<select name="type"><option>Movie</option><option>Series</option></select>`), "media-add"),
+  "media-add": () => formModal("Add a title",
+    fld("Title", txt("title", "e.g. Interstellar")) +
+    `<div class="fld-row">${fld("Type", `<select name="type"><option>Movie</option><option>Series</option></select>`)}${fld("Year", txt("year", "e.g. 2014", "", false))}</div>` +
+    fld("Genre", txt("genre", "e.g. Sci-Fi", "", false)) +
+    fld("Emoji (used if no poster)", txt("emoji", "🎬", "🎬", false)), "media-add"),
+  "media-open": (el) => openMediaDetail(el.dataset.id),
+  "media-rate": (el) => { const m = state.media.find(x => x.id === el.dataset.id); if (m) { m.rating = +el.dataset.r; save(); checkBadges(); render(); openMediaDetail(m.id); } },
+  "media-fav": (el) => { const m = state.media.find(x => x.id === el.dataset.id); if (m) { m.favorite = !m.favorite; if (m.favorite) toast("Added to favorites ♥"); save(); render(); openMediaDetail(m.id); } },
+  "media-cover-clear": (el) => { const m = state.media.find(x => x.id === el.dataset.id); if (m) { m.cover = null; save(); render(); openMediaDetail(m.id); } },
+  "media-ep": (el) => {
+    const m = state.media.find(x => x.id === el.dataset.id);
+    if (!m) return;
+    const max = m.epTotal || Infinity;
+    m.epsDone = clamp((m.epsDone || 0) + +el.dataset.d, 0, max);
+    if (m.status === "watchlist" && m.epsDone > 0) m.status = "watching";
+    save(); render(); openMediaDetail(m.id);
+  },
   "media-advance": (el) => {
     const m = state.media.find(x => x.id === el.dataset.id);
-    if (m.status === "watchlist") { m.status = "watching"; save(); render(); }
-    else formModal(`Finished “${esc(m.title)}”`, fld("Rating", `<select name="rating">${[5, 4, 3, 2, 1].map(r => `<option value="${r}">${"★".repeat(r)}</option>`).join("")}</select>`) + `<input type="hidden" name="id" value="${m.id}">`, "media-finish", "Done");
+    if (!m) return;
+    if (m.status === "watchlist") { m.status = "watching"; m.started = todayIso(); }
+    else if (m.status === "watching") {
+      m.status = "done"; m.finished = todayIso();
+      if (m.epTotal) m.epsDone = m.epTotal;
+      addXp(10, `Finished ${m.title}`);
+      state._mediaTab = "done";
+    }
+    save(); checkBadges(); render(); openMediaDetail(m.id);
   },
+  "media-rewatch": (el) => { const m = state.media.find(x => x.id === el.dataset.id); if (m) { m.status = "watching"; m.epsDone = 0; m.started = todayIso(); state._mediaTab = "watching"; save(); render(); openMediaDetail(m.id); } },
+  "media-edit": (el) => {
+    const m = state.media.find(x => x.id === el.dataset.id);
+    if (!m) return;
+    const isSeries = m.type === "Series";
+    formModal("Edit title",
+      fld("Title", txt("title", "", m.title)) +
+      `<div class="fld-row">${fld("Type", `<select name="type"><option${!isSeries ? " selected" : ""}>Movie</option><option${isSeries ? " selected" : ""}>Series</option></select>`)}${fld("Year", txt("year", "", m.year || "", false))}</div>` +
+      fld("Genre", txt("genre", "", m.genre || "", false)) +
+      (isSeries
+        ? `<div class="fld-row">${fld("Current season", num("season", m.season || 1, 1))}${fld("Total episodes", num("epTotal", m.epTotal || 0, 0))}</div>`
+        : fld("Director", txt("director", "", m.director || "", false)) + fld("Cast", txt("cast", "", m.cast || "", false))) +
+      fld("Emoji", txt("emoji", "", m.emoji || (isSeries ? "📺" : "🎬"), false)) +
+      `<input type="hidden" name="id" value="${m.id}">`, "media-edit");
+  },
+  "media-del-d": (el) => { state.media = state.media.filter(m => m.id !== el.dataset.id); save(); closeModal(); render(); toast("Title removed"); },
   "media-del": (el) => { state.media = state.media.filter(m => m.id !== el.dataset.id); save(); render(); },
 
   /* work / projects / social / memories */
@@ -2473,13 +2682,34 @@ const SUBMITS = {
   "uni-goal": (f) => { state.university.weeklyHours = +f.hours; },
   "course-add": (f) => { state.skills.courses.push({ id: uid(), name: f.name, progress: 0 }); },
   "uni-task-add": (f) => { state.university.tasks.push({ id: uid(), title: f.title, due: f.due, done: false }); },
-  "book-add": (f) => { state.reading.books.push({ id: uid(), title: f.title, author: f.author || "Unknown", emoji: f.emoji || "📘", cover: f.cover || null, genre: f.genre || "", notes: "", favorite: false, status: "current", pages: +f.pages, page: 0, rating: 0, started: todayIso() }); },
+  "book-add": (f) => { state.reading.books.push({ id: uid(), title: f.title, author: f.author || "Unknown", emoji: f.emoji || "📘", cover: f.cover || null, genre: f.genre || "", blurb: "", notes: "", recommenders: [], favorite: false, status: "current", pages: +f.pages, page: 0, rating: 0, started: todayIso() }); },
   "book-edit": (f) => {
     const b = state.reading.books.find(x => x.id === f.id);
     if (b) { b.title = f.title; b.author = f.author || b.author; b.pages = Math.max(1, +f.pages); b.page = clamp(b.page, 0, b.pages); b.genre = f.genre || ""; b.emoji = f.emoji || b.emoji; }
   },
-  "media-add": (f) => { state.media.push({ id: uid(), title: f.title, type: f.type, status: "watchlist", rating: 0 }); },
-  "media-finish": (f) => { const m = state.media.find(x => x.id === f.id); if (m) { m.status = "done"; m.rating = +f.rating; addXp(10, `Finished ${m.title}`); } },
+  "media-add": (f) => {
+    const type = f.type === "Series" ? "Series" : "Movie";
+    state.media.push({ id: uid(), title: f.title, type, status: "watchlist", rating: 0,
+      emoji: f.emoji || (type === "Series" ? "📺" : "🎬"), cover: null, genre: f.genre || "", year: f.year || "",
+      blurb: "", notes: "", favorite: false, recommenders: [], director: "", cast: "",
+      season: 1, epsDone: 0, epTotal: 0, started: "", finished: "" });
+  },
+  "rec-add": (f) => {
+    if (!f.name) return true;
+    const item = f.kind === "media"
+      ? state.media.find(x => x.id === f.id)
+      : state.reading.books.find(x => x.id === f.id);
+    if (item) { item.recommenders = item.recommenders || []; if (item.recommenders.length < 12) item.recommenders.push(f.name); }
+    return true;
+  },
+  "media-edit": (f) => {
+    const m = state.media.find(x => x.id === f.id);
+    if (!m) return;
+    m.title = f.title; m.type = f.type === "Series" ? "Series" : "Movie";
+    m.year = f.year || ""; m.genre = f.genre || ""; m.emoji = f.emoji || m.emoji;
+    if (m.type === "Series") { m.season = Math.max(1, +f.season || 1); m.epTotal = Math.max(0, +f.epTotal || 0); m.epsDone = clamp(m.epsDone || 0, 0, m.epTotal || Infinity); }
+    else { m.director = f.director || ""; m.cast = f.cast || ""; }
+  },
   "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, done: false }); },
   "project-add": (f) => { state.projects.push({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
@@ -2521,6 +2751,34 @@ const CHANGES = {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
     if (b) { b.notes = el.value.slice(0, 1200); save(); }   // no re-render: keep the textarea focused
   },
+  "book-blurb": (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id);
+    if (b) { b.blurb = el.value.slice(0, 140); save(); }
+  },
+  "media-blurb": (el) => {
+    const m = state.media.find(x => x.id === el.dataset.id);
+    if (m) { m.blurb = el.value.slice(0, 140); save(); }
+  },
+  "media-notes": (el) => {
+    const m = state.media.find(x => x.id === el.dataset.id);
+    if (m) { m.notes = el.value.slice(0, 1200); save(); }
+  },
+  "media-ep-set": (el) => {
+    const m = state.media.find(x => x.id === el.dataset.id);
+    if (m) { m.epsDone = clamp(+el.value || 0, 0, m.epTotal || Infinity); if (m.status === "watchlist" && m.epsDone > 0) m.status = "watching"; save(); render(); openMediaDetail(m.id); }
+  },
+  "media-eptotal-set": (el) => {
+    const m = state.media.find(x => x.id === el.dataset.id);
+    if (m) { m.epTotal = Math.max(0, +el.value || 0); m.epsDone = clamp(m.epsDone || 0, 0, m.epTotal || Infinity); save(); render(); openMediaDetail(m.id); }
+  },
+  "media-cover-pick": (el) => {
+    const m = state.media.find(x => x.id === el.dataset.id);
+    if (!m) return;
+    processCover(el.files[0], (dataUrl) => {
+      try { m.cover = dataUrl; save(); render(); openMediaDetail(m.id); toast("Poster updated 🎬"); }
+      catch { toast("That image is too large to save"); }
+    });
+  },
   "book-cover-pick": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
     if (!b) return;
@@ -2555,7 +2813,16 @@ function bindEvents() {
     const data = Object.fromEntries(new FormData(form).entries());
     Object.keys(data).forEach(k => { if (typeof data[k] === "string") data[k] = data[k].trim(); });
     const fn = SUBMITS[form.dataset.submit];
-    if (fn) { fn(data); save(); closeModal(); checkBadges(); render(); }
+    if (fn) {
+      const keepOpen = fn(data) === true;   // rec-add reopens the detail modal itself
+      save();
+      if (!keepOpen) closeModal();
+      checkBadges();
+      render();
+      if (keepOpen && form.dataset.submit === "rec-add") {
+        (data.kind === "media" ? openMediaDetail : openBookDetail)(data.id);
+      }
+    }
   });
   document.addEventListener("change", (e) => {
     const el = e.target.closest("[data-change]");
