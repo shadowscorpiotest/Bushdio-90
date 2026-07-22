@@ -959,9 +959,40 @@ li.done .checkbox { animation: checkPop .3s ease; }
 
 /* task list */
 .task-add { display: flex; gap: 8px; margin-top: 10px; }
-.task-add input { flex: 1; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); padding: 9px 12px; }
+.task-add input[name="text"] { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); padding: 9px 12px; }
+.task-add .task-time-in { width: 118px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); padding: 9px 10px; }
 .task-list li { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
 .task-list li .row-txt b { font-weight: 500; }
+
+/* today's focus — timeline to-do list */
+.todo-list { display: flex; flex-direction: column; }
+.todo { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+.todo:last-child { border-bottom: 0; }
+.todo-time { flex: 0 0 46px; font-size: 12px; font-weight: 700; color: var(--brand); text-align: right; font-variant-numeric: tabular-nums; }
+.todo-time:empty::before { content: "·"; color: var(--ink-3); }
+.todo .row-txt { flex: 1; min-width: 0; cursor: pointer; }
+.todo .row-txt b { font-weight: 500; }
+.todo .row-txt small { display: inline-flex; align-items: center; gap: 4px; color: var(--brand); }
+.todo .row-txt small svg { width: 12px; height: 12px; }
+.todo.done .row-txt b { text-decoration: line-through; color: var(--ink-3); }
+.done-wrap { margin-top: 12px; }
+.done-wrap summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-3); display: flex; align-items: center; gap: 6px; padding: 6px 2px; }
+.done-wrap summary svg { width: 15px; height: 15px; color: var(--good); }
+.done-list { opacity: .7; margin-top: 4px; }
+
+/* today's habit chips */
+.habit-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.habit-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 999px; padding: 7px 13px; transition: transform .18s var(--ease-spring), border-color .2s, background .2s, color .2s; }
+.habit-chip:hover { transform: translateY(-1px); border-color: var(--a); }
+.habit-chip svg { width: 14px; height: 14px; }
+.habit-chip.on { background: color-mix(in srgb, var(--a) 14%, transparent); border-color: var(--a); color: var(--a); }
+
+/* mini agenda (upcoming) */
+.mini-agenda { display: flex; flex-direction: column; gap: 8px; }
+.mini-agenda li { display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 4px 2px; border-radius: 10px; }
+.mini-agenda li:hover { background: var(--surface-2); }
+.mini-agenda .row-txt { flex: 1; min-width: 0; }
+.mini-agenda .row-txt b { font-size: 14px; font-weight: 600; }
 
 /* section label chips row */
 .chip-row { display: flex; gap: 8px; flex-wrap: wrap; }

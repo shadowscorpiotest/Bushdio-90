@@ -1008,12 +1008,71 @@ function openReflectModal() {
       <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[todayIso()] || "")}</textarea>
       <div class="modal-foot"><button type="button" class="btn primary" data-action="modal-close">Done</button></div></div>`);
 }
+/* keyword → habit suggestion (the offline "smart" half of Both) */
+function suggestHabitForText(text) {
+  const s = (text || "").toLowerCase();
+  const rules = [
+    [/(workout|calisthen|gym|lift|weights|cardio|run|running|training|exercise|yoga|dance|pilates|hiit)/, h => h.kind === "workout" || /workout|exercise|gym|train/i.test(h.name)],
+    [/(reflect|journal|diary|gratitude)/, h => /journal|reflect|gratitude|diary/i.test(h.name)],
+    [/(read|book|pages|chapter)/, h => /read/i.test(h.name)],
+    [/(water|hydrate|drink)/, h => /water|hydrate|drink/i.test(h.name)],
+    [/(meditat|breath|mindful)/, h => /meditat|breath|mindful/i.test(h.name)],
+    [/(walk|steps|stroll)/, h => /walk|step/i.test(h.name)],
+    [/(sleep|bed|rest)/, h => /sleep|bed/i.test(h.name)],
+    [/(study|learn|course|lesson|language)/, h => /learn|study|language|course/i.test(h.name)],
+  ];
+  for (const [re, pred] of rules) if (re.test(s)) { const h = state.habits.find(pred); if (h) return h.id; }
+  const h2 = state.habits.find(h => { const n = h.name.toLowerCase(); return n && (s.includes(n) || n.split(/\s+/).some(w => w.length > 3 && s.includes(w))); });
+  return h2 ? h2.id : "";
+}
+function completeHabitToday(habitId) {
+  const h = state.habits.find(x => x.id === habitId); if (!h) return;
+  const d = todayIso();
+  if (habitMet(h, d) || h.type === "avoid") return;
+  const e = ensureHabitEntry(h, d);
+  if (h.type === "quantity") e.amount = h.target || 1; else e.done = true;
+  addXp(10, h.name);
+}
+function taskRow(td) {
+  const h = td.habitId ? state.habits.find(x => x.id === td.habitId) : null;
+  return `<li class="todo ${td.done ? "done" : ""}">
+    <span class="todo-time">${td.time || ""}</span>
+    <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
+    <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${h ? `<small>${I.target} ${esc(h.name)}</small>` : ""}</span>
+    <button class="icon-btn ghost" data-action="todo-open" data-id="${td.id}" aria-label="Edit task">${I.chevR}</button>
+  </li>`;
+}
+function openTaskDetail(id) {
+  const td = state.todos.find(x => x.id === id); if (!td) { closeModal(); return; }
+  openModal(`<header class="modal-head"><h3>Task</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <label class="fld"><span>Task</span><input type="text" data-change="task-text" data-id="${td.id}" value="${esc(td.text)}" maxlength="120"></label>
+      <div class="fld-row">
+        <label class="fld"><span>Time (optional)</span><input type="time" data-change="task-time" data-id="${td.id}" value="${td.time || ""}"></label>
+        <label class="fld"><span>Counts toward habit</span>
+          <select data-change="task-habit" data-id="${td.id}">
+            <option value="">— none —</option>
+            ${state.habits.map(h => `<option value="${h.id}" ${td.habitId === h.id ? "selected" : ""}>${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}
+          </select></label>
+      </div>
+      <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
+    </div>`);
+}
+function taskAddForm() {
+  return `<form data-submit="todo-add" class="task-add">
+    <input name="text" placeholder="Add a task…" autocomplete="off" required maxlength="120">
+    <input name="time" type="time" class="task-time-in" aria-label="Time (optional)">
+    <button class="btn primary" type="submit" aria-label="Add task">${I.plus}</button>
+  </form>`;
+}
 function vToday() {
   const li = levelInfo(), t = todayIso();
-  const agenda = todayAgenda();
-  const ordered = [...agenda].sort((a, b) => ((a.nav ? 2 : a.done ? 1 : 0) - (b.nav ? 2 : b.done ? 1 : 0)));
-  const remaining = agenda.filter(a => !a.done && !a.nav).length;
   const todos = state.todos.filter(td => !td.date || td.date === t);
+  const undone = todos.filter(td => !td.done).sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+  const done = todos.filter(td => td.done);
+  const dueHabits = state.habits.filter(h => isScheduled(h, t) && !isSkipped(h, t));
+  const deadlines = state.university.tasks.filter(k => !k.done && k.due <= addDays(t, 5)).sort((a, b) => a.due < b.due ? -1 : 1);
+  const remaining = undone.length + dueHabits.filter(h => !habitMet(h, t)).length;
   return `
   <div class="grid dash">
     ${card("today-hero span2", `
@@ -1035,18 +1094,21 @@ function vToday() {
         <div class="stat"><b data-count="${Object.keys(state.badges).length}">0</b><span>${I.medal} badges</span></div>
       </div>`)}
 
-    ${card("span2", cardHead(`Today's focus <small class="soft">${remaining} left</small>`) + (ordered.length ? `
-      <div class="agenda-list">${ordered.map(agendaRow).join("")}</div>` : `<div class="agenda-empty"><span class="big">🌿</span><p>Nothing on the agenda — add a task or a habit.</p></div>`))}
+    ${card("span2", cardHead(`Today's focus <small class="soft">${undone.length} to do</small>`) + `
+      <ul class="todo-list">${undone.length ? undone.map(taskRow).join("") : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`}</ul>
+      ${taskAddForm()}
+      ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
 
-    ${card("span2", cardHead("Tasks") + `
-      <ul class="check-list task-list">
-        ${todos.length ? todos.map(td => `<li class="${td.done ? "done" : ""}">
-          <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
-          <span class="row-txt"><b>${esc(td.text)}</b></span>
-          <button class="icon-btn ghost" data-action="todo-del" data-id="${td.id}" aria-label="Delete task">${I.trash}</button>
-        </li>`).join("") : `<p class="soft small" style="padding:6px 2px">No tasks yet — add one below.</p>`}
-      </ul>
-      <form data-submit="todo-add" class="task-add"><input name="text" placeholder="Add a task…" autocomplete="off" required maxlength="120"><button class="btn primary" type="submit" aria-label="Add task">${I.plus}</button></form>`)}
+    ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
+      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="ag-habit" data-id="${h.id}" style="--a:${h.color || "#6a5ae0"}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>
+      <p class="soft note">${I.spark} Add a task that "counts toward" a habit and checking it will tick the habit for you.</p>` : `<p class="soft small">No habits scheduled today.</p>`))}
+
+    ${card("", cardHead("Upcoming") + (deadlines.length ? `
+      <ul class="mini-agenda">${deadlines.map(k => `<li data-nav="university"><span class="a-ic" style="--a:#3e63dd">${I.building}</span><span class="row-txt"><b>${esc(k.title)}</b><small>university</small></span><span class="a-when">${daysUntil(k.due)}</span></li>`).join("")}</ul>` : `<p class="soft small">Nothing due soon 🎉</p>`))}
+
+    ${card("", cardHead("Reflection") + `
+      <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
+      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
   </div>`;
 }
 
@@ -1955,9 +2017,13 @@ const ACTIONS = {
   "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
   "ag-task": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); save(); render(); } },
   "ag-reflect": openReflectModal,
-  "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); save(); render(); } },
-  "todo-del": (el) => { state.todos = state.todos.filter(x => x.id !== el.dataset.id); save(); render(); },
-  "task-add": () => formModal("New task", fld("Task", txt("text", "e.g. Buy groceries")), "todo-add"),
+  "todo-open": (el) => openTaskDetail(el.dataset.id),
+  "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) { addXp(5, "Task done"); if (td.habitId) completeHabitToday(td.habitId); } save(); closeModal(); render(); } },
+  "todo-del": (el) => { state.todos = state.todos.filter(x => x.id !== el.dataset.id); save(); closeModal(); render(); },
+  "task-add": () => formModal("New task",
+    fld("Task", txt("text", "e.g. Calisthenics workout")) +
+    `<div class="fld-row"><label class="fld"><span>Time (optional)</span><input type="time" name="time"></label>
+     <label class="fld"><span>Counts toward habit</span><select name="habitId"><option value="">Auto-detect</option><option value="none">None</option>${state.habits.map(h => `<option value="${h.id}">${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</select></label></div>`, "todo-add"),
 
   /* day navigation (shared) */
   "day-prev": (el) => { const v = el.dataset.view; setCursor(v, addDays(dayCursor(v), -1)); render(); },
@@ -2284,7 +2350,11 @@ const SUBMITS = {
   "project-add": (f) => { state.projects.push({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
   "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360) }); addXp(10, "Memory saved"); },
-  "todo-add": (f) => { if (f.text) state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso() }); },
+  "todo-add": (f) => {
+    if (!f.text) return;
+    const habitId = f.habitId === "none" ? "" : (f.habitId || suggestHabitForText(f.text));
+    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "", habitId: habitId || "" });
+  },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { localStorage.removeItem(STORE_KEY); state = seedState(defaultState()); state.profile.onboarded = true; save(); },
 };
@@ -2295,7 +2365,15 @@ const CHANGES = {
   "habit-note": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.note = el.value.slice(0, 600); save(); } },
   "habit-goal": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.goalId = el.value || null; save(); } },
   "habit-amount": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const was = habitMet(h, dayCursor("habits")); const e = ensureHabitEntry(h, dayCursor("habits")); e.amount = Math.max(0, +el.value || 0); if (!was && habitMet(h, dayCursor("habits")) && dayCursor("habits") === todayIso()) addXp(10, h.name); save(); render(); openHabitDetail(h.id); } },
-  "reflection": (el) => { const v = el.value.trim(); if (v) state.reflections[todayIso()] = v.slice(0, 1000); else delete state.reflections[todayIso()]; save(); },
+  "reflection": (el) => {
+    const v = el.value.trim();
+    if (v) { state.reflections[todayIso()] = v.slice(0, 1000); const jid = suggestHabitForText("reflection journal"); if (jid) completeHabitToday(jid); }
+    else delete state.reflections[todayIso()];
+    save();
+  },
+  "task-text": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.text = el.value.slice(0, 120); save(); } },
+  "task-time": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.time = el.value || ""; save(); } },
+  "task-habit": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.habitId = el.value || ""; save(); render(); openTaskDetail(td.id); } },
   "session-media": (el) => {
     const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (!s) return;
     storeMediaFile(el.files[0], (ref) => { s.media = s.media || []; s.media.push(ref); save(); render(); toast(`${ref.kind === "video" ? "Video" : "Photo"} added 📎`); });

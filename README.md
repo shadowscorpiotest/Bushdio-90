@@ -8,7 +8,7 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 
 | Area | What it does |
 |---|---|
-| ✨ **Today** | The OS home: an animated hero (level ring, streak, count-up stats) and a **focus agenda** that pulls everything actionable today into one list — due habits, meals, tasks, deadlines and your reflection — each completed inline. Plus a **Tasks / to-do** list. |
+| ✨ **Today** | The OS home: animated hero (level ring, streak, count-up stats); **Today's Focus** is a **to-do list** with optional **times/timeline** where done items collapse into a "Done today" drawer; a task can **count toward a habit** (auto-detected or chosen) so checking it **ticks that habit**; habits live in their own **chip strip**; plus **Upcoming** deadlines and a **Reflection** that ticks your journaling habit. |
 | 🏠 **Dashboard** | Greeting, level & XP bar, day streak, today's missions (auto-completing, each worth XP), life-area grid with live progress, weekly snapshot |
 | 🎯 **Habit Tracker** | Three habit **types** — *build* (checkbox), *amount* (reach a target like 2L / 20 pages), and *avoid* (break a bad habit, shows days clean). Set a **cadence** (daily / specific weekdays / N× per week) that streaks respect, a **why** for each habit, and **skip / rest days** that don't break the chain. **Navigate any day**, add per-day **notes**, see a **4-week completion history + %**, attach **milestones**, link to a **Goal**, and mark a habit as a workout to **log it into the Workout section**. Add habits fast from a **starter library**, and end the day with a rotating **daily reflection** prompt |
 | ❤️ **Health** | Steps ring vs. goal, water counter, sleep log, mood picker, steps-per-week chart with goal line |
