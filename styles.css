@@ -604,6 +604,19 @@ input[type="color"] { width: 100%; height: 42px; border: 1px solid var(--line); 
 .media-thumb-del { position: absolute; top: 4px; right: 4px; z-index: 2; width: 26px; height: 26px; background: color-mix(in srgb, var(--surface) 78%, transparent); }
 .media-thumb-del svg { width: 14px; height: 14px; }
 
+/* ---------- workout plan & classes ---------- */
+.plan-list .row-txt.open { cursor: pointer; }
+.plan-list .reorder { display: flex; flex-direction: column; gap: 0; }
+.plan-list .reorder .icon-btn { width: 26px; height: 20px; }
+.plan-list .reorder .icon-btn svg { width: 14px; height: 14px; transform: rotate(90deg); }
+.plan-list .reorder .icon-btn[disabled] { opacity: .3; }
+.class-list { display: flex; flex-direction: column; }
+.class-list li { display: flex; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line); }
+.class-list li:last-child { border-bottom: 0; }
+.class-list li.spent .row-txt b { color: var(--ink-2); }
+.class-list .row-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.class-list .row-txt b { font-size: 14.5px; font-weight: 600; }
+
 /* ---------- workout sessions ---------- */
 .session-list { display: flex; flex-direction: column; gap: 12px; }
 .session { background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }

@@ -10,6 +10,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(+n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 const DAY_MS = 86400000;
 const iso = (d) => {
@@ -140,7 +141,7 @@ function defaultState() {
     todos: [],                 // {id,text,done,date}
     habits: [],                // {id,name,emoji,kind,goalId,milestones,log:{date:{done,note,workoutId}}}
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
-    workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [] },  // log[date]=[planIds]; sessions:[{id,date,category,planId,note,exercises,media}]
+    workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
     nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70 }, meals: [], log: {}, shopping: [] },
     skills: { monthlyHours: 10, courses: [], log: {} }, // log[date]=minutes
     reflections: {},           // {date: text}
@@ -268,6 +269,8 @@ function migrate(s) {
   s.todos = s.todos || [];
   s.workout = s.workout || {};
   s.workout.sessions = s.workout.sessions || [];
+  s.workout.classes = s.workout.classes || [];
+  (s.workout.plan || []).forEach(p => { if (!Array.isArray(p.days)) p.days = []; if (p.time == null) p.time = ""; if (p.focus == null) p.focus = ""; if (!Array.isArray(p.exercises)) p.exercises = []; });
   s.nutrition = s.nutrition || {};
   s.nutrition.shopping = s.nutrition.shopping || [];
   s.reflections = s.reflections || {};
@@ -1476,7 +1479,22 @@ function vHealth() {
 }
 
 /* ---------- workout ---------- */
-const WORKOUT_CATS = ["Calisthenics", "Strength", "Cardio", "Mobility", "Yoga"];
+const WORKOUT_CATS = ["Calisthenics", "Strength", "Cardio", "Mobility", "Yoga", "Class"];
+function planFormFields(p) {
+  p = p || {};
+  return fld("Name", txt("name", "e.g. Pull-ups", p.name || "")) +
+    fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option ${p.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>`) +
+    `<div class="fld-row">${fld("Minutes", `<input type="number" name="minutes" value="${p.minutes || 30}" min="0">`)}${fld("Sets — optional", `<input type="number" name="sets" value="${p.sets || ""}" min="0" placeholder="—">`)}${fld("Reps — optional", `<input type="number" name="reps" value="${p.reps || ""}" min="0" placeholder="—">`)}</div>` +
+    `<div class="fld-row"><label class="fld"><span>On days (optional)</span>${weekdayPicker(p.days || [])}</label>${fld("Time", `<input type="time" name="time" value="${p.time || ""}">`)}</div>` +
+    fld("Focus — optional", txt("focus", "e.g. Chest & triceps", p.focus || "", false)) +
+    fld("Exercises — optional, comma-separated (makes it an all-in-one routine)", txt("exercises", "Bench press, Squat, Row", (p.exercises || []).map(e => e.name).join(", "), false)) +
+    fld("Emoji", txt("emoji", "🏋️", p.emoji || "🏋️", false));
+}
+function planFromForm(f) {
+  const days = [...Array(7)].map((_, i) => f["wd" + i] ? i : -1).filter(x => x >= 0);
+  const exercises = (f.exercises || "").split(",").map(s => s.trim()).filter(Boolean).map(n => ({ id: uid(), name: n, kind: "reps", sets: [] }));
+  return { name: f.name, category: f.category || "", minutes: +f.minutes || 0, sets: +f.sets || 0, reps: +f.reps || 0, days, time: f.time || "", focus: f.focus || "", exercises, emoji: f.emoji || "🏋️" };
+}
 const CAT_COLORS = { Calisthenics: "#12a594", Strength: "#f76b15", Cardio: "#e5484d", Mobility: "#7c66dc", Yoga: "#8e4ec6" };
 function removeSession(id) {
   const s = state.workout.sessions.find(x => x.id === id);
@@ -1556,17 +1574,38 @@ function vWorkout() {
       </div>`)}
 
     ${card("span2", cardHead("Workout plan", `<button class="btn ghost tiny" data-action="workout-library">${I.grid}Routines</button>${addBtn("Add to plan", "workout-add")}`) + (state.workout.plan.length ? `
-      <ul class="check-list">
-        ${state.workout.plan.map(p => {
+      <ul class="check-list plan-list">
+        ${state.workout.plan.map((p, i) => {
           const on = state.workout.sessions.some(s => s.date === d && s.planId === p.id);
+          const meta = [p.category, p.minutes ? p.minutes + " min" : "", p.sets ? `${p.sets}×${p.reps || "?"}` : "", (p.days || []).length ? (p.days || []).map(x => WD_SHORT[x]).join("") : "", p.time, p.focus, (p.exercises || []).length ? `${p.exercises.length} exercises` : ""].filter(Boolean).join(" · ");
           return `<li class="${on ? "done" : ""}">
             <button class="checkbox" data-action="workout-toggle" data-id="${p.id}" aria-label="Toggle ${esc(p.name)}">${I.check}</button>
             <span class="row-emoji">${esc(p.emoji)}</span>
-            <span class="row-txt"><b>${esc(p.name)}</b><small>${p.category ? esc(p.category) + " · " : ""}${p.minutes} min${p.sets ? ` · ${p.sets}×${p.reps || "?"}` : ""}</small></span>
+            <span class="row-txt open" data-action="workout-edit" data-id="${p.id}"><b>${esc(p.name)}</b><small>${esc(meta)}</small></span>
+            <span class="reorder"><button class="icon-btn ghost" data-action="plan-up" data-id="${p.id}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.chevL}</button><button class="icon-btn ghost" data-action="plan-down" data-id="${p.id}" aria-label="Move down" ${i === state.workout.plan.length - 1 ? "disabled" : ""}>${I.chevR}</button></span>
+            <button class="icon-btn ghost" data-action="workout-edit" data-id="${p.id}" aria-label="Edit ${esc(p.name)}">${I.edit}</button>
             <button class="icon-btn ghost" data-action="workout-del" data-id="${p.id}" aria-label="Delete ${esc(p.name)}">${I.trash}</button>
           </li>`;
         }).join("")}
       </ul>` : emptyMsg("dumbbell", "No workouts in your plan yet.", addBtn("Add one", "workout-add"))))}
+
+    ${card("span2", cardHead("Classes & packages", addBtn("Add package", "class-add")) + (state.workout.classes.length ? `
+      <ul class="class-list">
+        ${state.workout.classes.map(c => {
+          const used = (c.log || []).length, remaining = c.total - used, pct = Math.round(100 * used / c.total), doneAll = remaining <= 0;
+          return `<li class="${doneAll ? "spent" : ""}">
+            <span class="row-emoji">🎟️</span>
+            <span class="row-txt"><b>${esc(c.name)}</b><small>${used}/${c.total} sessions${c.price ? ` · ${money(c.price)}` : ""}${used ? ` · last ${niceDate((c.log[c.log.length - 1]))}` : ""}</small>${barHtml(pct, doneAll ? "#e5484d" : "#f76b15")}</span>
+            <span class="pill-row">
+              ${doneAll ? `<button class="btn tiny good" data-action="class-renew" data-id="${c.id}">Renew</button>` : `<button class="btn tiny" data-action="class-attend" data-id="${c.id}">+ Attend</button>`}
+              ${used ? `<button class="icon-btn ghost" data-action="class-undo" data-id="${c.id}" aria-label="Undo last">${I.chevL}</button>` : ""}
+              <button class="icon-btn ghost" data-action="class-del" data-id="${c.id}" aria-label="Delete package">${I.trash}</button>
+            </span>
+          </li>`;
+        }).join("")}
+      </ul>
+      <p class="soft note">${I.spark} Total on classes: <b>${money(state.workout.classes.reduce((a, c) => a + (c.price || 0) * (1 + (c.renewals || 0)), 0))}</b> — this will feed the Finance section later.</p>`
+      : emptyMsg("calendar", "Track class packages (e.g. 8 yoga sessions) so you know when to rebook.", addBtn("Add a package", "class-add"))))}
 
     ${card("span2", cardHead((isToday ? "Today's" : "That day's") + " sessions", addBtn("Log session", "session-add")) + dayNav("workout") + (daySessions.length ? `
       <ul class="session-list">${daySessions.map(sessionCard).join("")}</ul>`
@@ -2182,18 +2221,17 @@ const ACTIONS = {
 
   /* workout */
   "workout-day": (el) => { if (el.dataset.d <= todayIso()) { setCursor("workout", el.dataset.d); render(); } },
-  "workout-add": () => formModal("Add to plan",
-    fld("Name", txt("name", "e.g. Pull-ups")) +
-    fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option>${c}</option>`).join("")}</select>`) +
-    `<div class="fld-row">${fld("Minutes", num("minutes", 30, 1, 5))}${fld("Sets", num("sets", 0, 0))}${fld("Reps", num("reps", 0, 0))}</div>` +
-    fld("Emoji", txt("emoji", "🏋️", "🏋️", false)), "workout-add"),
+  "workout-add": () => formModal("Add to plan", planFormFields(), "workout-add"),
+  "workout-edit": (el) => { const p = state.workout.plan.find(x => x.id === el.dataset.id); if (p) formModal("Edit plan", planFormFields(p) + `<input type="hidden" name="id" value="${p.id}">`, "workout-edit"); },
+  "plan-up": (el) => { const a = state.workout.plan, i = a.findIndex(p => p.id === el.dataset.id); if (i > 0) { [a[i - 1], a[i]] = [a[i], a[i - 1]]; save(); render(); } },
+  "plan-down": (el) => { const a = state.workout.plan, i = a.findIndex(p => p.id === el.dataset.id); if (i >= 0 && i < a.length - 1) { [a[i + 1], a[i]] = [a[i], a[i + 1]]; save(); render(); } },
   "workout-toggle": (el) => {
     const p = state.workout.plan.find(x => x.id === el.dataset.id); if (!p) return;
     const d = dayCursor("workout");
     const existing = state.workout.sessions.find(s => s.date === d && s.planId === p.id);
     if (existing) { removeSession(existing.id); }
     else {
-      const sess = { id: uid(), date: d, category: p.category || "Strength", planId: p.id, planName: p.name, note: "", exercises: [], media: [] };
+      const sess = { id: uid(), date: d, category: p.category || "Strength", planId: p.id, planName: p.name, note: p.focus || "", exercises: (p.exercises || []).map(e => ({ id: uid(), name: e.name, kind: e.kind || "reps", sets: [] })), media: [] };
       state.workout.sessions.push(sess);
       (state.workout.log[d] = state.workout.log[d] || []).push(sess.id);
       if (d === todayIso()) addXp(20, "Workout");
@@ -2201,6 +2239,15 @@ const ACTIONS = {
     save(); render();
   },
   "workout-del": (el) => { state.workout.plan = state.workout.plan.filter(p => p.id !== el.dataset.id); save(); render(); },
+  /* class packages */
+  "class-add": () => formModal("New class package",
+    fld("Class name", txt("name", "e.g. Yoga studio")) +
+    `<div class="fld-row">${fld("Total sessions", `<input type="number" name="total" value="8" min="1">`)}${fld("Price paid", `<input type="number" name="price" value="0" min="0" step="any">`)}</div>` +
+    fld("Start date", `<input type="date" name="start" value="${todayIso()}">`), "class-add"),
+  "class-attend": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length < c.total) { c.log = c.log || []; c.log.push(todayIso()); addXp(10, c.name); save(); render(); if ((c.log.length) >= c.total) toast(`Last session of ${c.name} — time to renew 🔁`); } },
+  "class-undo": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length) { c.log.pop(); save(); render(); } },
+  "class-renew": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c) { c.renewals = (c.renewals || 0) + 1; c.log = []; c.start = todayIso(); save(); render(); toast(`${c.name} renewed`); } },
+  "class-del": (el) => { state.workout.classes = state.workout.classes.filter(c => c.id !== el.dataset.id); save(); render(); },
   "session-add": () => formModal("Log a session",
     fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option>${c}</option>`).join("")}</select>`) +
     fld("What did you do?", `<textarea name="note" placeholder="Sets, reps, how it felt…" maxlength="600"></textarea>`), "session-add"),
@@ -2401,7 +2448,9 @@ const SUBMITS = {
   "goal-log": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) { g.progress.push({ date: todayIso(), value: +f.value || 0 }); syncGoalMilestones(g); addXp(5, "Progress logged"); } },
   "gms-add": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) g.milestones.push({ id: uid(), text: f.text, done: false }); },
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
-  "workout-add": (f) => { state.workout.plan.push({ id: uid(), name: f.name, category: f.category || "", minutes: +f.minutes, sets: +f.sets || 0, reps: +f.reps || 0, emoji: f.emoji || "🏋️" }); },
+  "workout-add": (f) => { state.workout.plan.push(Object.assign({ id: uid() }, planFromForm(f))); },
+  "workout-edit": (f) => { const p = state.workout.plan.find(x => x.id === f.id); if (p) Object.assign(p, planFromForm(f)); },
+  "class-add": (f) => { state.workout.classes.push({ id: uid(), name: f.name, total: Math.max(1, +f.total || 8), price: +f.price || 0, start: f.start || todayIso(), log: [], renewals: 0 }); },
   "session-add": (f) => { const d = dayCursor("workout"); const sess = { id: uid(), date: d, category: f.category || "Strength", planId: null, planName: "", note: f.note || "", exercises: [], media: [] }; state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
   "session-note": (f) => { const s = state.workout.sessions.find(x => x.id === f.id); if (s) s.note = f.note; },
   "ex-add": (f) => { const s = state.workout.sessions.find(x => x.id === f.sid); if (s) { s.exercises = s.exercises || []; s.exercises.push({ id: uid(), name: f.name, kind: f.kind || "reps", sets: [] }); } },
