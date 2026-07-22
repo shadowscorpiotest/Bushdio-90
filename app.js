@@ -89,6 +89,7 @@ const I = (() => {
     download:  w('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/>'),
     upload:    w('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 8 5-5 5 5M12 3v12"/>'),
     grid:      w('<rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/>'),
+    search:    w('<circle cx="11" cy="11" r="6.5"/><path d="m20.5 20.5-4-4"/>'),
   };
 })();
 
@@ -131,7 +132,7 @@ let state = null;
 
 function defaultState() {
   return {
-    profile: { name: "", avatar: "🌱", theme: "auto", onboarded: false, apiKey: "", metrics: null },
+    profile: { name: "", avatar: "🌱", theme: "auto", onboarded: false, apiKey: "", tmdbKey: "", metrics: null },
     xp: 0,
     xpLog: {},                 // {date: xp gained}
     claimed: {},               // {date: {missionId:true}}
@@ -270,6 +271,7 @@ function seedState(s) {
 function migrate(s) {
   s.profile = s.profile || {};
   if (s.profile.apiKey == null) s.profile.apiKey = "";
+  if (s.profile.tmdbKey == null) s.profile.tmdbKey = "";
   if (s.profile.metrics === undefined) s.profile.metrics = null;
   s.goals = s.goals || [];
   s.todos = s.todos || [];
@@ -315,6 +317,8 @@ function migrate(s) {
     if (!Array.isArray(b.recommenders)) b.recommenders = [];
     if (b.notes == null) b.notes = "";
     if (b.genre == null) b.genre = "";
+    if (b.format == null) b.format = "physical";
+    if (b.file === undefined) b.file = null;
   });
   s.media = s.media || [];
   s.media.forEach(m => {
@@ -421,6 +425,13 @@ function storeMediaFile(file, cb) {
   } else {
     finish(file);
   }
+}
+/* store an arbitrary file (e.g. a book PDF/EPUB) in IndexedDB */
+function storeFile(file, cb) {
+  if (!file) return;
+  if (file.size > 100 * 1024 * 1024) { toast("That file is over 100MB — too large to store here"); return; }
+  mediaPut(file).then(id => cb({ id, kind: "file", name: file.name, type: file.type || "" }))
+    .catch(() => toast("Couldn't save that file"));
 }
 
 /* ================= day navigation (Habits / Workout / Skills) ================= */
@@ -1836,6 +1847,103 @@ function readingStats() {
   const avg = rated.length ? (rated.reduce((a, b) => a + b.rating, 0) / rated.length).toFixed(1) : "—";
   return { done: done.length, pages, avg, favs: books.filter(b => b.favorite).length };
 }
+/* ---------- search & autofill (Reading + Movies) ---------- */
+let _searchResults = [];
+async function searchBooks(q) {
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=12`;
+  const j = await (await fetch(url)).json();
+  return (j.items || []).map(it => {
+    const v = it.volumeInfo || {};
+    let cover = (v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || "";
+    cover = cover.replace(/^http:/, "https:");
+    return {
+      kind: "book", title: v.title || "Untitled", author: (v.authors || []).join(", ") || "Unknown",
+      year: (v.publishedDate || "").slice(0, 4), pages: v.pageCount || 0,
+      genre: (v.categories || [])[0] || "", blurb: (v.description || "").replace(/<[^>]+>/g, "").slice(0, 140),
+      cover,
+    };
+  });
+}
+async function searchMovies(q) {
+  const key = state.profile.tmdbKey;
+  const url = `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(q)}`;
+  const j = await (await fetch(url)).json();
+  return (j.results || []).filter(x => x.media_type === "movie" || x.media_type === "tv").map(x => ({
+    kind: "media", tmdbId: x.id, mediaType: x.media_type,
+    title: x.title || x.name || "Untitled",
+    year: ((x.release_date || x.first_air_date) || "").slice(0, 4),
+    typeLabel: x.media_type === "tv" ? "Series" : "Movie",
+    cover: x.poster_path ? `https://image.tmdb.org/t/p/w200${x.poster_path}` : "",
+  }));
+}
+async function fetchMovieDetail(id, mediaType) {
+  const key = state.profile.tmdbKey;
+  const d = await (await fetch(`https://api.themoviedb.org/3/${mediaType}/${id}?api_key=${encodeURIComponent(key)}&append_to_response=credits`)).json();
+  const crew = (d.credits && d.credits.crew) || [], cast = (d.credits && d.credits.cast) || [];
+  return {
+    type: mediaType === "tv" ? "Series" : "Movie",
+    title: d.title || d.name || "Untitled",
+    year: ((d.release_date || d.first_air_date) || "").slice(0, 4),
+    genre: ((d.genres || [])[0] || {}).name || "",
+    epTotal: mediaType === "tv" ? (d.number_of_episodes || 0) : 0,
+    director: (crew.find(c => c.job === "Director") || {}).name || "",
+    cast: cast.slice(0, 4).map(c => c.name).join(", "),
+    blurb: (d.overview || "").slice(0, 140),
+    poster: d.poster_path ? `https://image.tmdb.org/t/p/w500${d.poster_path}` : "",
+  };
+}
+function createBookFromResult(r) {
+  const b = { id: uid(), title: r.title, author: r.author || "Unknown", emoji: "📘", cover: r.cover || null,
+    genre: r.genre || "", blurb: r.blurb || "", notes: "", recommenders: [], favorite: false,
+    status: "current", pages: +r.pages || 0, page: 0, rating: 0, format: "physical", file: null, started: todayIso() };
+  state.reading.books.push(b); save(); checkBadges(); return b.id;
+}
+function createMediaFromDetail(d) {
+  const m = { id: uid(), title: d.title, type: d.type, status: "watchlist", rating: 0,
+    emoji: d.type === "Series" ? "📺" : "🎬", cover: d.poster || null, genre: d.genre || "", year: d.year || "",
+    blurb: d.blurb || "", notes: "", favorite: false, recommenders: [], director: d.director || "",
+    cast: d.cast || "", season: 1, epsDone: 0, epTotal: d.epTotal || 0, started: "", finished: "" };
+  state.media.push(m); save(); return m.id;
+}
+function openSearchPicker(kind) {
+  const isMedia = kind === "media";
+  if (isMedia && !state.profile.tmdbKey) {
+    openModal(`<header class="modal-head"><h3>Search movies &amp; series</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+      <div class="modal-body"><p class="soft">Movie &amp; series search uses a free <b>TMDb API key</b>. Add it once in your profile and this works everywhere.</p>
+      <button class="btn primary" data-action="go-tmdb-key">Add TMDb key in Profile</button></div>`);
+    return;
+  }
+  _searchResults = [];
+  openModal(`<header class="modal-head"><h3>Search ${isMedia ? "movies &amp; series" : "books"}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <form data-search-form="${kind}" class="search-bar">
+        <input type="text" id="searchQ" placeholder="Type a ${isMedia ? "title" : "title or author"}…" autocomplete="off" aria-label="Search query">
+        <button class="btn primary" type="submit">${I.search}Search</button>
+      </form>
+      <div id="searchResults" class="search-results"><p class="soft small">Search a title, pick a result, and every field fills in — then you review and save.</p></div>
+    </div>`);
+  setTimeout(() => { const q = $("#searchQ"); if (q) q.focus(); }, 40);
+}
+async function runSearch(kind) {
+  const inp = $("#searchQ"), box = $("#searchResults");
+  const q = inp && inp.value.trim();
+  if (!q || !box) return;
+  box.innerHTML = `<p class="soft small">Searching…</p>`;
+  try {
+    _searchResults = kind === "media" ? await searchMovies(q) : await searchBooks(q);
+  } catch (e) {
+    box.innerHTML = `<p class="soft small">Couldn't reach the ${kind === "media" ? "movie" : "book"} database. Check your connection${kind === "media" ? " and TMDb key" : ""}, then try again.</p>`;
+    return;
+  }
+  if (!_searchResults.length) { box.innerHTML = `<p class="soft small">No matches — try a different spelling.</p>`; return; }
+  box.innerHTML = _searchResults.map((r, i) => {
+    const sub = r.kind === "media" ? [r.typeLabel, r.year].filter(Boolean).join(" · ") : [r.author, r.year].filter(Boolean).join(" · ");
+    return `<button type="button" class="search-res" data-action="${kind}-pick" data-i="${i}">
+      <span class="sr-cover" ${r.cover ? `style="background-image:url('${r.cover}')"` : ""}>${r.cover ? "" : (r.kind === "media" ? "🎬" : "📘")}</span>
+      <span class="sr-txt"><b>${esc(r.title)}</b><small>${esc(sub)}</small></span>
+    </button>`;
+  }).join("");
+}
 function bookCover(b, cls = "") {
   return b.cover
     ? `<span class="book-cover ${cls}" style="background-image:url('${b.cover}')" role="img" aria-label="${esc(b.title)} cover"></span>`
@@ -1976,6 +2084,20 @@ function openBookDetail(id) {
       ${b.status === "done" ? `<p class="soft">${I.check} Finished${b.finished ? ` · ${niceDate(b.finished)}` : ""}</p><button class="btn ghost slim" data-action="book-reread" data-id="${b.id}">Read again</button>` : ""}
       <label class="fld"><span>Blurb <small class="soft">— one line for the gallery card</small></span><input type="text" data-change="book-blurb" data-id="${b.id}" placeholder="A short hook or synopsis…" maxlength="140" value="${esc(b.blurb || "")}"></label>
       <label class="fld"><span>Notes &amp; thoughts</span><textarea data-change="book-notes" data-id="${b.id}" placeholder="What did you think? Favorite quotes, takeaways…" maxlength="1200">${esc(b.notes || "")}</textarea></label>
+      <div class="fld"><span>Format</span>
+        <div class="seg">
+          <button type="button" class="seg-btn ${b.format !== "digital" ? "on" : ""}" data-action="book-format" data-id="${b.id}" data-v="physical">${I.book}Physical</button>
+          <button type="button" class="seg-btn ${b.format === "digital" ? "on" : ""}" data-action="book-format" data-id="${b.id}" data-v="digital">📱 Digital</button>
+        </div>
+      </div>
+      ${b.format === "digital" ? `<div class="book-file">
+        ${b.file
+          ? `<button class="btn primary slim" data-action="book-file-open" data-id="${b.id}">${I.book}Open / continue reading</button>
+             <div class="book-file-meta"><span class="soft small">📄 ${esc(b.file.name || "file")}</span><button class="btn tiny ghost" data-action="book-file-del" data-id="${b.id}">${I.trash}Remove file</button></div>
+             <p class="soft note">Opens in your device's reader — PDFs preview here; iPhone offers Books/Files. The reader keeps its own place; the app tracks your page${b.page ? ` (currently ${b.page}${b.pages ? " / " + b.pages : ""})` : ""}.</p>`
+          : `<label class="cover-upload"><input type="file" accept=".pdf,.epub,application/pdf,application/epub+zip" data-change="book-file-add" data-id="${b.id}" hidden><span class="btn ghost slim">${I.upload}Attach a PDF / EPUB</span></label>
+             <p class="soft note">Optional — attach the file, then tap to open it on your device. Stored privately in this browser.</p>`}
+      </div>` : ""}
       ${recEditor("book", b.id, b.recommenders)}
       <div class="pill-row">
         <button class="btn ghost" data-action="book-edit" data-id="${b.id}">${I.edit}Edit details</button>
@@ -2328,6 +2450,10 @@ function vProfile() {
         <button class="btn danger" data-action="data-reset">${I.trash}Reset everything</button>
       </div>
       <p class="soft note">Everything lives in this browser's local storage — export regularly if you care about it.</p>`)}
+    ${card("span2", cardHead("Connections") + `
+      <label class="fld"><span>TMDb API key <small class="soft">— powers movie &amp; series search + autofill</small></span>
+        <input type="text" data-change="tmdb-key" value="${esc(state.profile.tmdbKey || "")}" placeholder="Paste your free TMDb key" autocomplete="off"></label>
+      <p class="soft note">${I.search} Get a free key at <b>themoviedb.org → Settings → API</b>. Book search needs no key. Your key is stored only in this browser.</p>`)}
   </div>`;
 }
 
@@ -2594,7 +2720,9 @@ const ACTIONS = {
   /* reading */
   "reading-tab": (el) => { state._readingTab = el.dataset.id; render(); },
   "book-add": () => formModal("Add book",
-    `<label class="cover-upload add">
+    `<button type="button" class="btn primary slim autofill-btn" data-action="book-search">${I.search}Search &amp; autofill</button>
+     <p class="autofill-or"><span>or add it manually</span></p>
+     <label class="cover-upload add">
        <input type="file" accept="image/*" data-change="book-cover-new" hidden>
        <span class="cover-preview" id="coverPreview">${I.upload}<i>Add cover</i></span>
      </label>
@@ -2602,6 +2730,16 @@ const ACTIONS = {
     fld("Title", txt("title", "e.g. Atomic Habits")) + fld("Author", txt("author", "", "", false)) +
     `<div class="fld-row">${fld("Pages", num("pages", 300, 1))}${fld("Genre", txt("genre", "e.g. Self-help", "", false))}</div>` +
     fld("Emoji (used if no cover)", txt("emoji", "📘", "📘", false)), "book-add"),
+  "book-search": () => openSearchPicker("book"),
+  "media-search": () => openSearchPicker("media"),
+  "go-tmdb-key": () => { closeModal(); go("profile"); toast("Add your TMDb key under Connections"); },
+  "book-pick": (el) => { const r = _searchResults[+el.dataset.i]; if (!r) return; const id = createBookFromResult(r); render(); openBookDetail(id); toast("Filled in — review &amp; edit, it's saved"); },
+  "media-pick": async (el) => {
+    const r = _searchResults[+el.dataset.i]; if (!r) return;
+    const box = $("#searchResults"); if (box) box.innerHTML = `<p class="soft small">Loading details…</p>`;
+    try { const d = await fetchMovieDetail(r.tmdbId, r.mediaType); const id = createMediaFromDetail(d); render(); openMediaDetail(id); toast("Filled in — review it, it's saved"); }
+    catch (e) { toast("Couldn't load those details — try again"); }
+  },
   "book-open": (el) => openBookDetail(el.dataset.id),
   "book-rate": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.rating = +el.dataset.r; save(); checkBadges(); render(); openBookDetail(b.id); } },
   "book-fav": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.favorite = !b.favorite; if (b.favorite) toast("Added to favorites ♥"); save(); render(); openBookDetail(b.id); } },
@@ -2625,7 +2763,18 @@ const ACTIONS = {
       fld("Emoji", txt("emoji", "", b.emoji || "📘", false)) +
       `<input type="hidden" name="id" value="${b.id}">`, "book-edit");
   },
-  "book-del-d": (el) => { state.reading.books = state.reading.books.filter(b => b.id !== el.dataset.id); save(); closeModal(); render(); toast("Book removed"); },
+  "book-del-d": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b && b.file) mediaDelete(b.file.id); state.reading.books = state.reading.books.filter(b => b.id !== el.dataset.id); save(); closeModal(); render(); toast("Book removed"); },
+  "book-format": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.format = el.dataset.v; save(); render(); openBookDetail(b.id); } },
+  "book-file-open": async (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id); if (!b || !b.file) return;
+    const blob = await mediaGet(b.file.id);
+    if (!blob) { toast("That file isn't on this device"); return; }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  },
+  "book-file-del": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b && b.file) { mediaDelete(b.file.id); b.file = null; save(); render(); openBookDetail(b.id); } },
 
   /* recommenders (shared by books + media) */
   "rec-del": (el) => {
@@ -2641,6 +2790,8 @@ const ACTIONS = {
   /* media */
   "media-tab": (el) => { state._mediaTab = el.dataset.id; render(); },
   "media-add": () => formModal("Add a title",
+    `<button type="button" class="btn primary slim autofill-btn" data-action="media-search">${I.search}Search &amp; autofill</button>
+     <p class="autofill-or"><span>or add it manually</span></p>` +
     fld("Title", txt("title", "e.g. Interstellar")) +
     `<div class="fld-row">${fld("Type", `<select name="type"><option>Movie</option><option>Series</option></select>`)}${fld("Year", txt("year", "e.g. 2014", "", false))}</div>` +
     fld("Genre", txt("genre", "e.g. Sci-Fi", "", false)) +
@@ -2917,6 +3068,12 @@ const CHANGES = {
       catch { toast("That image is too large to save"); }
     });
   },
+  "book-file-add": (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id);
+    if (!b) return;
+    storeFile(el.files[0], (ref) => { if (b.file) mediaDelete(b.file.id); b.file = ref; save(); render(); openBookDetail(b.id); toast("File attached 📎"); });
+  },
+  "tmdb-key": (el) => { state.profile.tmdbKey = el.value.trim(); save(); },
   "book-cover-new": (el) => {
     processCover(el.files[0], (dataUrl) => {
       const field = $("#coverField"), preview = $("#coverPreview");
@@ -2937,6 +3094,8 @@ function bindEvents() {
     if (e.target === $("#drawerBackdrop")) closeDrawer();
   });
   document.addEventListener("submit", (e) => {
+    const sf = e.target.closest("[data-search-form]");
+    if (sf) { e.preventDefault(); runSearch(sf.dataset.searchForm); return; }
     const form = e.target.closest("[data-submit]");
     if (!form) return;
     e.preventDefault();
