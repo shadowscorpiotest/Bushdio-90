@@ -164,14 +164,29 @@ function defaultState() {
 
 function seedState(s) {
   const t = todayIso();
-  const H = (o) => Object.assign({ id: uid(), emoji: "✅", type: "build", target: 0, unit: "", why: "", cadence: { mode: "daily" }, kind: "", goalId: null, milestones: [], log: {} }, o);
+  const H = (o) => Object.assign({ id: uid(), emoji: "✅", type: "build", target: 0, unit: "", why: "", cadence: { mode: "daily" }, kind: "", color: "#6a5ae0", goalIds: [], milestones: [], log: {} }, o);
   s.habits = [
-    H({ name: "Morning meditation", emoji: "🧘", why: "Start calm, stay calm." }),
-    H({ name: "Workout", emoji: "💪", kind: "workout", cadence: { mode: "days", days: [0, 2, 4] }, why: "Strong body, strong mind." }),
-    H({ name: "Drink water", emoji: "💧", type: "quantity", target: 2, unit: "L", why: "Energy & focus." }),
-    H({ name: "Read", emoji: "📖", type: "quantity", target: 20, unit: "pages" }),
-    H({ name: "No sugar", emoji: "🍬", type: "avoid", why: "Steady energy, clear skin." }),
+    H({ name: "Morning meditation", emoji: "🧘", color: "#7c66dc", why: "Start calm, stay calm." }),
+    H({ name: "Workout", emoji: "💪", kind: "workout", color: "#f76b15", cadence: { mode: "days", days: [0, 2, 4] }, why: "Strong body, strong mind." }),
+    H({ name: "Drink water", emoji: "💧", type: "quantity", target: 2, unit: "L", color: "#00a2c7", why: "Energy & focus." }),
+    H({ name: "Read", emoji: "📖", type: "quantity", target: 20, unit: "pages", color: "#0091ff" }),
+    H({ name: "No sugar", emoji: "🍬", type: "avoid", color: "#e5484d", why: "Steady energy, clear skin." }),
   ];
+  // a starter outcome goal, linked to the process habits that build it
+  const goalId = uid();
+  s.goals = [{
+    id: goalId, title: "Lose 8 kg body fat", emoji: "🎯", type: "outcome", unit: "kg", direction: "down",
+    start: 78, target: 70, deadline: addDays(t, 120), note: "Slow and steady — habits over crash diets.",
+    progress: [{ date: addDays(t, -21), value: 78 }, { date: addDays(t, -7), value: 76.6 }],
+    habitIds: [s.habits[1].id, s.habits[2].id, s.habits[4].id],
+    milestones: [
+      { id: uid(), text: "Down to 76 kg", target: 76, done: false },
+      { id: uid(), text: "Down to 74 kg", target: 74, done: false },
+      { id: uid(), text: "Down to 72 kg", target: 72, done: false },
+      { id: uid(), text: "Reach 70 kg", target: 70, done: false },
+    ],
+  }];
+  [s.habits[1], s.habits[2], s.habits[4]].forEach(h => h.goalIds = [goalId]);
   // a gentle history so charts aren't empty on first run
   for (let i = 1; i <= 10; i++) {
     const d = addDays(t, -i);
@@ -263,7 +278,22 @@ function migrate(s) {
     if (h.why == null) h.why = "";
     if (h.target == null) h.target = 0;
     if (h.unit == null) h.unit = "";
+    if (h.color == null) h.color = "#6a5ae0";
+    if (!Array.isArray(h.goalIds)) h.goalIds = h.goalId ? [h.goalId] : [];
+    delete h.goalId;
   });
+  (s.goals || []).forEach(g => {
+    g.milestones = g.milestones || [];
+    g.type = g.type || "checklist";
+    if (g.unit == null) g.unit = "";
+    if (g.direction == null) g.direction = "down";
+    if (g.start == null) g.start = 0;
+    if (g.target == null) g.target = 0;
+    if (g.deadline == null) g.deadline = "";
+    if (!Array.isArray(g.progress)) g.progress = [];
+    if (g.note == null) g.note = "";
+  });
+  (s.todos || []).forEach(td => { if (td.time == null) td.time = ""; if (td.habitId == null) td.habitId = ""; });
   return s;
 }
 
@@ -1171,9 +1201,29 @@ function vDashboard() {
 }
 
 /* ---------- habits ---------- */
+function goalCurrent(g) {
+  if (!g.progress || !g.progress.length) return g.start;
+  return g.progress[g.progress.length - 1].value;
+}
 function goalProgress(g) {
   const tot = g.milestones.length, done = g.milestones.filter(m => m.done).length;
-  return { done, tot, pct: tot ? Math.round(100 * done / tot) : 0 };
+  if (g.type === "outcome") {
+    const cur = goalCurrent(g), span = (g.start - g.target) || 1;
+    let pct = Math.round(100 * (g.start - cur) / span);
+    pct = clamp(pct, 0, 100);
+    return { done, tot, pct, cur };
+  }
+  return { done, tot, pct: tot ? Math.round(100 * done / tot) : 0, cur: null };
+}
+/* auto-complete numeric milestones when the logged value crosses their target */
+function syncGoalMilestones(g) {
+  if (g.type !== "outcome") return;
+  const cur = goalCurrent(g);
+  g.milestones.forEach(m => {
+    if (m.target == null || m.target === "") return;
+    const reached = g.direction === "down" ? cur <= m.target : cur >= m.target;
+    if (reached && !m.done) { m.done = true; addXp(15, "Milestone"); }
+  });
 }
 function habitRow(h, d) {
   const e = habitEntry(h, d) || {}, met = habitMet(h, d), streak = habitStreak(h);
@@ -1188,9 +1238,10 @@ function habitRow(h, d) {
     control = `<button class="checkbox" data-action="habit-toggle" data-id="${h.id}" aria-label="Toggle ${esc(h.name)}">${I.check}</button>`;
     sub = `${streak} day streak`;
   }
-  const quantBar = h.type === "quantity" ? barHtml(100 * ((e.amount) || 0) / (h.target || 1), "#6a5ae0") : "";
+  const col = h.color || "#6a5ae0";
+  const quantBar = h.type === "quantity" ? barHtml(100 * ((e.amount) || 0) / (h.target || 1), col) : "";
   const incBtn = h.type === "quantity" ? `<button class="btn tiny ghost" data-action="habit-inc" data-id="${h.id}">+${habitStep(h)}</button>` : "";
-  return `<li class="${met ? "done" : ""}">
+  return `<li class="habit-li ${met ? "done" : ""}" style="--hc:${col}">
     ${control}
     <button class="row-emoji as-btn" data-action="habit-open" data-id="${h.id}" aria-label="Open ${esc(h.name)}">${esc(h.emoji)}</button>
     <span class="row-txt open" data-action="habit-open" data-id="${h.id}">
@@ -1246,9 +1297,10 @@ function vHabits() {
       <ul class="goal-list">
         ${state.goals.map(g => {
           const gp = goalProgress(g);
+          const sub = g.type === "outcome" ? `${goalCurrent(g)} → ${g.target} ${esc(g.unit || "")}` : `${gp.done}/${gp.tot} milestones`;
           return `<li data-action="goal-open" data-id="${g.id}">
             <span class="row-emoji">${esc(g.emoji || "🎯")}</span>
-            <span class="row-txt open"><b>${esc(g.title)}</b><small>${gp.done}/${gp.tot} milestones</small>${barHtml(gp.pct, "#6a5ae0")}</span>
+            <span class="row-txt open"><b>${esc(g.title)}</b><small>${sub}</small>${barHtml(gp.pct, "#6a5ae0")}</span>
             <b class="pct">${gp.pct}%</b>
           </li>`;
         }).join("")}
@@ -1262,7 +1314,7 @@ function weekdayPicker(selected) {
 function habitFormFields(h) {
   h = h || {}; const c = h.cadence || { mode: "daily" };
   return fld("Name", txt("name", "e.g. Drink water", h.name || "")) +
-    fld("Emoji", txt("emoji", "💧", h.emoji || "💧", false)) +
+    `<div class="fld-row">${fld("Emoji", txt("emoji", "💧", h.emoji || "💧", false))}<label class="fld"><span>Color</span><input type="color" name="color" value="${h.color || "#6a5ae0"}"></label></div>` +
     fld("Type", `<select name="type">
       <option value="build" ${(!h.type || h.type === "build") ? "selected" : ""}>Build — just do it (checkbox)</option>
       <option value="quantity" ${h.type === "quantity" ? "selected" : ""}>Amount — reach a target (e.g. 2L, 20 pages)</option>
@@ -1328,12 +1380,9 @@ function openHabitDetail(id) {
         </ul>` : `<p class="soft small">No milestones yet.</p>`}
         <button class="btn tiny ghost" data-action="ms-add" data-id="${h.id}">${I.plus}Add milestone</button>
       </div>
-      <label class="fld"><span>Part of a goal</span>
-        <select data-change="habit-goal" data-id="${h.id}">
-          <option value="">— none —</option>
-          ${state.goals.map(g => `<option value="${g.id}" ${h.goalId === g.id ? "selected" : ""}>${esc(g.emoji || "🎯")} ${esc(g.title)}</option>`).join("")}
-        </select>
-      </label>
+      <div class="fld"><span>Part of goals</span>
+        ${state.goals.length ? `<div class="chip-check">${state.goals.map(g => `<label class="goal-check"><input type="checkbox" data-change="habit-goal-toggle" data-h="${h.id}" data-g="${g.id}" ${(h.goalIds || []).includes(g.id) ? "checked" : ""}> <span>${esc(g.emoji || "🎯")} ${esc(g.title)}</span></label>`).join("")}</div>` : `<p class="soft small">No goals yet — create one below.</p>`}
+      </div>
       <div class="pill-row"><button class="btn ghost" data-action="habit-edit" data-id="${h.id}">${I.edit}Edit</button><button class="btn danger" data-action="habit-del-d" data-id="${h.id}">${I.trash}Delete</button></div>
     </div>`);
 }
@@ -1342,20 +1391,53 @@ function openGoalDetail(id) {
   const g = state.goals.find(x => x.id === id);
   if (!g) { closeModal(); return; }
   const gp = goalProgress(g);
-  const linked = state.habits.filter(h => h.goalId === g.id);
+  const linked = state.habits.filter(h => (h.goalIds || []).includes(g.id));
+  const isNum = g.type === "outcome";
+  const cur = goalCurrent(g);
+  const chartData = (g.progress || []).map(p => ({ label: +p.date.slice(-2), value: p.value, tip: `${niceDate(p.date)} · ${p.value} ${g.unit || ""}` }));
   openModal(`
     <header class="modal-head"><h3>${esc(g.emoji || "🎯")} ${esc(g.title)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body">
-      <div class="progress-line"><span>${gp.done}/${gp.tot} milestones</span>${barHtml(gp.pct, "#6a5ae0")}<b>${gp.pct}%</b></div>
-      <div class="fld"><span>Milestones</span>
+      ${isNum ? `
+        <div class="goal-num"><div class="goal-num-big">${cur}<span>${esc(g.unit || "")}</span></div><div class="goal-num-meta"><small class="soft">start ${g.start} → target ${g.target} ${esc(g.unit || "")}</small>${g.deadline ? `<small class="soft">${I.calendar} ${daysUntil(g.deadline)}</small>` : ""}</div></div>
+        <div class="progress-line"><span>${gp.pct}% there</span>${barHtml(gp.pct, "#6a5ae0")}<b>${gp.pct}%</b></div>
+        ${chartData.length ? `<div class="fld"><span>Progress log</span><div data-chart-type="bar" data-chart='${esc(JSON.stringify(chartData))}' data-color="#6a5ae0" data-h="120" data-goal="${g.target}" data-label="progress"></div></div>` : ""}
+        <button class="btn primary slim" data-action="goal-log" data-id="${g.id}">${I.plus}Log ${esc(g.unit || "value")}</button>
+      ` : `<div class="progress-line"><span>${gp.done}/${gp.tot} milestones</span>${barHtml(gp.pct, "#6a5ae0")}<b>${gp.pct}%</b></div>`}
+      ${g.note ? `<p class="habit-why">“${esc(g.note)}”</p>` : ""}
+      <div class="fld"><span>Milestones${isNum ? " (auto-complete as you log)" : ""}</span>
         ${g.milestones.length ? `<ul class="ms-list">
-          ${g.milestones.map(m => `<li class="${m.done ? "done" : ""}"><button class="checkbox sm" data-action="gms-toggle" data-g="${g.id}" data-m="${m.id}" aria-label="Toggle milestone">${I.check}</button><span>${esc(m.text)}</span><button class="icon-btn ghost" data-action="gms-del" data-g="${g.id}" data-m="${m.id}" aria-label="Delete milestone">${I.x}</button></li>`).join("")}
+          ${g.milestones.map(m => `<li class="${m.done ? "done" : ""}"><button class="checkbox sm" data-action="gms-toggle" data-g="${g.id}" data-m="${m.id}" aria-label="Toggle milestone">${I.check}</button><span>${esc(m.text)}${m.target != null && m.target !== "" ? ` <i class="soft">@ ${m.target}${esc(g.unit || "")}</i>` : ""}</span><button class="icon-btn ghost" data-action="gms-del" data-g="${g.id}" data-m="${m.id}" aria-label="Delete milestone">${I.x}</button></li>`).join("")}
         </ul>` : `<p class="soft small">No milestones yet.</p>`}
         <button class="btn tiny ghost" data-action="gms-add" data-id="${g.id}">${I.plus}Add milestone</button>
       </div>
-      ${linked.length ? `<div class="fld"><span>Habits building this goal</span><div class="chip-wrap">${linked.map(h => `<span class="chip-genre">${esc(h.emoji)} ${esc(h.name)}</span>`).join("")}</div></div>` : `<p class="soft small">Link habits to this goal from a habit's detail view.</p>`}
+      <div class="fld"><span>Daily actions — habits building this goal</span>
+        ${linked.length ? `<ul class="goal-habits">${linked.map(h => `<li data-action="habit-open" data-id="${h.id}"><span class="hdot" style="background:${h.color || "#6a5ae0"}"></span><b>${esc(h.emoji)} ${esc(h.name)}</b><small class="soft">${habitStreak(h)}🔥 · ${habitCompletion(h, 30)}%</small></li>`).join("")}</ul>` : `<p class="soft small">No habits linked yet.</p>`}
+        <button class="btn tiny ghost" data-action="goal-habits" data-id="${g.id}">${I.plus}Link habits</button>
+      </div>
       <div class="pill-row"><button class="btn ghost" data-action="goal-edit" data-id="${g.id}">${I.edit}Edit</button><button class="btn danger" data-action="goal-del" data-id="${g.id}">${I.trash}Delete</button></div>
     </div>`);
+  drawCharts();
+}
+function goalFormFields(g) {
+  g = g || {};
+  return fld("Title", txt("title", "e.g. Lose 8 kg", g.title || "")) +
+    fld("Emoji", txt("emoji", "🎯", g.emoji || "🎯", false)) +
+    fld("Type", `<select name="type">
+      <option value="outcome" ${g.type === "outcome" ? "selected" : ""}>Number to reach (track progress + chart)</option>
+      <option value="checklist" ${g.type !== "outcome" ? "selected" : ""}>Checklist of milestones</option>
+    </select>`) +
+    `<div class="fld-row">${fld("Start", num("start", g.start || 0, 0, "any"))}${fld("Target", num("target", g.target || 0, 0, "any"))}${fld("Unit", txt("unit", "kg", g.unit || "", false))}</div>` +
+    fld("Direction", `<select name="direction"><option value="down" ${g.direction !== "up" ? "selected" : ""}>Lower is better (lose weight)</option><option value="up" ${g.direction === "up" ? "selected" : ""}>Higher is better (gain / save)</option></select>`) +
+    fld("Deadline (optional)", `<input type="date" name="deadline" value="${g.deadline || ""}">`) +
+    fld("Why / note", txt("note", "your reason…", g.note || "", false));
+}
+function openGoalHabits(id) {
+  const g = state.goals.find(x => x.id === id); if (!g) return;
+  openModal(`<header class="modal-head"><h3>Link habits · ${esc(g.title)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body"><p class="soft small">Tick the habits that build this goal.</p>
+      <ul class="link-list">${state.habits.map(h => `<li><label class="check-inline"><input type="checkbox" data-change="goal-habit-toggle" data-g="${g.id}" data-h="${h.id}" ${(h.goalIds || []).includes(g.id) ? "checked" : ""}> <span>${esc(h.emoji)} ${esc(h.name)}</span></label></li>`).join("")}</ul>
+      <div class="modal-foot"><button type="button" class="btn primary" data-action="goal-open" data-id="${g.id}">Done</button></div></div>`);
 }
 
 /* ---------- health ---------- */
@@ -2035,7 +2117,7 @@ const ACTIONS = {
   "habit-library": openHabitLibrary,
   "habit-tmpl": (el) => {
     const t = HABIT_TEMPLATES[+el.dataset.i]; if (!t) return;
-    state.habits.push({ id: uid(), name: t.name, emoji: t.emoji || "✅", type: t.type || "build", target: t.target || 0, unit: t.unit || "", why: t.why || "", cadence: t.cadence || { mode: "daily" }, kind: t.kind || "", goalId: null, milestones: [], log: {} });
+    state.habits.push({ id: uid(), name: t.name, emoji: t.emoji || "✅", type: t.type || "build", target: t.target || 0, unit: t.unit || "", why: t.why || "", color: t.color || "#6a5ae0", cadence: t.cadence || { mode: "daily" }, kind: t.kind || "", goalIds: [], milestones: [], log: {} });
     save(); render(); toast(`Added ${t.emoji} ${t.name}`);
   },
   "workout-library": openWorkoutLibrary,
@@ -2079,10 +2161,12 @@ const ACTIONS = {
   "ms-del": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.milestones = h.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openHabitDetail(h.id); } },
 
   /* goals */
-  "goal-add": () => formModal("New goal", fld("Title", txt("title", "e.g. Run a half marathon")) + fld("Emoji", txt("emoji", "🎯", "🎯", false)), "goal-add"),
+  "goal-add": () => formModal("New goal", goalFormFields(), "goal-add"),
+  "goal-log": (el) => { const g = state.goals.find(x => x.id === el.dataset.id); if (g) formModal(`Log ${esc(g.unit || "value")} · ${esc(g.title)}`, fld(`Current ${esc(g.unit || "value")}`, num("value", goalCurrent(g), 0, "any")) + `<input type="hidden" name="gid" value="${g.id}">`, "goal-log"); },
+  "goal-habits": (el) => openGoalHabits(el.dataset.id),
   "goal-open": (el) => openGoalDetail(el.dataset.id),
-  "goal-edit": (el) => { const g = state.goals.find(x => x.id === el.dataset.id); formModal("Edit goal", fld("Title", txt("title", "", g.title)) + fld("Emoji", txt("emoji", "", g.emoji || "🎯", false)) + `<input type="hidden" name="id" value="${g.id}">`, "goal-edit"); },
-  "goal-del": (el) => { state.goals = state.goals.filter(x => x.id !== el.dataset.id); state.habits.forEach(h => { if (h.goalId === el.dataset.id) h.goalId = null; }); save(); closeModal(); render(); },
+  "goal-edit": (el) => { const g = state.goals.find(x => x.id === el.dataset.id); formModal("Edit goal", goalFormFields(g) + `<input type="hidden" name="id" value="${g.id}">`, "goal-edit"); },
+  "goal-del": (el) => { const id = el.dataset.id; state.goals = state.goals.filter(x => x.id !== id); state.habits.forEach(h => { h.goalIds = (h.goalIds || []).filter(x => x !== id); }); save(); closeModal(); render(); },
   "gms-add": (el) => { const id = el.dataset.id; formModal("New milestone", fld("Milestone", txt("text", "e.g. Finish week 4")) + `<input type="hidden" name="gid" value="${id}">`, "gms-add"); },
   "gms-toggle": (el) => { const g = state.goals.find(x => x.id === el.dataset.g); const m = g && g.milestones.find(x => x.id === el.dataset.m); if (m) { m.done = !m.done; if (m.done) addXp(15, "Milestone"); save(); render(); openGoalDetail(g.id); } },
   "gms-del": (el) => { const g = state.goals.find(x => x.id === el.dataset.g); if (g) { g.milestones = g.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openGoalDetail(g.id); } },
@@ -2309,11 +2393,12 @@ function ensureJournal() {
 
 /* form submits */
 const SUBMITS = {
-  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", cadence: parseCadence(f), kind: f.kind ? "workout" : "", goalId: null, milestones: [], log: {} }); },
-  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.cadence = parseCadence(f); h.kind = f.kind ? "workout" : ""; } },
+  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: f.kind ? "workout" : "", goalIds: [], milestones: [], log: {} }); },
+  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = f.kind ? "workout" : ""; } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
-  "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", milestones: [] }); },
-  "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; } },
+  "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", progress: [], habitIds: [], milestones: [] }); },
+  "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; syncGoalMilestones(g); } },
+  "goal-log": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) { g.progress.push({ date: todayIso(), value: +f.value || 0 }); syncGoalMilestones(g); addXp(5, "Progress logged"); } },
   "gms-add": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) g.milestones.push({ id: uid(), text: f.text, done: false }); },
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
   "workout-add": (f) => { state.workout.plan.push({ id: uid(), name: f.name, category: f.category || "", minutes: +f.minutes, sets: +f.sets || 0, reps: +f.reps || 0, emoji: f.emoji || "🏋️" }); },
@@ -2363,7 +2448,8 @@ const SUBMITS = {
 const CHANGES = {
   "sleep-set": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.sleep = clamp(+el.value || 0, 0, 24); save(); render(); },
   "habit-note": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.note = el.value.slice(0, 600); save(); } },
-  "habit-goal": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.goalId = el.value || null; save(); } },
+  "habit-goal-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
+  "goal-habit-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "habit-amount": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const was = habitMet(h, dayCursor("habits")); const e = ensureHabitEntry(h, dayCursor("habits")); e.amount = Math.max(0, +el.value || 0); if (!was && habitMet(h, dayCursor("habits")) && dayCursor("habits") === todayIso()) addXp(10, h.name); save(); render(); openHabitDetail(h.id); } },
   "reflection": (el) => {
     const v = el.value.trim();
