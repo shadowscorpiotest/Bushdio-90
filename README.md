@@ -15,8 +15,8 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 | 💪 **Workout** | Weekly goal and a plan with **categories** (incl. **Class** for yoga/dance). Plan items are **editable & reorderable**, can be **scheduled** (days / time / focus), and can carry **attached exercises** so checking one off creates an **all-in-one session** pre-filled to log. **Sets/reps are optional**. **Per-day sessions** you can navigate; log **exercises with real sets** — *weight × reps*, *time/holds*, or *distance* — with **personal records** (PR toast), a **per-exercise progress chart**, note, and **photo & video** uploads. Plus **class packages** (e.g. 8 yoga sessions): track attendance + dates, see when to **renew**, and total spend (feeds Finance later). |
 | 🍎 **Nutrition** | Calorie goal, macro donut (protein / carbs / fats), daily meal checklist with kcal & macros |
 | 🎓 **Skills & Education** | Monthly study-hours goal, courses with progress, one-tap study logging |
-| 📚 **Reading** | Yearly book goal, Reading / Wishlist / Completed shelves, page progress, ratings |
-| 🎬 **Movies & Series** | Watchlist → Watching → Completed pipeline with ratings |
+| 📚 **Reading** | Yearly book goal with a **cover-forward gallery** — each book is a poster card with star rating, a one-line **blurb**, a status/progress badge, and a **"recommended by"** avatar row (people you type in). Reading / Wishlist / Completed shelves, page progress, cover uploads, ratings, favorites, and per-book notes |
+| 🎬 **Movies & Series** | Same **gallery** treatment: poster cards with stars, blurbs, favorites and "recommended by" avatars. A real tracker now — **poster uploads**, a detail view with a **review**, Watchlist → Watching → Completed pipeline (earns XP), **movie** cast + director + year, and **series episode tracking** (current season + a per-episode progress bar) |
 | 🏛️ **University** | Weekly study-hours goal, tasks with due dates and overdue indicators |
 | 💼 **Work Preparation** | Career-readiness ring and checklist (resume, LinkedIn, portfolio…) |
 | 🚀 **Projects** | Project cards with status and progress; shipping one earns big XP |
