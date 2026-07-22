@@ -522,6 +522,29 @@ li.done .row-txt b { color: var(--ink-3); text-decoration: line-through; }
 .goal-list li:hover { background: var(--surface-2); }
 .chip-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* per-habit color accent */
+.habit-li { position: relative; }
+.habit-li::before { content: ""; position: absolute; left: -4px; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--hc, transparent); }
+input[type="color"] { width: 100%; height: 42px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); padding: 4px; cursor: pointer; }
+
+/* goal detail — numeric */
+.goal-num { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.goal-num-big { font-size: 34px; font-weight: 800; display: flex; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.goal-num-big span { font-size: 15px; font-weight: 600; color: var(--ink-3); }
+.goal-num-meta { display: flex; flex-direction: column; gap: 3px; text-align: right; }
+.goal-num-meta small { display: inline-flex; align-items: center; gap: 5px; justify-content: flex-end; }
+.goal-num-meta svg { width: 13px; height: 13px; }
+.goal-habits { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.goal-habits li { display: flex; align-items: center; gap: 9px; padding: 8px 6px; border-radius: 10px; cursor: pointer; }
+.goal-habits li:hover { background: var(--surface-2); }
+.goal-habits li b { font-size: 13.5px; font-weight: 600; flex: 1; }
+.hdot { width: 10px; height: 10px; border-radius: 999px; flex: 0 0 auto; }
+.chip-check { display: flex; flex-direction: column; gap: 6px; }
+.goal-check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+.goal-check input { width: 17px; height: 17px; accent-color: var(--brand); }
+.link-list { display: flex; flex-direction: column; gap: 8px; }
+.link-list .check-inline { padding: 4px 2px; }
+
 /* templates / library */
 .card-head .btn.tiny { padding: 5px 11px; min-height: 30px; }
 .tmpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
