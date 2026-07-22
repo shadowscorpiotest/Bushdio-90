@@ -476,8 +476,11 @@ function isScheduled(h, d) {
 }
 function isSkipped(h, d) { const e = habitEntry(h, d); return !!(e && e.skip); }
 /* did the habit's goal get met that day? */
+function workoutDone(d) { return ((state.workout.log[d] || []).length) > 0; }
 function habitMet(h, d) {
   const e = habitEntry(h, d);
+  // a workout habit is one with your Workout section: logging a session IS completing it
+  if (h.kind === "workout") return workoutDone(d) || !!(e && e.done);
   if (h.type === "avoid") return !(e && e.slip);
   if (h.type === "quantity") return ((e && e.amount) || 0) >= (h.target || 1);
   return !!(e && e.done);
@@ -1182,7 +1185,7 @@ function vToday() {
       ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
 
     ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
-      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="ag-habit" data-id="${h.id}" style="--a:${h.color || "#6a5ae0"}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>
+      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="${h.kind === "workout" ? "habit-workout-jump" : "ag-habit"}" data-id="${h.id}" style="--a:${h.color || "#6a5ae0"}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>
       <p class="soft note">${I.spark} Add a task that "counts toward" a habit and checking it will tick the habit for you.</p>` : `<p class="soft small">No habits scheduled today.</p>`))}
 
     ${card("", cardHead("Upcoming") + (deadlines.length ? `
@@ -1280,7 +1283,10 @@ function syncGoalMilestones(g) {
 function habitRow(h, d) {
   const e = habitEntry(h, d) || {}, met = habitMet(h, d), streak = habitStreak(h);
   let control, sub;
-  if (h.type === "avoid") {
+  if (h.kind === "workout") {
+    control = `<button class="checkbox" data-action="habit-workout-jump" data-id="${h.id}" aria-label="${met ? "Workout logged — open Workout" : "Log a workout"}">${I.check}</button>`;
+    sub = met ? `Workout logged · ${streak} day streak` : `Log it in Workout · ${streak}🔥`;
+  } else if (h.type === "avoid") {
     control = `<button class="checkbox avoid ${e.slip ? "slip" : "kept"}" data-action="habit-toggle" data-id="${h.id}" aria-label="${e.slip ? "Slipped" : "Kept"}">${e.slip ? I.x : I.check}</button>`;
     sub = `${streak} days clean${e.slip ? " · slipped" : ""}`;
   } else if (h.type === "quantity") {
@@ -1406,6 +1412,9 @@ function habitDayControl(h, d, e) {
     </div>`;
   }
   const met = habitMet(h, d);
+  if (h.kind === "workout") {
+    return `<button class="btn ${met ? "good" : "primary"} slim" data-action="habit-log-workout" data-id="${h.id}">${met ? I.check + "Workout logged — open Workout" : I.dumbbell + "Log a workout"}</button>`;
+  }
   return `<button class="btn ${met ? "good" : "primary"} slim" data-action="habit-toggle-d" data-id="${h.id}">${met ? I.check + "Done — tap to undo" : "Mark done"}</button>`;
 }
 function openHabitDetail(id) {
@@ -1424,7 +1433,10 @@ function openHabitDetail(id) {
         <textarea data-change="habit-note" data-id="${h.id}" placeholder="A line about how it went…" maxlength="600">${esc(e.note || "")}</textarea></label>
       <div class="fld"><span>Last 4 weeks · ${habitCompletion(h, 30)}% completion</span>${habitHistoryRow(h)}</div>
       ${h.kind === "workout"
-        ? `<div class="pill-row">${e.workoutId ? `<span class="soft small">${I.check} Linked to a workout session</span><button class="btn tiny ghost" data-action="habit-goto-workout" data-id="${h.id}">Open workout</button>` : `<button class="btn ghost slim" data-action="habit-log-workout" data-id="${h.id}">${I.dumbbell}Log this as a workout session</button>`}</div>`
+        ? `<div class="pill-row">${workoutDone(d)
+            ? `<span class="soft small">${I.check} Completed by ${(state.workout.log[d] || []).length} workout session${(state.workout.log[d] || []).length > 1 ? "s" : ""}</span><button class="btn tiny ghost" data-action="habit-log-workout" data-id="${h.id}">Open workout</button>`
+            : `<button class="btn ghost slim" data-action="habit-log-workout" data-id="${h.id}">${I.dumbbell}Log a workout</button>`}
+           <span class="spacer"></span><button class="btn tiny ghost" data-action="habit-unmake-workout" data-id="${h.id}">Not a workout habit</button></div>`
         : `<button class="btn ghost slim" data-action="habit-make-workout" data-id="${h.id}">${I.dumbbell}This is a workout habit</button>`}
       <div class="fld"><span>Milestones</span>
         ${h.milestones.length ? `<ul class="ms-list">
@@ -2376,7 +2388,11 @@ const ACTIONS = {
   "go-journal": () => { closeModal(); go("journal"); },
 
   /* Today agenda + tasks */
-  "ag-habit": (el) => { setCursor("habits", todayIso()); toggleHabit(el.dataset.id); render(); },
+  "ag-habit": (el) => {
+    const h = state.habits.find(x => x.id === el.dataset.id);
+    if (h && h.kind === "workout") { setCursor("workout", todayIso()); go("workout"); toast("Log your workout here — it ticks the habit 💪"); return; }
+    setCursor("habits", todayIso()); toggleHabit(el.dataset.id); render();
+  },
   "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
   "ag-task": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); save(); render(); } },
   "ag-reflect": openReflectModal,
@@ -2419,18 +2435,10 @@ const ACTIONS = {
   "habit-dec": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { addHabitAmount(h, dayCursor("habits"), -habitStep(h)); render(); openHabitDetail(h.id); } },
   "habit-skip": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.skip = !e.skip; if (!e.skip && !e.done && !e.note && !e.amount && !e.workoutId && !e.slip) delete h.log[dayCursor("habits")]; save(); render(); openHabitDetail(h.id); } },
   "habit-make-workout": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.kind = "workout"; save(); render(); openHabitDetail(h.id); } },
-  "habit-log-workout": (el) => {
-    const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
-    const d = dayCursor("habits");
-    const sess = { id: uid(), date: d, category: "Strength", planId: null, note: `From habit: ${h.name}`, exercises: [], media: [] };
-    state.workout.sessions.push(sess);
-    (state.workout.log[d] = state.workout.log[d] || []).push(sess.id);
-    const e = ensureHabitEntry(h, d); e.done = true; e.workoutId = sess.id;
-    if (d === todayIso()) addXp(20, "Workout");
-    save(); render(); openHabitDetail(h.id);
-    toast("Workout session created 💪");
-  },
-  "habit-goto-workout": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = habitEntry(h, dayCursor("habits")); if (e && e.workoutId) setCursor("workout", dayCursor("habits")); closeModal(); go("workout"); } },
+  "habit-unmake-workout": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.kind = ""; save(); render(); openHabitDetail(h.id); } },
+  // workout habits are completed by logging a real session — jump to the Workout section for that day
+  "habit-log-workout": (el) => { setCursor("workout", dayCursor("habits")); closeModal(); go("workout"); },
+  "habit-workout-jump": (el) => { setCursor("workout", dayCursor("habits")); closeModal(); go("workout"); toast("Log your workout here — it ticks the habit 💪"); },
   "habit-edit": (el) => {
     const h = state.habits.find(x => x.id === el.dataset.id);
     formModal("Edit habit", habitFormFields(h) + `<input type="hidden" name="id" value="${h.id}">`, "habit-edit");
