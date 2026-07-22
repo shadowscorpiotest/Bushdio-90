@@ -142,7 +142,7 @@ function defaultState() {
     habits: [],                // {id,name,emoji,kind,goalId,milestones,log:{date:{done,note,workoutId}}}
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
     workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
-    nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70 }, meals: [], log: {}, shopping: [] },
+    nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70, fiber: 30 }, meals: [], log: {}, photos: {}, supplements: [], supTaken: {}, shopping: [] },
     skills: { monthlyHours: 10, courses: [], log: {} }, // log[date]=minutes
     reflections: {},           // {date: text}
     reading: { yearlyGoal: 12, books: [], log: {} },
@@ -204,10 +204,16 @@ function seedState(s) {
     { id: uid(), name: "Yoga",         emoji: "🧘", category: "Yoga", minutes: 20, sets: 0, reps: 0 },
   ];
   s.nutrition.meals = [
-    { id: uid(), slot: "Breakfast", name: "Oatmeal, banana & nuts",       kcal: 420, protein: 16, carbs: 62, fats: 13 },
-    { id: uid(), slot: "Lunch",     name: "Grilled chicken, rice, salad", kcal: 650, protein: 48, carbs: 70, fats: 16 },
-    { id: uid(), slot: "Dinner",    name: "Salmon, quinoa & veggies",     kcal: 580, protein: 40, carbs: 48, fats: 22 },
-    { id: uid(), slot: "Snacks",    name: "Greek yogurt & berries",       kcal: 220, protein: 18, carbs: 24, fats: 6 },
+    { id: uid(), slot: "Breakfast", name: "Oatmeal, banana & nuts",       time: "08:00", kcal: 420, protein: 16, carbs: 62, fats: 13, fiber: 8 },
+    { id: uid(), slot: "Lunch",     name: "Grilled chicken, rice, salad", time: "13:00", kcal: 650, protein: 48, carbs: 70, fats: 16, fiber: 9 },
+    { id: uid(), slot: "Snacks",    name: "Greek yogurt & berries",       time: "16:30", kcal: 220, protein: 18, carbs: 24, fats: 6,  fiber: 4 },
+    { id: uid(), slot: "Dinner",    name: "Salmon, quinoa & veggies",     time: "19:30", kcal: 580, protein: 40, carbs: 48, fats: 22, fiber: 7 },
+  ];
+  s.nutrition.supplements = [
+    { id: uid(), name: "Vitamin D3", emoji: "☀️", dose: "1000 IU", every: "day" },
+    { id: uid(), name: "Magnesium",  emoji: "🌙", dose: "300 mg",  every: "day" },
+    { id: uid(), name: "Iron",       emoji: "🩸", dose: "18 mg",   every: "week" },
+    { id: uid(), name: "Vitamin B12", emoji: "💊", dose: "1000 mcg", every: "month" },
   ];
   s.skills.courses = [
     { id: uid(), name: "Python for Beginners", progress: 60 },
@@ -273,6 +279,12 @@ function migrate(s) {
   (s.workout.plan || []).forEach(p => { if (!Array.isArray(p.days)) p.days = []; if (p.time == null) p.time = ""; if (p.focus == null) p.focus = ""; if (!Array.isArray(p.exercises)) p.exercises = []; });
   s.nutrition = s.nutrition || {};
   s.nutrition.shopping = s.nutrition.shopping || [];
+  s.nutrition.goals = s.nutrition.goals || {};
+  if (s.nutrition.goals.fiber == null) s.nutrition.goals.fiber = 30;
+  s.nutrition.photos = s.nutrition.photos || {};
+  s.nutrition.supplements = s.nutrition.supplements || [];
+  s.nutrition.supTaken = s.nutrition.supTaken || {};
+  (s.nutrition.meals || []).forEach(m => { if (m.time == null) m.time = ""; if (m.fiber == null) m.fiber = 0; });
   s.reflections = s.reflections || {};
   (s.habits || []).forEach(h => {
     h.milestones = h.milestones || [];
@@ -608,9 +620,21 @@ function studyMinutesToday() {
 }
 function nutritionToday() {
   const checked = state.nutrition.log[todayIso()] || {};
-  const tot = { kcal: 0, protein: 0, carbs: 0, fats: 0 };
-  state.nutrition.meals.forEach(m => { if (checked[m.id]) { tot.kcal += m.kcal; tot.protein += m.protein; tot.carbs += m.carbs; tot.fats += m.fats; } });
+  const tot = { kcal: 0, protein: 0, carbs: 0, fats: 0, fiber: 0 };
+  state.nutrition.meals.forEach(m => { if (checked[m.id]) { tot.kcal += m.kcal; tot.protein += m.protein; tot.carbs += m.carbs; tot.fats += m.fats; tot.fiber += (m.fiber || 0); } });
   return tot;
+}
+/* per-day meal photos live in nutrition.photos[date][mealId] = [{id,kind}] */
+function mealPhotos(t, id) { return ((state.nutrition.photos[t] || {})[id]) || []; }
+/* supplement cadence + "due" status */
+const SUP_PERIOD = { day: 1, week: 7, month: 30 };
+const SUP_LABEL = { day: "daily", week: "weekly", month: "monthly" };
+function supStatus(sup) {
+  const last = state.nutrition.supTaken[sup.id];
+  const period = SUP_PERIOD[sup.every] || 1;
+  if (!last) return { due: true, nextInDays: 0, last: null };
+  const elapsed = Math.floor((Date.parse(todayIso()) - Date.parse(last)) / DAY_MS);
+  return { due: elapsed >= period, nextInDays: Math.max(0, period - elapsed), last };
 }
 function socialWeek() {
   const log = state.social.log[weekKey()] || {};
@@ -1674,31 +1698,89 @@ function openExerciseHistory(name) {
 }
 
 /* ---------- nutrition ---------- */
+function macroBar(label, value, goal, color) {
+  const pct = goal ? 100 * value / goal : 0;
+  return `<div class="macro-bar">
+    <div class="macro-top"><span>${label}</span><b>${Math.round(value)}<small> / ${goal} g</small></b></div>
+    ${barHtml(pct, color)}
+  </div>`;
+}
 function vNutrition() {
+  const t = todayIso();
   const g = state.nutrition.goals, tot = nutritionToday();
-  const checked = state.nutrition.log[todayIso()] || {};
-  const macro = [
-    { label: "Protein", value: tot.protein, unit: "g" },
-    { label: "Carbs",   value: tot.carbs,   unit: "g" },
-    { label: "Fats",    value: tot.fats,    unit: "g" },
-  ];
+  const checked = state.nutrition.log[t] || {};
+  const kcalPct = g.kcal ? Math.round(100 * tot.kcal / g.kcal) : 0;
+  const meals = [...state.nutrition.meals].sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : 1);
+  const sups = state.nutrition.supplements;
+  const dueCount = sups.filter(s => supStatus(s).due).length;
   return `
   <div class="grid">
     ${card("", `
-      <p class="soft">Calories today</p><h3>${tot.kcal.toLocaleString()} / ${g.kcal.toLocaleString()} kcal</h3>
-      ${barHtml(100 * tot.kcal / g.kcal, "#30a46c")}
+      <div class="goal-row">
+        <div><p class="soft">Calories today</p><h3>${tot.kcal.toLocaleString()} / ${g.kcal.toLocaleString()}</h3><small class="soft">kcal · ${kcalPct}%</small></div>
+        <span class="big-ic" style="--a:#30a46c">${I.apple}</span>
+      </div>
+      ${barHtml(kcalPct, "#30a46c")}
       <div class="pill-row" style="margin-top:12px"><button class="btn ghost" data-action="nutrition-goals">${I.sliders}Edit goals</button></div>`)}
-    ${card("", cardHead("Macros") + `<div data-chart-type="donut" data-chart='${esc(JSON.stringify(macro))}' data-label="Macros today"></div>`)}
-    ${card("span2", cardHead("Today's meals", addBtn("Add meal", "meal-add")) + (state.nutrition.meals.length ? `
-      <ul class="check-list">
-        ${state.nutrition.meals.map(m => `
-          <li class="${checked[m.id] ? "done" : ""}">
-            <button class="checkbox" data-action="meal-toggle" data-id="${m.id}" aria-label="Toggle ${esc(m.name)}">${I.check}</button>
-            <span class="row-txt"><b>${esc(m.slot)}</b><small>${esc(m.name)} · ${m.kcal} kcal</small></span>
-            <span class="soft small">${m.protein}P · ${m.carbs}C · ${m.fats}F</span>
-            <button class="icon-btn ghost" data-action="meal-del" data-id="${m.id}" aria-label="Delete meal">${I.trash}</button>
-          </li>`).join("")}
+    ${card("", cardHead("Macros today") + `<div class="macro-bars">
+      ${macroBar("Protein", tot.protein, g.protein, "#e5484d")}
+      ${macroBar("Carbs", tot.carbs, g.carbs, "#f5a623")}
+      ${macroBar("Fats", tot.fats, g.fats, "#7c66dc")}
+      ${macroBar("Fiber", tot.fiber, g.fiber, "#30a46c")}
+    </div>`)}
+    ${card("span2", cardHead("Meal schedule", addBtn("Add meal", "meal-add")) + (meals.length ? `
+      <ul class="meal-sched">
+        ${meals.map(m => {
+          const done = !!checked[m.id];
+          const photos = mealPhotos(t, m.id);
+          return `<li class="meal-item ${done ? "done" : ""}">
+            <span class="meal-time">${m.time ? esc(m.time) : "—"}</span>
+            <button class="checkbox" data-action="meal-toggle" data-id="${m.id}" aria-label="Mark ${esc(m.name)} eaten">${I.check}</button>
+            <div class="meal-main">
+              <div class="meal-head">
+                <b>${esc(m.slot)}</b>
+                <span class="meal-actions">
+                  <button class="icon-btn ghost" data-action="meal-edit" data-id="${m.id}" aria-label="Edit meal">${I.edit}</button>
+                  <button class="icon-btn ghost" data-action="meal-del" data-id="${m.id}" aria-label="Delete meal">${I.trash}</button>
+                </span>
+              </div>
+              <small class="soft">${esc(m.name)}</small>
+              <div class="meal-macros">
+                <span class="mm kcal">${m.kcal} kcal</span>
+                <span class="mm">${m.protein}P</span><span class="mm">${m.carbs}C</span><span class="mm">${m.fats}F</span>${m.fiber ? `<span class="mm">${m.fiber}Fi</span>` : ""}
+              </div>
+              <div class="meal-photos">
+                ${photos.map(p => `<span class="meal-photo">
+                  <span class="media-host" data-media="${p.id}" data-media-kind="${p.kind}"><span class="media-missing">…</span></span>
+                  <button class="photo-x" data-action="meal-photo-del" data-id="${m.id}" data-ref="${p.id}" aria-label="Remove photo">${I.x}</button>
+                </span>`).join("")}
+                <label class="meal-photo-add" aria-label="Add a photo of this meal">
+                  <input type="file" accept="image/*" data-change="meal-photo-add" data-id="${m.id}" hidden>
+                  <span>${I.camera || I.upload}</span>
+                </label>
+              </div>
+            </div>
+          </li>`;
+        }).join("")}
       </ul>` : emptyMsg("apple", "Plan your meals for the day.", addBtn("Add a meal", "meal-add"))))}
+    ${card("span2", cardHead(`Supplements${dueCount ? ` · ${dueCount} due` : ""}`, addBtn("Add", "sup-add")) + (sups.length ? `
+      <ul class="sup-list">
+        ${sups.map(s => {
+          const st = supStatus(s);
+          const status = st.due
+            ? `<span class="sup-due">Due now</span>`
+            : `<span class="sup-next">in ${st.nextInDays} day${st.nextInDays === 1 ? "" : "s"}</span>`;
+          return `<li class="sup-item ${st.due ? "due" : "taken"}">
+            <span class="sup-emoji" aria-hidden="true">${esc(s.emoji || "💊")}</span>
+            <div class="row-txt"><b>${esc(s.name)}</b><small>${esc(s.dose || "")}${s.dose ? " · " : ""}${SUP_LABEL[s.every] || "daily"}</small></div>
+            ${status}
+            ${st.due
+              ? `<button class="btn tiny good" data-action="sup-take" data-id="${s.id}">${I.check}Take</button>`
+              : `<button class="btn tiny ghost" data-action="sup-undo" data-id="${s.id}" aria-label="Undo">${I.rotate || ""}Undo</button>`}
+            <button class="icon-btn ghost" data-action="sup-del" data-id="${s.id}" aria-label="Delete supplement">${I.trash}</button>
+          </li>`;
+        }).join("")}
+      </ul>` : emptyMsg("apple", "Track vitamins & supplements with reminders.", addBtn("Add a supplement", "sup-add"))))}
   </div>`;
 }
 
@@ -2433,19 +2515,46 @@ const ACTIONS = {
 
   /* nutrition */
   "meal-add": () => formModal("Add meal",
-    fld("Slot", `<select name="slot">${["Breakfast", "Lunch", "Dinner", "Snacks"].map(s => `<option>${s}</option>`).join("")}</select>`) +
+    `<div class="fld-row">${fld("Slot", `<select name="slot">${["Breakfast", "Lunch", "Dinner", "Snacks"].map(s => `<option>${s}</option>`).join("")}</select>`)}${fld("Time", `<input type="time" name="time" value="08:00">`)}</div>` +
     fld("Description", txt("name", "e.g. Oatmeal & berries")) +
-    `<div class="fld-row">${fld("kcal", num("kcal", 400, 0, 10))}${fld("Protein g", num("protein", 20, 0, 1))}${fld("Carbs g", num("carbs", 40, 0, 1))}${fld("Fats g", num("fats", 10, 0, 1))}</div>`, "meal-add"),
+    `<div class="fld-row">${fld("kcal", num("kcal", 400, 0, 10))}${fld("Protein g", num("protein", 20, 0, 1))}${fld("Carbs g", num("carbs", 40, 0, 1))}${fld("Fats g", num("fats", 10, 0, 1))}${fld("Fiber g", num("fiber", 5, 0, 1))}</div>`, "meal-add"),
+  "meal-edit": (el) => {
+    const m = state.nutrition.meals.find(x => x.id === el.dataset.id);
+    if (!m) return;
+    formModal("Edit meal",
+      `<div class="fld-row">${fld("Slot", `<select name="slot">${["Breakfast", "Lunch", "Dinner", "Snacks"].map(s => `<option${s === m.slot ? " selected" : ""}>${s}</option>`).join("")}</select>`)}${fld("Time", `<input type="time" name="time" value="${m.time || ""}">`)}</div>` +
+      fld("Description", txt("name", "", m.name)) +
+      `<div class="fld-row">${fld("kcal", num("kcal", m.kcal, 0, 10))}${fld("Protein g", num("protein", m.protein, 0, 1))}${fld("Carbs g", num("carbs", m.carbs, 0, 1))}${fld("Fats g", num("fats", m.fats, 0, 1))}${fld("Fiber g", num("fiber", m.fiber || 0, 0, 1))}</div>` +
+      `<input type="hidden" name="id" value="${m.id}">`, "meal-edit");
+  },
   "meal-toggle": (el) => {
     const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {};
     l[el.dataset.id] = !l[el.dataset.id];
     if (l[el.dataset.id]) addXp(5, "Meal logged");
     save(); render();
   },
-  "meal-del": (el) => { state.nutrition.meals = state.nutrition.meals.filter(m => m.id !== el.dataset.id); save(); render(); },
+  "meal-del": (el) => {
+    const t = todayIso();
+    mealPhotos(t, el.dataset.id).forEach(p => mediaDelete(p.id));
+    state.nutrition.meals = state.nutrition.meals.filter(m => m.id !== el.dataset.id);
+    save(); render();
+  },
+  "meal-photo-del": (el) => {
+    const t = todayIso(), arr = (state.nutrition.photos[t] || {})[el.dataset.id];
+    if (!arr) return;
+    state.nutrition.photos[t][el.dataset.id] = arr.filter(p => p.id !== el.dataset.ref);
+    mediaDelete(el.dataset.ref);
+    save(); render();
+  },
   "nutrition-goals": () => formModal("Nutrition goals",
     fld("Calories", num("kcal", state.nutrition.goals.kcal, 800, 50)) +
-    `<div class="fld-row">${fld("Protein g", num("protein", state.nutrition.goals.protein))}${fld("Carbs g", num("carbs", state.nutrition.goals.carbs))}${fld("Fats g", num("fats", state.nutrition.goals.fats))}</div>`, "nutrition-goals"),
+    `<div class="fld-row">${fld("Protein g", num("protein", state.nutrition.goals.protein))}${fld("Carbs g", num("carbs", state.nutrition.goals.carbs))}${fld("Fats g", num("fats", state.nutrition.goals.fats))}${fld("Fiber g", num("fiber", state.nutrition.goals.fiber))}</div>`, "nutrition-goals"),
+  "sup-add": () => formModal("Add supplement",
+    `<div class="fld-row">${fld("Name", txt("name", "e.g. Vitamin D3"))}${fld("Emoji", txt("emoji", "💊", "💊", false))}</div>` +
+    `<div class="fld-row">${fld("Dose", txt("dose", "e.g. 1000 IU", "", false))}${fld("Every", `<select name="every"><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option></select>`)}</div>`, "sup-add"),
+  "sup-take": (el) => { state.nutrition.supTaken[el.dataset.id] = todayIso(); addXp(3, "Supplement taken"); toast("Nice — logged 💊"); save(); render(); },
+  "sup-undo": (el) => { delete state.nutrition.supTaken[el.dataset.id]; save(); render(); },
+  "sup-del": (el) => { state.nutrition.supplements = state.nutrition.supplements.filter(s => s.id !== el.dataset.id); delete state.nutrition.supTaken[el.dataset.id]; save(); render(); },
 
   /* skills / university */
   "study-log": (el) => {
@@ -2676,8 +2785,13 @@ const SUBMITS = {
     if (after > before && before > 0) toast(`New PR on ${ex.name} — ${prLabel(ex.kind, after)} 🏆`, "badge");
     addXp(5, "Set logged");
   },
-  "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats }); },
-  "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats }; },
+  "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, time: f.time || "", kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }); },
+  "meal-edit": (f) => {
+    const m = state.nutrition.meals.find(x => x.id === f.id);
+    if (m) { m.slot = f.slot; m.name = f.name; m.time = f.time || ""; m.kcal = +f.kcal; m.protein = +f.protein; m.carbs = +f.carbs; m.fats = +f.fats; m.fiber = +f.fiber || 0; }
+  },
+  "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }; },
+  "sup-add": (f) => { state.nutrition.supplements.push({ id: uid(), name: f.name, emoji: f.emoji || "💊", dose: f.dose || "", every: ["day", "week", "month"].includes(f.every) ? f.every : "day" }); },
   "skills-goal": (f) => { state.skills.monthlyHours = +f.hours; },
   "uni-goal": (f) => { state.university.weeklyHours = +f.hours; },
   "course-add": (f) => { state.skills.courses.push({ id: uid(), name: f.name, progress: 0 }); },
@@ -2742,6 +2856,14 @@ const CHANGES = {
   "session-media": (el) => {
     const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (!s) return;
     storeMediaFile(el.files[0], (ref) => { s.media = s.media || []; s.media.push(ref); save(); render(); toast(`${ref.kind === "video" ? "Video" : "Photo"} added 📎`); });
+  },
+  "meal-photo-add": (el) => {
+    const t = todayIso(), id = el.dataset.id;
+    storeMediaFile(el.files[0], (ref) => {
+      const day = state.nutrition.photos[t] = state.nutrition.photos[t] || {};
+      (day[id] = day[id] || []).push(ref);
+      save(); render(); toast("Meal photo added 📸");
+    });
   },
   "book-page-set": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
