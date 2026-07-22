@@ -111,6 +111,7 @@ const areaOf = (id) => AREAS.find(a => a.id === id);
 
 const NAV_GROUPS = [
   { label: "Overview", items: [
+    { id: "today",     name: "Today",     icon: "spark" },
     { id: "dashboard", name: "Dashboard", icon: "home" },
     { id: "progress",  name: "Progress",  icon: "chart" },
   ]},
@@ -381,7 +382,7 @@ function addXp(n, label) {
   state.xpLog[t] = (state.xpLog[t] || 0) + n;
   const after = levelInfo().lvl;
   toast(`+${n} XP${label ? " · " + label : ""}`, "xp");
-  if (after > before) toast(`Level up! You reached level ${after} 🎉`, "level");
+  if (after > before) { toast(`Level up! You reached level ${after} 🎉`, "level"); celebrate(); }
   checkBadges();
   save();
   renderTopbar();
@@ -619,6 +620,7 @@ function checkMissions() {
     if (m.done() && !state.claimed[t][m.id]) {
       state.claimed[t][m.id] = true;
       addXp(m.xp, m.title());
+      if (m.id === "habits") { toast("Perfect day! Every habit done 🌟", "badge"); celebrate(); }
     }
   });
   save();
@@ -668,9 +670,10 @@ function toggleTheme() {
 }
 
 /* ================= shell: nav / topbar ================= */
-let currentView = "dashboard";
+let currentView = "today";
 
 const VIEW_META = {
+  today:        { title: "Today",        sub: () => new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) },
   dashboard:    { title: "Dashboard",    sub: () => new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) },
   progress:     { title: "Progress",     sub: () => "Your journey in numbers" },
   integrations: { title: "Integrations", sub: () => "Connect your favorite apps" },
@@ -703,7 +706,7 @@ function renderNav() {
       </div>
     </div>`;
   const bottom = [
-    { id: "dashboard", name: "Home",     icon: "home" },
+    { id: "today",     name: "Today",    icon: "spark" },
     { id: "habits",    name: "Habits",   icon: "target" },
     { id: "_add",      name: "Add",      icon: "plus" },
     { id: "progress",  name: "Progress", icon: "chart" },
@@ -758,7 +761,10 @@ function closeModal() { $("#modalBackdrop").hidden = true; $("#modal").innerHTML
 function openDrawer() {
   $("#drawer").innerHTML = `
     <div class="drawer-head"><strong>Life areas</strong><button class="icon-btn" data-action="close-drawer" aria-label="Close">${I.x}</button></div>
-    <div class="drawer-grid">${AREAS.map(a => `
+    <div class="drawer-grid">
+      <button class="drawer-item" data-nav="today" style="--a:#7c66dc"><span class="tile-ic">${I.spark}</span><span>Today</span></button>
+      <button class="drawer-item" data-nav="dashboard" style="--a:#6a5ae0"><span class="tile-ic">${I.home}</span><span>Dashboard</span></button>
+      ${AREAS.map(a => `
       <button class="drawer-item" data-nav="${a.id}" style="--a:${a.hue}">
         <span class="tile-ic">${I[a.icon]}</span><span>${esc(a.name)}</span>
       </button>`).join("")}
@@ -885,6 +891,54 @@ function drawCharts() {
   });
 }
 
+/* ================= motion primitives ================= */
+const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+function animateCounts() {
+  if (reduceMotion()) return;
+  $$("[data-count]").forEach(el => {
+    if (el.dataset.counted) return; el.dataset.counted = "1";
+    const raw = el.dataset.count, target = parseFloat(raw) || 0, dec = raw.includes(".") ? 1 : 0;
+    const suffix = el.dataset.countSuffix || "", dur = 750, start = performance.now();
+    const fmt = v => (dec ? v.toFixed(dec) : Math.round(v).toLocaleString()) + suffix;
+    (function tick(now) {
+      const p = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = fmt(target * e);
+      if (p < 1) requestAnimationFrame(tick); else el.textContent = fmt(target);
+    })(start);
+  });
+}
+function animateBars() {
+  $$(".bar > span").forEach(sp => {
+    if (sp.dataset.animated) return; sp.dataset.animated = "1";
+    const w = sp.style.width; sp.style.width = "0%";
+    requestAnimationFrame(() => requestAnimationFrame(() => { sp.style.width = w; }));
+  });
+}
+function animateRings() {
+  $$(".ring-val").forEach(c => {
+    if (c.dataset.animated) return; c.dataset.animated = "1";
+    const off = c.getAttribute("stroke-dashoffset"), dash = c.getAttribute("stroke-dasharray");
+    c.setAttribute("stroke-dashoffset", dash);
+    requestAnimationFrame(() => requestAnimationFrame(() => { c.setAttribute("stroke-dashoffset", off); }));
+  });
+}
+function runMotion() { animateBars(); animateRings(); animateCounts(); }
+function celebrate() {
+  if (reduceMotion()) return;
+  const c = document.createElement("canvas"); c.className = "confetti-canvas";
+  document.body.appendChild(c);
+  const ctx = c.getContext("2d"), W = c.width = innerWidth, H = c.height = innerHeight;
+  const cols = ["#6a5ae0", "#f76b15", "#30a46c", "#e5484d", "#eda100", "#0091ff", "#d6409f"];
+  const parts = [...Array(140)].map(() => ({ x: W / 2 + (Math.random() - .5) * W * .4, y: H * .28, vx: (Math.random() - .5) * 11, vy: Math.random() * -13 - 4, g: .42, r: Math.random() * 7 + 3, col: cols[Math.random() * cols.length | 0], rot: Math.random() * 6, vr: (Math.random() - .5) * .35 }));
+  let t0 = performance.now();
+  (function frame(now) {
+    const dt = Math.min(2, (now - t0) / 16); t0 = now; ctx.clearRect(0, 0, W, H); let alive = false;
+    parts.forEach(p => { p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt; if (p.y < H + 24) alive = true; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col; ctx.globalAlpha = .9; ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * .62); ctx.restore(); });
+    if (alive) requestAnimationFrame(frame); else c.remove();
+  })(t0);
+  setTimeout(() => c.remove(), 4500);
+}
+
 /* tooltip */
 function bindTip() {
   const tip = $("#tip");
@@ -918,6 +972,82 @@ function greeting() {
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   return "Good evening";
+}
+
+/* ---------- Today (OS home) ---------- */
+function todayAgenda() {
+  const t = todayIso(), items = [];
+  state.habits.filter(h => h.type !== "avoid" && isScheduled(h, t) && !isSkipped(h, t)).forEach(h => {
+    items.push({ kind: "habit", id: h.id, emoji: h.emoji, hue: "#6a5ae0", title: h.name,
+      sub: h.type === "quantity" ? `${(habitEntry(h, t) || {}).amount || 0} / ${h.target} ${h.unit || ""}` : "habit",
+      done: habitMet(h, t), action: "ag-habit" });
+  });
+  const checked = state.nutrition.log[t] || {};
+  state.nutrition.meals.forEach(m => items.push({ kind: "meal", id: m.id, hue: "#30a46c", title: m.slot, sub: m.name, done: !!checked[m.id], action: "ag-meal", emoji: "🍽️" }));
+  state.todos.filter(td => !td.date || td.date === t).forEach(td => items.push({ kind: "task", id: td.id, hue: "#3e63dd", title: td.text, sub: "task", done: td.done, action: "ag-task", emoji: "✅" }));
+  items.push({ kind: "reflect", hue: "#7c66dc", title: "Daily reflection", sub: reflectionOfDay(), done: !!state.reflections[t], action: "ag-reflect", emoji: "✨" });
+  state.university.tasks.filter(k => !k.done && k.due <= addDays(t, 5)).forEach(k => items.push({ kind: "deadline", nav: "university", icon: "building", hue: "#3e63dd", title: k.title, when: daysUntil(k.due), sub: "university deadline" }));
+  return items;
+}
+function agendaRow(it) {
+  if (it.nav) {
+    return `<div class="agenda-item" style="--a:${it.hue}" data-nav="${it.nav}">
+      <span class="a-ic" style="--a:${it.hue}">${I[it.icon]}</span>
+      <span class="a-txt"><b>${esc(it.title)}</b><small>${esc(it.sub)}</small></span>
+      <span class="a-when">${esc(it.when || "")}</span>
+    </div>`;
+  }
+  return `<div class="agenda-item ${it.done ? "done" : ""}" style="--a:${it.hue}">
+    <button class="a-check ${it.done ? "on" : ""}" data-action="${it.action}" data-id="${it.id || ""}" aria-label="${it.action === "ag-reflect" ? "Write reflection" : "Complete " + esc(it.title)}">${I.check}</button>
+    <span class="a-txt"><b>${it.emoji ? esc(it.emoji) + " " : ""}${esc(it.title)}</b><small>${esc(it.sub)}</small></span>
+  </div>`;
+}
+function openReflectModal() {
+  openModal(`<header class="modal-head"><h3>${I.spark} Daily reflection</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body"><p class="reflect-prompt">${esc(reflectionOfDay())}</p>
+      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[todayIso()] || "")}</textarea>
+      <div class="modal-foot"><button type="button" class="btn primary" data-action="modal-close">Done</button></div></div>`);
+}
+function vToday() {
+  const li = levelInfo(), t = todayIso();
+  const agenda = todayAgenda();
+  const ordered = [...agenda].sort((a, b) => ((a.nav ? 2 : a.done ? 1 : 0) - (b.nav ? 2 : b.done ? 1 : 0)));
+  const remaining = agenda.filter(a => !a.done && !a.nav).length;
+  const todos = state.todos.filter(td => !td.date || td.date === t);
+  return `
+  <div class="grid dash">
+    ${card("today-hero span2", `
+      <div class="hero-row">
+        <div>
+          <p class="hero-hi">${greeting()}, ${esc(state.profile.name || "friend")} <span aria-hidden="true">☀️</span></p>
+          <h2 class="hero-big">${remaining ? `${remaining} thing${remaining > 1 ? "s" : ""} left today` : "All done for today 🎉"}</h2>
+          <div class="hero-level">
+            <span class="lv-pill">Level ${li.lvl}</span>
+            <span class="bar"><span style="width:${li.pct}%"></span></span>
+            <small>${li.into.toLocaleString()} / ${li.need.toLocaleString()} XP</small>
+          </div>
+        </div>
+        <div class="hero-ring">${ring(li.pct, { size: 96, sw: 9, color: "#fff", center: "Lv " + li.lvl, label: "level progress" })}</div>
+      </div>
+      <div class="stat-row">
+        <div class="stat"><b data-count="${perfectStreak()}">0</b><span>${I.flame} day streak</span></div>
+        <div class="stat"><b data-count="${weeklyProgress()}" data-count-suffix="%">0</b><span>${I.activity} today</span></div>
+        <div class="stat"><b data-count="${Object.keys(state.badges).length}">0</b><span>${I.medal} badges</span></div>
+      </div>`)}
+
+    ${card("span2", cardHead(`Today's focus <small class="soft">${remaining} left</small>`) + (ordered.length ? `
+      <div class="agenda-list">${ordered.map(agendaRow).join("")}</div>` : `<div class="agenda-empty"><span class="big">🌿</span><p>Nothing on the agenda — add a task or a habit.</p></div>`))}
+
+    ${card("span2", cardHead("Tasks") + `
+      <ul class="check-list task-list">
+        ${todos.length ? todos.map(td => `<li class="${td.done ? "done" : ""}">
+          <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
+          <span class="row-txt"><b>${esc(td.text)}</b></span>
+          <button class="icon-btn ghost" data-action="todo-del" data-id="${td.id}" aria-label="Delete task">${I.trash}</button>
+        </li>`).join("") : `<p class="soft small" style="padding:6px 2px">No tasks yet — add one below.</p>`}
+      </ul>
+      <form data-submit="todo-add" class="task-add"><input name="text" placeholder="Add a task…" autocomplete="off" required maxlength="120"><button class="btn primary" type="submit" aria-label="Add task">${I.plus}</button></form>`)}
+  </div>`;
 }
 
 function vDashboard() {
@@ -1766,7 +1896,7 @@ function vProfile() {
 
 /* ================= render ================= */
 const VIEWS = {
-  dashboard: vDashboard, habits: vHabits, health: vHealth, workout: vWorkout,
+  today: vToday, dashboard: vDashboard, habits: vHabits, health: vHealth, workout: vWorkout,
   nutrition: vNutrition, skills: vSkills, reading: vReading, media: vMedia,
   university: vUniversity, work: vWork, projects: vProjects, social: vSocial,
   memories: vMemories, journal: vJournal, progress: vProgress,
@@ -1780,6 +1910,7 @@ function render() {
   renderTopbar();
   drawCharts();
   hydrateMedia();
+  runMotion();
 }
 
 /* ================= modals / forms ================= */
@@ -1804,7 +1935,7 @@ function openQuickAdd() {
   openModal(`
     <header class="modal-head"><h3>Quick add</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="quick-grid">
-      ${[["habit-add", "target", "Habit"], ["workout-add", "dumbbell", "Workout"], ["book-add", "book", "Book"],
+      ${[["task-add", "check", "Task"], ["habit-add", "target", "Habit"], ["workout-add", "dumbbell", "Workout"], ["book-add", "book", "Book"],
          ["media-add", "film", "Movie / series"], ["uni-task-add", "building", "Uni task"], ["project-add", "rocket", "Project"],
          ["memory-add", "camera", "Memory"], ["go-journal", "pen", "Journal"]]
         .map(([act, ic, lbl]) => `<button class="quick-item" data-action="${act}">${I[ic]}<span>${lbl}</span></button>`).join("")}
@@ -1818,6 +1949,15 @@ const ACTIONS = {
   "theme-toggle": toggleTheme,
   "quick-add": openQuickAdd,
   "go-journal": () => { closeModal(); go("journal"); },
+
+  /* Today agenda + tasks */
+  "ag-habit": (el) => { setCursor("habits", todayIso()); toggleHabit(el.dataset.id); render(); },
+  "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
+  "ag-task": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); save(); render(); } },
+  "ag-reflect": openReflectModal,
+  "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); save(); render(); } },
+  "todo-del": (el) => { state.todos = state.todos.filter(x => x.id !== el.dataset.id); save(); render(); },
+  "task-add": () => formModal("New task", fld("Task", txt("text", "e.g. Buy groceries")), "todo-add"),
 
   /* day navigation (shared) */
   "day-prev": (el) => { const v = el.dataset.view; setCursor(v, addDays(dayCursor(v), -1)); render(); },
@@ -2144,6 +2284,7 @@ const SUBMITS = {
   "project-add": (f) => { state.projects.push({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
   "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360) }); addXp(10, "Memory saved"); },
+  "todo-add": (f) => { if (f.text) state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso() }); },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { localStorage.removeItem(STORE_KEY); state = seedState(defaultState()); state.profile.onboarded = true; save(); },
 };

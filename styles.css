@@ -219,10 +219,10 @@ svg.ic { width: 20px; height: 20px; flex: 0 0 auto; }
   display: block; height: 8px; border-radius: 999px;
   background: var(--heat-0); overflow: hidden; min-width: 40px;
 }
-.bar > span { display: block; height: 100%; border-radius: 999px; background: var(--brand); transition: width .4s ease; }
+.bar > span { display: block; height: 100%; border-radius: 999px; background: var(--brand); transition: width .75s cubic-bezier(.22,.8,.28,1); }
 .bar.mini { height: 5px; }
 .ring-track { fill: none; stroke: var(--heat-0); }
-.ring-val { fill: none; stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dashoffset .5s ease; }
+.ring-val { fill: none; stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; transition: stroke-dashoffset .9s cubic-bezier(.22,.8,.28,1); }
 .ring-txt { fill: var(--ink); font-size: 21px; font-weight: 800; text-anchor: middle; dominant-baseline: middle; }
 .ring-sub { fill: var(--ink-3); font-size: 10.5px; text-anchor: middle; dominant-baseline: middle; }
 
@@ -842,3 +842,129 @@ li.done .checkbox { animation: checkPop .3s ease; }
   .stat b { font-size: 17px; }
   .hero-mascot { display: none; }
 }
+
+/* ============================================================
+   Design System 2.0 — depth, gradients, motion, polish
+   (loaded last so its refinements win the cascade)
+   ============================================================ */
+:root {
+  --grad-brand: linear-gradient(135deg, #7b6ef0 0%, #9a6ee8 48%, #c98be8 100%);
+  --grad-brand-soft: linear-gradient(135deg, color-mix(in srgb, var(--brand) 16%, transparent), color-mix(in srgb, #c98be8 16%, transparent));
+  --ring-shadow: 0 2px 8px -2px color-mix(in srgb, var(--brand) 45%, transparent);
+  --ease-spring: cubic-bezier(.34, 1.4, .5, 1);
+  --ease-out: cubic-bezier(.22, .8, .28, 1);
+}
+:root[data-theme="dark"] {
+  --grad-brand: linear-gradient(135deg, #5647b8 0%, #6f54cc 48%, #8e5fce 100%);
+}
+
+/* richer card depth + hover lift */
+.card { transition: transform .3s var(--ease-out), box-shadow .3s var(--ease-out), border-color .3s; }
+.grid > .card:hover { box-shadow: 0 2px 4px rgba(26,26,43,.05), 0 18px 40px -20px rgba(26,26,43,.22); }
+:root[data-theme="dark"] .grid > .card:hover { box-shadow: 0 2px 4px rgba(0,0,0,.4), 0 20px 44px -20px rgba(0,0,0,.7); }
+
+/* buttons: spring press + lift */
+.btn { transition: transform .18s var(--ease-spring), filter .15s, background .15s, box-shadow .2s; }
+.btn.primary { background: var(--grad-brand); box-shadow: 0 8px 20px -10px color-mix(in srgb, var(--brand) 80%, transparent); }
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(0) scale(.97); }
+.icon-btn { transition: transform .18s var(--ease-spring), color .15s, border-color .15s, background .15s; }
+.icon-btn:hover { transform: translateY(-1px); }
+.icon-btn:active { transform: scale(.92); }
+
+/* interactive tiles: lift + colored glow on hover */
+.area-tile, .mini-stat, .quick-item, .tmpl-item, .drawer-item, .book-row, .goal-list li, .mission, .ex-pr-list li {
+  transition: transform .25s var(--ease-out), box-shadow .25s var(--ease-out), border-color .2s, background .2s;
+}
+.area-tile:hover { transform: translateY(-3px); box-shadow: 0 14px 30px -16px color-mix(in srgb, var(--a) 70%, transparent); }
+.tmpl-item:hover, .mini-stat:hover { transform: translateY(-2px); }
+.tile-ic, .big-ic { transition: transform .25s var(--ease-spring); }
+.area-tile:hover .tile-ic { transform: scale(1.08) rotate(-3deg); }
+
+/* checkbox pop + fill polish */
+.checkbox { transition: background .2s, border-color .2s, color .2s, transform .15s var(--ease-spring); }
+.checkbox:active { transform: scale(.88); }
+
+/* hero card 2.0 — animated aura + glass tiles */
+.hero-card { position: relative; overflow: hidden; }
+.hero-card::before {
+  content: ""; position: absolute; inset: -40% -10% auto auto; width: 420px; height: 420px;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.35), transparent 60%),
+              conic-gradient(from 0deg, rgba(255,255,255,.18), rgba(255,255,255,0) 40%, rgba(255,255,255,.18));
+  border-radius: 50%; filter: blur(6px); opacity: .5;
+  animation: auraSpin 18s linear infinite; pointer-events: none;
+}
+@keyframes auraSpin { to { transform: rotate(360deg); } }
+.hero-mascot { position: relative; box-shadow: 0 10px 30px -10px rgba(0,0,0,.35); animation: floaty 5s ease-in-out infinite; }
+@keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.stat { backdrop-filter: blur(4px); transition: transform .25s var(--ease-out), background .2s; }
+.stat:hover { transform: translateY(-2px); background: rgba(255,255,255,.2); }
+.stat b { font-variant-numeric: tabular-nums; }
+
+/* nav active accent bar */
+.nav-item { position: relative; }
+.nav-item.active::before { content: ""; position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: var(--brand); }
+
+/* bottom nav + FAB glow */
+.bn-add { transition: transform .2s var(--ease-spring), box-shadow .2s; }
+.bn-add:hover { transform: translateY(-24px) scale(1.05); }
+.bn-add:active { transform: translateY(-22px) scale(.95); }
+.bn-item svg { transition: transform .2s var(--ease-spring); }
+.bn-item.active svg { transform: translateY(-2px) scale(1.08); }
+
+/* progress ring drop shadow */
+.ring-val { filter: drop-shadow(var(--ring-shadow)); }
+
+/* confetti overlay */
+.confetti-canvas { position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+
+/* smoother, springier card entrance */
+.grid > .card { animation: cardIn .5s var(--ease-out) both; }
+@keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(.99); } to { opacity: 1; transform: none; } }
+
+/* ---------- OS "Today" agenda ---------- */
+.today-hero { background: var(--grad-brand); color: #fff; border: 0; position: relative; overflow: hidden; }
+.today-hero::before {
+  content: ""; position: absolute; inset: -40% -10% auto auto; width: 420px; height: 420px;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.32), transparent 60%);
+  border-radius: 50%; filter: blur(6px); opacity: .5; animation: auraSpin 20s linear infinite; pointer-events: none;
+}
+.hero-ring { position: relative; flex: 0 0 auto; }
+.today-hero .ring-track { stroke: rgba(255,255,255,.25); }
+.today-hero .ring-txt { fill: #fff; font-size: 18px; }
+.today-hero .ring-val { filter: none; }
+@media (max-width: 420px) { .hero-ring { display: none; } }
+.agenda-list { display: flex; flex-direction: column; gap: 8px; }
+.agenda-item {
+  display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 14px;
+  background: var(--surface-2); border: 1px solid var(--line); cursor: pointer;
+  transition: transform .2s var(--ease-out), border-color .2s, background .2s; text-align: left; width: 100%;
+}
+.agenda-item:hover { transform: translateX(3px); border-color: var(--a, var(--brand)); }
+.agenda-item .a-check {
+  width: 26px; height: 26px; flex: 0 0 auto; border: 2px solid var(--line); border-radius: 9px;
+  display: grid; place-items: center; color: transparent; transition: background .2s, border-color .2s, color .2s, transform .15s var(--ease-spring);
+}
+.agenda-item .a-check:hover { border-color: var(--a, var(--brand)); }
+.agenda-item .a-check.on { background: var(--good); border-color: var(--good); color: #fff; }
+.agenda-item.done .a-txt b { text-decoration: line-through; color: var(--ink-3); }
+.a-ic { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--a, var(--brand)) 15%, transparent); color: var(--a, var(--brand)); }
+.a-ic svg { width: 18px; height: 18px; }
+.a-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.a-txt b { font-size: 14px; font-weight: 600; }
+.a-txt small { font-size: 12px; color: var(--ink-3); }
+.a-when { font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+.agenda-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px; text-align: center; color: var(--ink-3); }
+.agenda-empty .big { font-size: 34px; }
+
+/* task list */
+.task-add { display: flex; gap: 8px; margin-top: 10px; }
+.task-add input { flex: 1; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-2); padding: 9px 12px; }
+.task-list li { display: flex; align-items: center; gap: 10px; padding: 9px 2px; }
+.task-list li .row-txt b { font-weight: 500; }
+
+/* section label chips row */
+.chip-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* focus-visible refinement */
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
