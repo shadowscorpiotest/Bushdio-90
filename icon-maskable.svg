@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b7bf3"/>
+      <stop offset="0.55" stop-color="#6a5ae0"/>
+      <stop offset="1" stop-color="#4f3cc4"/>
+    </linearGradient>
+    <linearGradient id="petalM" x1="256" y1="146" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eee9ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- mark scaled to ~66% so it sits inside the maskable safe zone -->
+  <g transform="translate(256 256)" fill="url(#petalM)">
+    <g transform="scale(0.72)">
+      <ellipse cx="0" cy="-108" rx="34" ry="74"/>
+      <g transform="rotate(60)"><ellipse cx="0" cy="-108" rx="34" ry="74"/></g>
+      <g transform="rotate(120)"><ellipse cx="0" cy="-108" rx="34" ry="74"/></g>
+      <g transform="rotate(180)"><ellipse cx="0" cy="-108" rx="34" ry="74"/></g>
+      <g transform="rotate(240)"><ellipse cx="0" cy="-108" rx="34" ry="74"/></g>
+      <g transform="rotate(300)"><ellipse cx="0" cy="-108" rx="34" ry="74"/></g>
+    </g>
+  </g>
+  <circle cx="256" cy="256" r="29" fill="#6a5ae0"/>
+  <circle cx="256" cy="256" r="29" fill="none" stroke="#ffffff" stroke-width="7"/>
+</svg>

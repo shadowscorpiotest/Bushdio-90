@@ -96,6 +96,7 @@ svg.ic { width: 20px; height: 20px; flex: 0 0 auto; }
 .brand-mark svg { width: 38px; height: 38px; display: block; }
 .mark-bg { fill: var(--brand); }
 .mark-leaf { fill: var(--brand-ink); }
+.mark-leaf-stroke { stroke: var(--brand-ink); }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-text strong { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
 .brand-text small { color: var(--ink-3); font-size: 12px; }
