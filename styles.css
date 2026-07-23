@@ -544,6 +544,29 @@ li.done .row-txt b { color: var(--ink-3); text-decoration: line-through; }
 .nr-pct { font-size: 13px; font-weight: 700; color: #0091ff; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .linkish { background: none; border: 0; padding: 0; color: var(--brand); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 
+/* task area chip */
+.task-area {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--a); font-weight: 600;
+}
+.task-area::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--a); }
+
+/* ---------- finance ---------- */
+.pos { color: var(--good); }
+.neg { color: var(--danger); }
+.goal-row h3.pos { color: var(--good); }
+.goal-row h3.neg { color: var(--danger); }
+.fin-list { display: flex; flex-direction: column; }
+.fin-list li { display: flex; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line); }
+.fin-list li:last-child { border-bottom: 0; }
+.fin-ic {
+  width: 34px; height: 34px; border-radius: 10px; flex: 0 0 auto;
+  display: grid; place-items: center; font-size: 16px; font-weight: 800;
+}
+.fin-ic.income { color: var(--good); background: color-mix(in srgb, var(--good) 14%, transparent); }
+.fin-ic.expense { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.fin-amt { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14.5px; flex: 0 0 auto; }
+
 /* reading stats strip */
 .read-stats { display: flex; gap: 10px; margin-top: 14px; }
 .read-stats div { flex: 1; background: var(--surface-2); border-radius: 12px; padding: 9px 12px; }
