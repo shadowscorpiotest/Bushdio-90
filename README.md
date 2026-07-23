@@ -19,6 +19,7 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 | 🏛️ **University** | Weekly study-hours goal, tasks with due dates and overdue indicators |
 | 💼 **Work Preparation** | Career-readiness ring and checklist (resume, LinkedIn, portfolio…) |
 | 🚀 **Projects** | Project cards with status and progress; shipping one earns big XP |
+| 💸 **Finance** | Income & expense log with categories, a this-month **net** summary, a **6-month spending trend**, and it **imports your Workout class-package spend**. A task like *"Pay yoga tuition"* auto-routes here and, when you check it, pops a quick amount box and records the expense |
 | 🫂 **Social** | Weekly connection goals (family calls, meetups…) with per-week counters |
 | 📸 **Memories** | A wall of memory cards with dates and notes |
 | ✒️ **Journal** | Daily entry with mood and tags, past-entry timeline |

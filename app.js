@@ -90,6 +90,7 @@ const I = (() => {
     upload:    w('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 8 5-5 5 5M12 3v12"/>'),
     grid:      w('<rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/>'),
     search:    w('<circle cx="11" cy="11" r="6.5"/><path d="m20.5 20.5-4-4"/>'),
+    wallet:    w('<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 9.5h18M16.5 13.5h.01"/><path d="M17 6V4.6a1.5 1.5 0 0 0-1.9-1.45L4.8 5.7A2.4 2.4 0 0 0 3 8"/>'),
   };
 })();
 
@@ -105,6 +106,7 @@ const AREAS = [
   { id: "university", name: "University",         icon: "building",  hue: "#3e63dd" },
   { id: "work",       name: "Work Preparation",   icon: "briefcase", hue: "#ad6f2d" },
   { id: "projects",   name: "Projects",           icon: "rocket",    hue: "#12a594" },
+  { id: "finance",    name: "Finance",            icon: "wallet",    hue: "#2f9e6f" },
   { id: "social",     name: "Social",             icon: "users",     hue: "#e93d82" },
   { id: "memories",   name: "Memories",           icon: "camera",    hue: "#00a2c7" },
   { id: "journal",    name: "Journal",            icon: "pen",       hue: "#7c66dc" },
@@ -118,7 +120,7 @@ const NAV_GROUPS = [
   ]},
   { label: "Daily", items: ["habits", "health", "workout", "nutrition", "journal"].map(areaOf) },
   { label: "Growth", items: ["skills", "reading", "university", "work", "projects"].map(areaOf) },
-  { label: "Life", items: ["media", "social", "memories"].map(areaOf) },
+  { label: "Life", items: ["finance", "media", "social", "memories"].map(areaOf) },
   { label: "System", items: [
     { id: "integrations", name: "Integrations", icon: "zap" },
     { id: "profile",      name: "Profile",      icon: "user" },
@@ -150,6 +152,7 @@ function defaultState() {
     university: { weeklyHours: 20, tasks: [], log: {} },
     work: { items: [] },       // {id,title,done}
     projects: [],              // {id,name,emoji,status,progress,note}
+    finance: { entries: [], importedClasses: [] }, // entries {id,date,type:income|expense,amount,category,note}
     social: { items: [], log: {} }, // items {id,title,emoji,target}; log[weekKey]={itemId:count}
     memories: [],              // {id,date,title,note,emoji,hue}
     journal: [],               // {id,date,text,mood,tags:[]}
@@ -203,6 +206,9 @@ function seedState(s) {
     { id: uid(), name: "Cardio",       emoji: "🏃", category: "Cardio", minutes: 30, sets: 0, reps: 0 },
     { id: uid(), name: "Yoga",         emoji: "🧘", category: "Yoga", minutes: 20, sets: 0, reps: 0 },
   ];
+  s.workout.classes = [
+    { id: uid(), name: "Yoga studio", total: 8, price: 120, start: addDays(t, -20), log: [addDays(t, -18), addDays(t, -14), addDays(t, -9), addDays(t, -4)], renewals: 0 },
+  ];
   s.nutrition.meals = [
     { id: uid(), slot: "Breakfast", name: "Oatmeal, banana & nuts",       time: "08:00", kcal: 420, protein: 16, carbs: 62, fats: 13, fiber: 8 },
     { id: uid(), slot: "Lunch",     name: "Grilled chicken, rice, salad", time: "13:00", kcal: 650, protein: 48, carbs: 70, fats: 16, fiber: 9 },
@@ -248,6 +254,12 @@ function seedState(s) {
     { id: uid(), name: "LifeHub app",       emoji: "🌿", status: "In progress", progress: 60, note: "" },
     { id: uid(), name: "AI tools research", emoji: "🤖", status: "In progress", progress: 40, note: "" },
     { id: uid(), name: "YouTube channel",   emoji: "🎬", status: "Planning",    progress: 20, note: "" },
+  ];
+  s.finance.entries = [
+    { id: uid(), date: addDays(t, -2),  type: "income",  amount: 2400, category: "Salary",        note: "Monthly pay" },
+    { id: uid(), date: addDays(t, -1),  type: "expense", amount: 68,   category: "Food",          note: "Groceries" },
+    { id: uid(), date: todayIso(),      type: "expense", amount: 45,   category: "Health",        note: "Supplements" },
+    { id: uid(), date: addDays(t, -5),  type: "expense", amount: 90,   category: "Subscriptions", note: "Streaming + apps" },
   ];
   s.social.items = [
     { id: uid(), title: "Family call",        emoji: "📞", target: 2 },
@@ -309,7 +321,10 @@ function migrate(s) {
     if (!Array.isArray(g.progress)) g.progress = [];
     if (g.note == null) g.note = "";
   });
-  (s.todos || []).forEach(td => { if (td.time == null) td.time = ""; if (td.habitId == null) td.habitId = ""; if (td.supId == null) td.supId = ""; });
+  (s.todos || []).forEach(td => { if (td.time == null) td.time = ""; if (td.habitId == null) td.habitId = ""; if (td.supId == null) td.supId = ""; if (td.areaId == null) td.areaId = ""; });
+  s.finance = s.finance || { entries: [], importedClasses: [] };
+  s.finance.entries = s.finance.entries || [];
+  s.finance.importedClasses = s.finance.importedClasses || [];
   s.reading = s.reading || { yearlyGoal: 12, books: [], log: {} };
   (s.reading.books || []).forEach(b => {
     if (b.blurb == null) b.blurb = "";
@@ -677,6 +692,7 @@ function areaProgressToday(id) {
     case "work": { const n = state.work.items.length; return n ? Math.round(100 * state.work.items.filter(i => i.done).length / n) : 0; }
     case "projects": { const n = state.projects.length; return n ? Math.round(state.projects.reduce((a, p) => a + p.progress, 0) / n) : 0; }
     case "social": { const w = socialWeek(); return w.target ? Math.round(100 * w.done / w.target) : 0; }
+    case "finance": { const m = financeMonth(); return m.income > 0 ? Math.round(100 * clamp(m.net / m.income, 0, 1)) : (m.expense > 0 ? 0 : 0); }
     case "memories": return state.memories.length ? 100 : 0;
     case "journal": return journalToday() ? 100 : 0;
     default: return 0;
@@ -1127,8 +1143,21 @@ function completeHabitToday(habitId) {
   addXp(10, h.name);
 }
 /* ---------- cross-linking: one check syncs task ⇄ habit / supplement ---------- */
+const AREA_RULES = [
+  [/\b(pay|paid|bill|billed|tuition|rent|buy|bought|purchase|subscription|invoice|expense|budget|salary|refund|deposit|spent|cost|fee)\b/, "finance"],
+  [/\b(eat|ate|meal|breakfast|lunch|dinner|snack|cook|cooked|groceries|grocery|recipe)\b/, "nutrition"],
+  [/\b(project|ship|shipped|launch|deploy|prototype|feature)\b/, "projects"],
+  [/\b(study|studying|studied|course|lecture|revise|homework|assignment|exam|lesson)\b/, "skills"],
+  [/\b(workout|gym|train|training|exercise|run|running|lift|calisthen|yoga)\b/, "workout"],
+  [/\b(read|reading|book|chapter|pages)\b/, "reading"],
+  [/\b(call|texted|text|meet|meetup|hangout|visit|birthday)\b/, "social"],
+  [/\b(journal|reflect|gratitude|diary)\b/, "journal"],
+  [/\b(movie|watch|series|episode|film|show)\b/, "media"],
+];
 function suggestLinkForText(text) {
   const s = (text || "").toLowerCase();
+  // money verbs are unambiguous — a "pay/buy/bill" task is a Finance expense even if other words match
+  if (AREA_RULES[0][0].test(s)) return { type: "area", id: "finance" };
   // supplements: match a supplement whose name (or a significant word of it) appears in the task
   const sup = state.nutrition.supplements.find(x => {
     const n = (x.name || "").toLowerCase();
@@ -1136,7 +1165,9 @@ function suggestLinkForText(text) {
   });
   if (sup) return { type: "sup", id: sup.id };
   const hid = suggestHabitForText(text);
-  return hid ? { type: "habit", id: hid } : { type: "", id: "" };
+  if (hid) return { type: "habit", id: hid };
+  for (const [re, id] of AREA_RULES) if (re.test(s) && areaOf(id)) return { type: "area", id };
+  return { type: "", id: "" };
 }
 function taskForLink(type, id) {
   if (!id) return null;
@@ -1156,8 +1187,11 @@ function syncTaskToLinks(td) {
   if (td.done) {
     if (td.habitId) completeHabitToday(td.habitId);
     if (td.supId) completeSupplementToday(td.supId);
+    // smart-log: a finance task pops an amount prompt (deferred so it survives the handler's closeModal)
+    if (td.areaId === "finance" && !td._logged) { td._logged = true; setTimeout(() => finEntryForm("expense", null, td.text, "Other"), 40); }
   } else {
     if (td.supId && state.nutrition.supTaken[td.supId] === todayIso()) delete state.nutrition.supTaken[td.supId];
+    td._logged = false;
   }
 }
 /* called when a habit is toggled: reflect its state onto a habit-linked task */
@@ -1168,7 +1202,9 @@ function syncHabitToTask(habitId) {
 function taskRow(td) {
   const h = td.habitId ? state.habits.find(x => x.id === td.habitId) : null;
   const sup = td.supId ? state.nutrition.supplements.find(x => x.id === td.supId) : null;
-  const link = h ? `<small>${I.target} ${esc(h.name)}</small>` : sup ? `<small>💊 ${esc(sup.name)}</small>` : "";
+  const ar = td.areaId ? areaOf(td.areaId) : null;
+  const link = h ? `<small>${I.target} ${esc(h.name)}</small>` : sup ? `<small>💊 ${esc(sup.name)}</small>`
+    : ar ? `<small class="task-area" style="--a:${ar.hue}">${esc(ar.name)}</small>` : "";
   return `<li class="todo ${td.done ? "done" : ""}">
     <span class="todo-time">${td.time || ""}</span>
     <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
@@ -1188,6 +1224,7 @@ function openTaskDetail(id) {
             <option value="">— none —</option>
             <optgroup label="Habits">${state.habits.map(h => `<option value="h:${h.id}" ${td.habitId === h.id ? "selected" : ""}>${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</optgroup>
             <optgroup label="Supplements">${state.nutrition.supplements.map(s => `<option value="s:${s.id}" ${td.supId === s.id ? "selected" : ""}>${esc(s.emoji || "💊")} ${esc(s.name)}</option>`).join("")}</optgroup>
+            <optgroup label="Areas">${AREAS.filter(a => a.id !== "habits").map(a => `<option value="a:${a.id}" ${td.areaId === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</optgroup>
           </select></label>
       </div>
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
@@ -1260,7 +1297,7 @@ function vDashboard() {
     ${card("span2", cardHead(`Today's focus <small class="soft">${undone.length} to do</small>`) + `
       <ul class="todo-list">${undone.length ? undone.map(taskRow).join("") : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`}</ul>
       ${taskAddForm()}
-      <p class="soft note">${I.spark} Name a task after a habit or supplement (e.g. "Take Vitamin D3") — checking it ticks that too, and vice versa.</p>
+      <p class="soft note">${I.spark} Name a task after a habit, supplement or area (e.g. "Take Vitamin D3", "Pay yoga tuition") — it auto-links, and checking it logs there too.</p>
       ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
 
     ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
@@ -2394,6 +2431,80 @@ function vProjects() {
   </div>`;
 }
 
+/* ---------- finance ---------- */
+const EXPENSE_CATS = ["Food", "Health", "Fitness", "Subscriptions", "Transport", "Bills", "Shopping", "Fun", "Education", "Other"];
+const INCOME_CATS = ["Salary", "Freelance", "Gift", "Refund", "Other"];
+function financeMonth(mk) {
+  mk = mk || monthKey();
+  let income = 0, expense = 0;
+  state.finance.entries.forEach(e => {
+    if ((e.date || "").slice(0, 7) !== mk) return;
+    if (e.type === "income") income += +e.amount || 0; else expense += +e.amount || 0;
+  });
+  return { income, expense, net: income - expense };
+}
+function financeTrend() {
+  const out = [];
+  const now = new Date();
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const mk = d.toISOString().slice(0, 7);
+    const exp = financeMonth(mk).expense;
+    out.push({ label: d.toLocaleDateString(undefined, { month: "short" }), value: Math.round(exp), tip: `${d.toLocaleDateString(undefined, { month: "long" })}: ${money(exp)} spent` });
+  }
+  return out;
+}
+function pendingClassSpend() {
+  return (state.workout.classes || []).filter(c => !state.finance.importedClasses.includes(c.id) && (c.price || 0) > 0);
+}
+function vFinance() {
+  const m = financeMonth();
+  const entries = [...state.finance.entries].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).slice(0, 24);
+  const pending = pendingClassSpend();
+  const pendingTot = pending.reduce((a, c) => a + (c.price || 0) * (1 + (c.renewals || 0)), 0);
+  return `
+  <div class="grid">
+    ${card("span2", `
+      <div class="goal-row">
+        <div><p class="soft">This month · net</p><h3 class="${m.net < 0 ? "neg" : "pos"}">${money(m.net)}</h3></div>
+        <span class="big-ic" style="--a:#2f9e6f">${I.wallet}</span>
+      </div>
+      <div class="read-stats">
+        <div><b class="pos">${money(m.income)}</b><small>income</small></div>
+        <div><b class="neg">${money(m.expense)}</b><small>spent</small></div>
+        <div><b>${state.finance.entries.length}</b><small>entries</small></div>
+      </div>
+      <div class="pill-row" style="margin-top:12px">
+        <button class="btn good" data-action="fin-income">${I.plus}Income</button>
+        <button class="btn danger" data-action="fin-expense">${I.plus}Expense</button>
+      </div>`)}
+
+    ${card("span2", cardHead("Spending · last 6 months") + `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(financeTrend()))}' data-color="#2f9e6f" data-label="Monthly spending"></div>`)}
+
+    ${pending.length ? card("span2", cardHead("From your Workout classes") + `
+      <p class="soft">You've got <b>${money(pendingTot)}</b> of class-package spend not yet in Finance.</p>
+      <div class="pill-row"><button class="btn primary slim" data-action="fin-import-classes">${I.wallet}Import ${pending.length} class ${pending.length > 1 ? "packages" : "package"}</button></div>`) : ""}
+
+    ${card("span2", cardHead("Recent activity", addBtn("Add", "fin-expense")) + (entries.length ? `
+      <ul class="fin-list">
+        ${entries.map(e => `<li>
+          <span class="fin-ic ${e.type}">${e.type === "income" ? "↑" : "↓"}</span>
+          <span class="row-txt"><b>${esc(e.category || (e.type === "income" ? "Income" : "Expense"))}</b><small>${e.note ? esc(e.note) + " · " : ""}${niceDate(e.date)}</small></span>
+          <b class="fin-amt ${e.type === "income" ? "pos" : "neg"}">${e.type === "income" ? "+" : "−"}${money(e.amount)}</b>
+          <button class="icon-btn ghost" data-action="fin-del" data-id="${e.id}" aria-label="Delete entry">${I.trash}</button>
+        </li>`).join("")}
+      </ul>` : emptyMsg("wallet", "Log income and expenses to see your money at a glance.", addBtn("Add an expense", "fin-expense"))))}
+  </div>`;
+}
+function finEntryForm(type, presetAmount, presetNote, presetCat) {
+  const cats = type === "income" ? INCOME_CATS : EXPENSE_CATS;
+  formModal(type === "income" ? "Add income" : "Add expense",
+    `<div class="fld-row">${fld("Amount", `<input type="number" name="amount" min="0" step="any" value="${presetAmount != null ? presetAmount : ""}" inputmode="decimal" required>`)}${fld("Date", `<input type="date" name="date" value="${todayIso()}">`)}</div>` +
+    fld("Category", `<select name="category">${cats.map(c => `<option ${presetCat === c ? "selected" : ""}>${c}</option>`).join("")}</select>`) +
+    fld("Note", txt("note", "optional", presetNote || "", false)) +
+    `<input type="hidden" name="type" value="${type}">`, "fin-entry");
+}
+
 /* ---------- social ---------- */
 function vSocial() {
   const w = socialWeek();
@@ -2550,7 +2661,7 @@ function vProfile() {
 const VIEWS = {
   dashboard: vDashboard, habits: vHabits, health: vHealth, workout: vWorkout,
   nutrition: vNutrition, skills: vSkills, reading: vReading, media: vMedia,
-  university: vUniversity, work: vWork, projects: vProjects, social: vSocial,
+  university: vUniversity, work: vWork, projects: vProjects, finance: vFinance, social: vSocial,
   memories: vMemories, journal: vJournal, progress: vProgress,
   integrations: vIntegrations, profile: vProfile,
 };
@@ -2926,6 +3037,18 @@ const ACTIONS = {
   "project-bump": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.progress = clamp(p.progress + +el.dataset.n, 0, 100); if (p.status === "Planning") p.status = "In progress"; save(); render(); },
   "project-done": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.status = "Done"; p.progress = 100; addXp(60, `${p.name} shipped`); save(); render(); },
   "project-del": (el) => { state.projects = state.projects.filter(p => p.id !== el.dataset.id); save(); render(); },
+  /* finance */
+  "fin-income": () => finEntryForm("income"),
+  "fin-expense": () => finEntryForm("expense"),
+  "fin-del": (el) => { state.finance.entries = state.finance.entries.filter(e => e.id !== el.dataset.id); save(); render(); },
+  "fin-import-classes": () => {
+    const pending = pendingClassSpend();
+    pending.forEach(c => {
+      state.finance.entries.push({ id: uid(), date: c.start || todayIso(), type: "expense", amount: (c.price || 0) * (1 + (c.renewals || 0)), category: "Fitness", note: `${c.name} class package` });
+      state.finance.importedClasses.push(c.id);
+    });
+    save(); render(); toast(`Imported ${pending.length} class ${pending.length > 1 ? "packages" : "package"} 💸`);
+  },
   "social-add": () => formModal("New connection goal",
     fld("Goal", txt("title", "e.g. Call grandma")) + `<div class="fld-row">${fld("Times per week", num("target", 1, 1))}${fld("Emoji", txt("emoji", "📞", "📞", false))}</div>`, "social-add"),
   "social-bump": (el) => {
@@ -3065,15 +3188,21 @@ const SUBMITS = {
   },
   "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, done: false }); },
   "project-add": (f) => { state.projects.push({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); },
+  "fin-entry": (f) => {
+    const amt = +f.amount || 0; if (amt <= 0) return;
+    const type = f.type === "income" ? "income" : "expense";
+    state.finance.entries.push({ id: uid(), date: f.date || todayIso(), type, amount: amt, category: f.category || "Other", note: f.note || "" });
+    addXp(3, type === "income" ? "Income logged" : "Expense logged");
+  },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
   "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360) }); addXp(10, "Memory saved"); },
   "todo-add": (f) => {
     if (!f.text) return;
-    let habitId = "", supId = "";
+    let habitId = "", supId = "", areaId = "";
     if (f.habitId === "none") { /* explicitly unlinked */ }
     else if (f.habitId) { habitId = f.habitId; }
-    else { const link = suggestLinkForText(f.text); if (link.type === "sup") supId = link.id; else habitId = link.id; }
-    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "", habitId, supId });
+    else { const link = suggestLinkForText(f.text); if (link.type === "sup") supId = link.id; else if (link.type === "area") areaId = link.id; else habitId = link.id; }
+    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "", habitId, supId, areaId });
   },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { localStorage.removeItem(STORE_KEY); state = seedState(defaultState()); state.profile.onboarded = true; save(); },
@@ -3099,6 +3228,7 @@ const CHANGES = {
     const v = el.value || "";
     td.habitId = v.startsWith("h:") ? v.slice(2) : "";
     td.supId = v.startsWith("s:") ? v.slice(2) : "";
+    td.areaId = v.startsWith("a:") ? v.slice(2) : "";
     save(); render(); openTaskDetail(td.id);
   },
   "session-media": (el) => {
