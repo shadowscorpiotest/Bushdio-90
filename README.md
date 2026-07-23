@@ -34,6 +34,16 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 - **Badges** — 17 achievements from *First step* to *Iron will* (30-day perfect streak).
 - **Streaks** — a perfect day means every habit checked; keep the flame alive.
 
+## 📲 Install it like an app
+
+LifeHub is a **PWA** — install it to your home screen for a full-screen, offline-capable app with its own icon.
+- **iPhone/iPad (Safari):** open the live site → **Share** → **Add to Home Screen**.
+- **Android (Chrome):** open the site → menu → **Install app** (or the install prompt).
+- **Desktop (Chrome/Edge):** click the **install** icon in the address bar.
+
+Once installed it launches standalone and works offline (a service worker caches the app shell). Search and
+autofill still need a connection since they query outside databases.
+
 ## 🖥️ Design
 
 - Responsive: sidebar navigation on desktop, bottom tab bar + quick-add sheet + area drawer on mobile.

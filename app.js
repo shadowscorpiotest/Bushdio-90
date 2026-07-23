@@ -3232,3 +3232,10 @@ bindEvents();
 bindTip();
 render();
 maybeOnboard();
+
+/* PWA: register the service worker for offline + installability (HTTPS/localhost only) */
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => { /* offline unsupported here — app still works */ });
+  });
+}
