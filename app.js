@@ -409,6 +409,12 @@ async function mediaDelete(id) {
   } catch {}
   if (_urlCache[id]) { URL.revokeObjectURL(_urlCache[id]); delete _urlCache[id]; }
 }
+/* wipe every stored photo/video/file (used by Start fresh / Reset) */
+function clearAllMedia() {
+  Object.keys(_urlCache).forEach(id => { try { URL.revokeObjectURL(_urlCache[id]); } catch {} delete _urlCache[id]; });
+  try { if (_mdb) { _mdb.close(); _mdb = null; } } catch {}
+  try { indexedDB.deleteDatabase(MEDIA_DB); } catch {}
+}
 /* swap [data-media] hosts for <img>/<video> from IndexedDB, after each render */
 async function hydrateMedia() {
   for (const host of $$("[data-media]")) {
@@ -1535,7 +1541,7 @@ function openHabitDetail(id) {
         <button class="btn tiny ghost" data-action="ms-add" data-id="${h.id}">${I.plus}Add milestone</button>
       </div>
       <div class="fld"><span>Part of goals</span>
-        ${state.goals.length ? `<div class="chip-check">${state.goals.map(g => `<label class="goal-check"><input type="checkbox" data-change="habit-goal-toggle" data-h="${h.id}" data-g="${g.id}" ${(h.goalIds || []).includes(g.id) ? "checked" : ""}> <span>${esc(g.emoji || "🎯")} ${esc(g.title)}</span></label>`).join("")}</div>` : `<p class="soft small">No goals yet — create one below.</p>`}
+        ${state.goals.length ? `<div class="goal-pick-wrap">${state.goals.map(g => `<label class="goal-pick"><input type="checkbox" data-change="habit-goal-toggle" data-h="${h.id}" data-g="${g.id}" ${(h.goalIds || []).includes(g.id) ? "checked" : ""}><span class="gp-emoji">${esc(g.emoji || "🎯")}</span><span class="gp-name">${esc(g.title || "Untitled goal")}</span><i class="gp-tick">${I.check}</i></label>`).join("")}</div>` : `<p class="soft small">No goals yet — create one below.</p>`}
       </div>
       <div class="pill-row"><button class="btn ghost" data-action="habit-edit" data-id="${h.id}">${I.edit}Edit</button><button class="btn danger" data-action="habit-del-d" data-id="${h.id}">${I.trash}Delete</button></div>
     </div>`);
@@ -2647,9 +2653,14 @@ function vProfile() {
       <div class="pill-row">
         <button class="btn ghost" data-action="data-export">${I.download}Export JSON</button>
         <button class="btn ghost" data-action="data-import">${I.upload}Import</button>
+      </div>
+      <p class="soft note">Everything lives in this browser's local storage — export regularly if you care about it.</p>
+      <div class="pill-row" style="margin-top:14px">
+        <button class="btn primary" data-action="data-fresh">${I.spark}Start fresh</button>
+        <button class="btn ghost" data-action="data-sample">${I.grid}Load sample data</button>
         <button class="btn danger" data-action="data-reset">${I.trash}Reset everything</button>
       </div>
-      <p class="soft note">Everything lives in this browser's local storage — export regularly if you care about it.</p>`)}
+      <p class="soft note"><b>Start fresh</b> clears all the demo/sample content &amp; uploaded media but keeps your name, theme and keys. <b>Load sample data</b> refills the demo. <b>Reset everything</b> wipes it all, including your profile.</p>`)}
     ${card("span2", cardHead("Connections") + `
       <label class="fld"><span>TMDb API key <small class="soft">— powers movie &amp; series search + autofill</small></span>
         <input type="text" data-change="tmdb-key" value="${esc(state.profile.tmdbKey || "")}" placeholder="Paste your free TMDb key" autocomplete="off"></label>
@@ -3109,7 +3120,11 @@ const ACTIONS = {
     inp.click();
   },
   "data-reset": () => formModal("Reset everything?",
-    `<p class="soft">This deletes all your LifeHub data in this browser. There is no undo — export first if unsure.</p>`, "data-reset", "Yes, reset"),
+    `<p class="soft">This deletes <b>all</b> your LifeHub data in this browser — including your profile and keys — and starts the welcome over. No undo; export first if unsure.</p>`, "data-reset", "Yes, wipe it all"),
+  "data-fresh": () => formModal("Start fresh?",
+    `<p class="soft">Clears all the demo/sample content and your uploaded photos, and gives you an empty LifeHub to fill. Your <b>name, theme and keys are kept</b>. No undo — export first if unsure.</p>`, "data-fresh", "Start fresh"),
+  "data-sample": () => formModal("Load sample data?",
+    `<p class="soft">Refills LifeHub with the demo content so you can explore every feature. This replaces your current content (your profile &amp; keys are kept).</p>`, "data-sample", "Load sample data"),
 };
 
 function ensureJournal() {
@@ -3205,7 +3220,21 @@ const SUBMITS = {
     state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "", habitId, supId, areaId });
   },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
-  "data-reset": () => { localStorage.removeItem(STORE_KEY); state = seedState(defaultState()); state.profile.onboarded = true; save(); },
+  "data-reset": () => { clearAllMedia(); localStorage.removeItem(STORE_KEY); state = defaultState(); save(); setTimeout(() => maybeOnboard(), 60); },
+  "data-fresh": () => {
+    clearAllMedia();
+    const p = state.profile;
+    state = defaultState();
+    state.profile = Object.assign(state.profile, p, { onboarded: true });
+    save(); toast("Fresh start — it's all yours ✨");
+  },
+  "data-sample": () => {
+    clearAllMedia();
+    const p = state.profile;
+    state = seedState(defaultState());
+    state.profile = Object.assign(state.profile, p, { onboarded: true });
+    save(); toast("Sample data loaded");
+  },
 };
 
 /* changes (inputs) */
