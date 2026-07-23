@@ -526,6 +526,22 @@ li.done .row-txt b { color: var(--ink-3); text-decoration: line-through; }
 /* digital book file */
 .book-file { display: flex; flex-direction: column; gap: 8px; }
 .book-file-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.book-file-link { text-decoration: none; justify-content: center; }
+.book-file-link.disabled { opacity: .55; pointer-events: none; }
+
+/* dashboard: currently reading */
+.now-reading { display: flex; flex-direction: column; }
+.nr-item {
+  display: flex; align-items: center; gap: 12px; padding: 9px 4px; cursor: pointer;
+  border-bottom: 1px solid var(--line); border-radius: 10px; transition: background .15s;
+}
+.now-reading .nr-item:last-child { border-bottom: 0; }
+.nr-item:hover { background: var(--surface-2); }
+.book-cover.sm { width: 34px; height: 46px; font-size: 17px; border-radius: 7px; }
+.nr-item .row-txt { flex: 1; min-width: 0; }
+.nr-item .row-txt .bar { margin-top: 5px; }
+.nr-pct { font-size: 13px; font-weight: 700; color: #0091ff; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.linkish { background: none; border: 0; padding: 0; color: var(--brand); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 
 /* reading stats strip */
 .read-stats { display: flex; gap: 10px; margin-top: 14px; }

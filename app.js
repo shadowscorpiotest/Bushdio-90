@@ -113,7 +113,6 @@ const areaOf = (id) => AREAS.find(a => a.id === id);
 
 const NAV_GROUPS = [
   { label: "Overview", items: [
-    { id: "today",     name: "Today",     icon: "spark" },
     { id: "dashboard", name: "Dashboard", icon: "home" },
     { id: "progress",  name: "Progress",  icon: "chart" },
   ]},
@@ -310,7 +309,7 @@ function migrate(s) {
     if (!Array.isArray(g.progress)) g.progress = [];
     if (g.note == null) g.note = "";
   });
-  (s.todos || []).forEach(td => { if (td.time == null) td.time = ""; if (td.habitId == null) td.habitId = ""; });
+  (s.todos || []).forEach(td => { if (td.time == null) td.time = ""; if (td.habitId == null) td.habitId = ""; if (td.supId == null) td.supId = ""; });
   s.reading = s.reading || { yearlyGoal: 12, books: [], log: {} };
   (s.reading.books || []).forEach(b => {
     if (b.blurb == null) b.blurb = "";
@@ -766,10 +765,9 @@ function toggleTheme() {
 }
 
 /* ================= shell: nav / topbar ================= */
-let currentView = "today";
+let currentView = "dashboard";
 
 const VIEW_META = {
-  today:        { title: "Today",        sub: () => new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) },
   dashboard:    { title: "Dashboard",    sub: () => new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) },
   progress:     { title: "Progress",     sub: () => "Your journey in numbers" },
   integrations: { title: "Integrations", sub: () => "Connect your favorite apps" },
@@ -802,7 +800,7 @@ function renderNav() {
       </div>
     </div>`;
   const bottom = [
-    { id: "today",     name: "Today",    icon: "spark" },
+    { id: "dashboard", name: "Home",     icon: "home" },
     { id: "habits",    name: "Habits",   icon: "target" },
     { id: "_add",      name: "Add",      icon: "plus" },
     { id: "progress",  name: "Progress", icon: "chart" },
@@ -858,7 +856,6 @@ function openDrawer() {
   $("#drawer").innerHTML = `
     <div class="drawer-head"><strong>Life areas</strong><button class="icon-btn" data-action="close-drawer" aria-label="Close">${I.x}</button></div>
     <div class="drawer-grid">
-      <button class="drawer-item" data-nav="today" style="--a:#7c66dc"><span class="tile-ic">${I.spark}</span><span>Today</span></button>
       <button class="drawer-item" data-nav="dashboard" style="--a:#6a5ae0"><span class="tile-ic">${I.home}</span><span>Dashboard</span></button>
       ${AREAS.map(a => `
       <button class="drawer-item" data-nav="${a.id}" style="--a:${a.hue}">
@@ -1129,12 +1126,53 @@ function completeHabitToday(habitId) {
   if (h.type === "quantity") e.amount = h.target || 1; else e.done = true;
   addXp(10, h.name);
 }
+/* ---------- cross-linking: one check syncs task ⇄ habit / supplement ---------- */
+function suggestLinkForText(text) {
+  const s = (text || "").toLowerCase();
+  // supplements: match a supplement whose name (or a significant word of it) appears in the task
+  const sup = state.nutrition.supplements.find(x => {
+    const n = (x.name || "").toLowerCase();
+    return n && (s.includes(n) || n.split(/\s+/).some(w => w.length > 2 && s.includes(w)));
+  });
+  if (sup) return { type: "sup", id: sup.id };
+  const hid = suggestHabitForText(text);
+  return hid ? { type: "habit", id: hid } : { type: "", id: "" };
+}
+function taskForLink(type, id) {
+  if (!id) return null;
+  const t = todayIso();
+  return state.todos.find(td => (!td.date || td.date === t) && (type === "sup" ? td.supId === id : td.habitId === id));
+}
+function completeSupplementToday(supId) {
+  if (!supId) return;
+  if (state.nutrition.supTaken[supId] !== todayIso()) { state.nutrition.supTaken[supId] = todayIso(); addXp(3, "Supplement taken"); }
+}
+function markLinkedTaskDone(type, id, done) {
+  const td = taskForLink(type, id);
+  if (td && !!td.done !== done) { td.done = done; if (done) addXp(5, "Task done"); }
+}
+/* called when a task is toggled: propagate to its linked habit / supplement */
+function syncTaskToLinks(td) {
+  if (td.done) {
+    if (td.habitId) completeHabitToday(td.habitId);
+    if (td.supId) completeSupplementToday(td.supId);
+  } else {
+    if (td.supId && state.nutrition.supTaken[td.supId] === todayIso()) delete state.nutrition.supTaken[td.supId];
+  }
+}
+/* called when a habit is toggled: reflect its state onto a habit-linked task */
+function syncHabitToTask(habitId) {
+  const h = state.habits.find(x => x.id === habitId); if (!h) return;
+  markLinkedTaskDone("habit", habitId, habitMet(h, todayIso()));
+}
 function taskRow(td) {
   const h = td.habitId ? state.habits.find(x => x.id === td.habitId) : null;
+  const sup = td.supId ? state.nutrition.supplements.find(x => x.id === td.supId) : null;
+  const link = h ? `<small>${I.target} ${esc(h.name)}</small>` : sup ? `<small>💊 ${esc(sup.name)}</small>` : "";
   return `<li class="todo ${td.done ? "done" : ""}">
     <span class="todo-time">${td.time || ""}</span>
     <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
-    <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${h ? `<small>${I.target} ${esc(h.name)}</small>` : ""}</span>
+    <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${link}</span>
     <button class="icon-btn ghost" data-action="todo-open" data-id="${td.id}" aria-label="Edit task">${I.chevR}</button>
   </li>`;
 }
@@ -1145,10 +1183,11 @@ function openTaskDetail(id) {
       <label class="fld"><span>Task</span><input type="text" data-change="task-text" data-id="${td.id}" value="${esc(td.text)}" maxlength="120"></label>
       <div class="fld-row">
         <label class="fld"><span>Time (optional)</span><input type="time" data-change="task-time" data-id="${td.id}" value="${td.time || ""}"></label>
-        <label class="fld"><span>Counts toward habit</span>
-          <select data-change="task-habit" data-id="${td.id}">
+        <label class="fld"><span>Counts toward</span>
+          <select data-change="task-link" data-id="${td.id}">
             <option value="">— none —</option>
-            ${state.habits.map(h => `<option value="${h.id}" ${td.habitId === h.id ? "selected" : ""}>${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}
+            <optgroup label="Habits">${state.habits.map(h => `<option value="h:${h.id}" ${td.habitId === h.id ? "selected" : ""}>${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</optgroup>
+            <optgroup label="Supplements">${state.nutrition.supplements.map(s => `<option value="s:${s.id}" ${td.supId === s.id ? "selected" : ""}>${esc(s.emoji || "💊")} ${esc(s.name)}</option>`).join("")}</optgroup>
           </select></label>
       </div>
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
@@ -1161,8 +1200,36 @@ function taskAddForm() {
     <button class="btn primary" type="submit" aria-label="Add task">${I.plus}</button>
   </form>`;
 }
-function vToday() {
+function currentlyReadingCard() {
+  const reading = state.reading.books.filter(b => b.status === "current").slice(0, 3);
+  const body = reading.length
+    ? `<ul class="now-reading">${reading.map(b => {
+        const pct = Math.round(100 * (b.page || 0) / (b.pages || 1));
+        return `<li class="nr-item" data-action="book-open" data-id="${b.id}">
+          ${bookCover(b, "sm")}
+          <span class="row-txt"><b>${esc(b.title)}</b><small>${esc(b.author || "")}${b.pages ? ` · p.${b.page || 0}/${b.pages}` : ""}</small>${barHtml(pct, "#0091ff")}</span>
+          <span class="nr-pct">${pct}%</span>
+        </li>`;
+      }).join("")}</ul>`
+    : `<p class="soft small">No book in progress — <button class="linkish" data-nav="reading">start one</button>.</p>`;
+  return card("", cardHead("Currently reading", `<button class="btn ghost tiny" data-nav="reading">Shelf</button>`) + body);
+}
+function supplementsDueCard() {
+  const due = state.nutrition.supplements.filter(s => supStatus(s).due);
+  const body = due.length
+    ? `<ul class="sup-list">${due.map(s => `<li class="sup-item due">
+        <span class="sup-emoji" aria-hidden="true">${esc(s.emoji || "💊")}</span>
+        <div class="row-txt"><b>${esc(s.name)}</b><small>${esc(s.dose || "")}${s.dose ? " · " : ""}${SUP_LABEL[s.every] || "daily"}</small></div>
+        <button class="btn tiny good" data-action="sup-take" data-id="${s.id}">${I.check}Take</button>
+      </li>`).join("")}</ul>`
+    : `<p class="soft small">${I.check} All supplements taken — nice.</p>`;
+  return card("", cardHead(`Supplements due${due.length ? ` · ${due.length}` : ""}`, `<button class="btn ghost tiny" data-nav="nutrition">Nutrition</button>`) + body);
+}
+function vDashboard() {
   const li = levelInfo(), t = todayIso();
+  const missionsDone = MISSIONS.filter(m => m.done()).length;
+  const wk = socialWeek();
+  const studiedH = Math.round(weekDates().reduce((a, d) => a + (state.university.log[d] || 0) + (state.skills.log[d] || 0), 0) / 6) / 10;
   const todos = state.todos.filter(td => !td.date || td.date === t);
   const undone = todos.filter(td => !td.done).sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
   const done = todos.filter(td => td.done);
@@ -1193,55 +1260,23 @@ function vToday() {
     ${card("span2", cardHead(`Today's focus <small class="soft">${undone.length} to do</small>`) + `
       <ul class="todo-list">${undone.length ? undone.map(taskRow).join("") : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`}</ul>
       ${taskAddForm()}
+      <p class="soft note">${I.spark} Name a task after a habit or supplement (e.g. "Take Vitamin D3") — checking it ticks that too, and vice versa.</p>
       ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
 
     ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
-      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="${h.kind === "workout" ? "habit-workout-jump" : "ag-habit"}" data-id="${h.id}" style="--a:${h.color || "#6a5ae0"}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>
-      <p class="soft note">${I.spark} Add a task that "counts toward" a habit and checking it will tick the habit for you.</p>` : `<p class="soft small">No habits scheduled today.</p>`))}
+      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="${h.kind === "workout" ? "habit-workout-jump" : "ag-habit"}" data-id="${h.id}" style="--a:${h.color || "#6a5ae0"}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>` : `<p class="soft small">No habits scheduled today.</p>`))}
 
-    ${card("", cardHead("Upcoming") + (deadlines.length ? `
-      <ul class="mini-agenda">${deadlines.map(k => `<li data-nav="university"><span class="a-ic" style="--a:#3e63dd">${I.building}</span><span class="row-txt"><b>${esc(k.title)}</b><small>university</small></span><span class="a-when">${daysUntil(k.due)}</span></li>`).join("")}</ul>` : `<p class="soft small">Nothing due soon 🎉</p>`))}
+    ${currentlyReadingCard()}
+    ${supplementsDueCard()}
 
-    ${card("", cardHead("Reflection") + `
-      <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
-  </div>`;
-}
-
-function vDashboard() {
-  const li = levelInfo();
-  const missionsDone = MISSIONS.filter(m => m.done()).length;
-  const wk = socialWeek();
-  const studiedH = Math.round(weekDates().reduce((a, d) => a + (state.university.log[d] || 0) + (state.skills.log[d] || 0), 0) / 6) / 10;
-  return `
-  <div class="grid dash">
-    ${card("hero-card span2", `
-      <div class="hero-row">
-        <div>
-          <p class="hero-hi">${greeting()}, ${esc(state.profile.name || "friend")} <span aria-hidden="true">👋</span></p>
-          <h2 class="hero-big">Let's make today amazing.</h2>
-          <div class="hero-level">
-            <span class="lv-pill">Level ${li.lvl}</span>
-            <span class="bar"><span style="width:${li.pct}%"></span></span>
-            <small>${li.into.toLocaleString()} / ${li.need.toLocaleString()} XP</small>
-          </div>
-        </div>
-        <div class="hero-mascot" aria-hidden="true">${esc(state.profile.avatar)}</div>
-      </div>
-      <div class="stat-row">
-        <div class="stat"><b>${perfectStreak()}</b><span>${I.flame} day streak</span></div>
-        <div class="stat"><b>${weeklyProgress()}%</b><span>${I.activity} today's progress</span></div>
-        <div class="stat"><b>${Object.keys(state.badges).length}</b><span>${I.medal} badges</span></div>
-      </div>`)}
-
-    ${card("", cardHead(`Today's missions <small class="soft">${missionsDone}/${MISSIONS.length} completed</small>`) + `
+    ${card("", cardHead(`Today's missions <small class="soft">${missionsDone}/${MISSIONS.length}</small>`) + `
       <ul class="mission-list">
         ${MISSIONS.map(m => {
-          const a = areaOf(m.area), done = m.done();
-          return `<li class="mission ${done ? "done" : ""}" data-nav="${m.area}" style="--a:${a.hue}">
+          const a = areaOf(m.area), md = m.done();
+          return `<li class="mission ${md ? "done" : ""}" data-nav="${m.area}" style="--a:${a.hue}">
             <span class="tile-ic">${I[a.icon]}</span>
             <span class="mission-txt"><b>${esc(m.title())}</b><small>${esc(m.sub())}</small></span>
-            <span class="mission-check">${done ? I.check : `<i class="xp-tag">+${m.xp}</i>`}</span>
+            <span class="mission-check">${md ? I.check : `<i class="xp-tag">+${m.xp}</i>`}</span>
           </li>`;
         }).join("")}
       </ul>`)}
@@ -1253,6 +1288,14 @@ function vDashboard() {
         <div class="mini-stat" data-nav="social"><span class="tile-ic" style="--a:#e93d82">${I.users}</span><div><b>${wk.done}/${wk.target}</b><small>social goals</small></div></div>
         <div class="mini-stat" data-nav="reading"><span class="tile-ic" style="--a:#0091ff">${I.book}</span><div><b>${state.reading.books.filter(b => b.status === "done").length}/${state.reading.yearlyGoal}</b><small>books this year</small></div></div>
       </div>`)}
+
+    ${deadlines.length ? card("", cardHead("Upcoming") + `
+      <ul class="mini-agenda">${deadlines.map(k => `<li data-nav="university"><span class="a-ic" style="--a:#3e63dd">${I.building}</span><span class="row-txt"><b>${esc(k.title)}</b><small>university</small></span><span class="a-when">${daysUntil(k.due)}</span></li>`).join("")}</ul>`) : ""}
+
+    ${card("", cardHead("Reflection") + `
+      <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
+      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
+
     ${card("span2", cardHead("Life areas") + `
       <div class="area-grid">
         ${AREAS.map(a => `
@@ -1262,7 +1305,6 @@ function vDashboard() {
             ${barHtml(areaProgressToday(a.id), "var(--a)")}
           </button>`).join("")}
       </div>`)}
-
   </div>`;
 }
 
@@ -1850,24 +1892,55 @@ function readingStats() {
 /* ---------- search & autofill (Reading + Movies) ---------- */
 let _searchResults = [];
 async function searchBooks(q) {
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=12`;
-  const j = await (await fetch(url)).json();
-  return (j.items || []).map(it => {
-    const v = it.volumeInfo || {};
-    let cover = (v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || "";
-    cover = cover.replace(/^http:/, "https:");
-    return {
-      kind: "book", title: v.title || "Untitled", author: (v.authors || []).join(", ") || "Unknown",
-      year: (v.publishedDate || "").slice(0, 4), pages: v.pageCount || 0,
-      genre: (v.categories || [])[0] || "", blurb: (v.description || "").replace(/<[^>]+>/g, "").slice(0, 140),
-      cover,
-    };
-  });
+  // primary: Google Books (keyless, CORS). fallback: Open Library (different host)
+  try {
+    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=12`);
+    if (!r.ok) throw new Error("Google Books HTTP " + r.status);
+    const j = await r.json();
+    const items = (j.items || []).map(it => {
+      const v = it.volumeInfo || {};
+      let cover = (v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || "";
+      cover = cover.replace(/^http:/, "https:");
+      return {
+        kind: "book", title: v.title || "Untitled", author: (v.authors || []).join(", ") || "Unknown",
+        year: (v.publishedDate || "").slice(0, 4), pages: v.pageCount || 0,
+        genre: (v.categories || [])[0] || "", blurb: (v.description || "").replace(/<[^>]+>/g, "").slice(0, 140),
+        cover,
+      };
+    });
+    if (items.length) return items;
+    throw new Error("no Google Books results");
+  } catch (e) {
+    return await searchBooksOpenLibrary(q);
+  }
+}
+async function searchBooksOpenLibrary(q) {
+  const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=12&fields=title,author_name,first_publish_year,number_of_pages_median,subject,cover_i`);
+  if (!r.ok) throw new Error("Open Library HTTP " + r.status);
+  const j = await r.json();
+  return (j.docs || []).map(d => ({
+    kind: "book", title: d.title || "Untitled", author: (d.author_name || []).join(", ") || "Unknown",
+    year: d.first_publish_year ? String(d.first_publish_year) : "", pages: d.number_of_pages_median || 0,
+    genre: (d.subject || [])[0] || "", blurb: "",
+    cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : "",
+  }));
+}
+/* TMDb accepts either a v3 API key (?api_key=) or a v4 read token (Authorization: Bearer, JWT-like "eyJ…") */
+function tmdbRequest(path) {
+  const key = (state.profile.tmdbKey || "").trim();
+  const isBearer = /^eyJ/.test(key) || key.length > 100;
+  const sep = path.includes("?") ? "&" : "?";
+  const url = "https://api.themoviedb.org/3" + path + (isBearer ? "" : `${sep}api_key=${encodeURIComponent(key)}`);
+  return fetch(url, isBearer ? { headers: { Authorization: "Bearer " + key } } : undefined);
+}
+async function tmdbJson(path) {
+  const r = await tmdbRequest(path);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.status_message || ("TMDb HTTP " + r.status) + " — check your key");
+  return j;
 }
 async function searchMovies(q) {
-  const key = state.profile.tmdbKey;
-  const url = `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(q)}`;
-  const j = await (await fetch(url)).json();
+  const j = await tmdbJson(`/search/multi?query=${encodeURIComponent(q)}`);
   return (j.results || []).filter(x => x.media_type === "movie" || x.media_type === "tv").map(x => ({
     kind: "media", tmdbId: x.id, mediaType: x.media_type,
     title: x.title || x.name || "Untitled",
@@ -1877,8 +1950,7 @@ async function searchMovies(q) {
   }));
 }
 async function fetchMovieDetail(id, mediaType) {
-  const key = state.profile.tmdbKey;
-  const d = await (await fetch(`https://api.themoviedb.org/3/${mediaType}/${id}?api_key=${encodeURIComponent(key)}&append_to_response=credits`)).json();
+  const d = await tmdbJson(`/${mediaType}/${id}?append_to_response=credits`);
   const crew = (d.credits && d.credits.crew) || [], cast = (d.credits && d.credits.cast) || [];
   return {
     type: mediaType === "tv" ? "Series" : "Movie",
@@ -1932,7 +2004,8 @@ async function runSearch(kind) {
   try {
     _searchResults = kind === "media" ? await searchMovies(q) : await searchBooks(q);
   } catch (e) {
-    box.innerHTML = `<p class="soft small">Couldn't reach the ${kind === "media" ? "movie" : "book"} database. Check your connection${kind === "media" ? " and TMDb key" : ""}, then try again.</p>`;
+    const detail = esc((e && e.message) || "network error");
+    box.innerHTML = `<p class="soft small">Couldn't reach the ${kind === "media" ? "movie" : "book"} database.<br><b>${detail}</b><br><span style="opacity:.8">Tip: search works on the live site (${location.host || "GitHub Pages"}), not the private preview — those block outside lookups${kind === "media" ? ". For TMDb, use an <b>API Key (v3 auth)</b> or a v4 Read Token." : "."}</span></p>`;
     return;
   }
   if (!_searchResults.length) { box.innerHTML = `<p class="soft small">No matches — try a different spelling.</p>`; return; }
@@ -2092,7 +2165,7 @@ function openBookDetail(id) {
       </div>
       ${b.format === "digital" ? `<div class="book-file">
         ${b.file
-          ? `<button class="btn primary slim" data-action="book-file-open" data-id="${b.id}">${I.book}Open / continue reading</button>
+          ? `<a class="btn primary slim book-file-link" id="bookFileLink" target="_blank" rel="noopener" aria-label="Open ${esc(b.file.name || "file")}">${I.book}Open / continue reading</a>
              <div class="book-file-meta"><span class="soft small">📄 ${esc(b.file.name || "file")}</span><button class="btn tiny ghost" data-action="book-file-del" data-id="${b.id}">${I.trash}Remove file</button></div>
              <p class="soft note">Opens in your device's reader — PDFs preview here; iPhone offers Books/Files. The reader keeps its own place; the app tracks your page${b.page ? ` (currently ${b.page}${b.pages ? " / " + b.pages : ""})` : ""}.</p>`
           : `<label class="cover-upload"><input type="file" accept=".pdf,.epub,application/pdf,application/epub+zip" data-change="book-file-add" data-id="${b.id}" hidden><span class="btn ghost slim">${I.upload}Attach a PDF / EPUB</span></label>
@@ -2104,6 +2177,22 @@ function openBookDetail(id) {
         <button class="btn danger" data-action="book-del-d" data-id="${b.id}">${I.trash}Delete</button>
       </div>
     </div>`);
+  if (b.format === "digital" && b.file) hydrateBookFile(b.file);
+}
+/* set the Open link's href to a blob URL up-front so tapping it is a real (iOS-safe) link, not an async click */
+function hydrateBookFile(file) {
+  const a = $("#bookFileLink");
+  if (!a) return;
+  const apply = (url) => {
+    a.href = url;
+    const isPdf = /pdf/i.test(file.type || "") || /\.pdf$/i.test(file.name || "");
+    if (isPdf) a.removeAttribute("download"); else a.setAttribute("download", file.name || "book");
+  };
+  if (_urlCache[file.id]) { apply(_urlCache[file.id]); return; }
+  mediaGet(file.id).then(blob => {
+    if (!blob) { a.textContent = "File unavailable on this device"; a.classList.add("disabled"); return; }
+    const url = URL.createObjectURL(blob); _urlCache[file.id] = url; apply(url);
+  }).catch(() => {});
 }
 
 /* downscale an uploaded image to a data URL that's small enough for localStorage */
@@ -2459,7 +2548,7 @@ function vProfile() {
 
 /* ================= render ================= */
 const VIEWS = {
-  today: vToday, dashboard: vDashboard, habits: vHabits, health: vHealth, workout: vWorkout,
+  dashboard: vDashboard, habits: vHabits, health: vHealth, workout: vWorkout,
   nutrition: vNutrition, skills: vSkills, reading: vReading, media: vMedia,
   university: vUniversity, work: vWork, projects: vProjects, social: vSocial,
   memories: vMemories, journal: vJournal, progress: vProgress,
@@ -2517,13 +2606,13 @@ const ACTIONS = {
   "ag-habit": (el) => {
     const h = state.habits.find(x => x.id === el.dataset.id);
     if (h && h.kind === "workout") { setCursor("workout", todayIso()); go("workout"); toast("Log your workout here — it ticks the habit 💪"); return; }
-    setCursor("habits", todayIso()); toggleHabit(el.dataset.id); render();
+    setCursor("habits", todayIso()); toggleHabit(el.dataset.id); syncHabitToTask(el.dataset.id); render();
   },
   "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
-  "ag-task": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); save(); render(); } },
+  "ag-task": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); render(); } },
   "ag-reflect": openReflectModal,
   "todo-open": (el) => openTaskDetail(el.dataset.id),
-  "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) { addXp(5, "Task done"); if (td.habitId) completeHabitToday(td.habitId); } save(); closeModal(); render(); } },
+  "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); closeModal(); render(); } },
   "todo-del": (el) => { state.todos = state.todos.filter(x => x.id !== el.dataset.id); save(); closeModal(); render(); },
   "task-add": () => formModal("New task",
     fld("Task", txt("text", "e.g. Calisthenics workout")) +
@@ -2555,8 +2644,8 @@ const ACTIONS = {
   },
   "habit-day": (el) => { if (el.dataset.d <= todayIso()) { setCursor("habits", el.dataset.d); render(); } },
   "habit-open": (el) => openHabitDetail(el.dataset.id),
-  "habit-toggle": (el) => { toggleHabit(el.dataset.id); render(); },
-  "habit-toggle-d": (el) => { toggleHabit(el.dataset.id); render(); openHabitDetail(el.dataset.id); },
+  "habit-toggle": (el) => { toggleHabit(el.dataset.id); syncHabitToTask(el.dataset.id); render(); },
+  "habit-toggle-d": (el) => { toggleHabit(el.dataset.id); syncHabitToTask(el.dataset.id); render(); openHabitDetail(el.dataset.id); },
   "habit-inc": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { addHabitAmount(h, dayCursor("habits"), habitStep(h)); render(); if ($("#modal").innerHTML) openHabitDetail(h.id); } },
   "habit-dec": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { addHabitAmount(h, dayCursor("habits"), -habitStep(h)); render(); openHabitDetail(h.id); } },
   "habit-skip": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.skip = !e.skip; if (!e.skip && !e.done && !e.note && !e.amount && !e.workoutId && !e.slip) delete h.log[dayCursor("habits")]; save(); render(); openHabitDetail(h.id); } },
@@ -2686,8 +2775,8 @@ const ACTIONS = {
   "sup-add": () => formModal("Add supplement",
     `<div class="fld-row">${fld("Name", txt("name", "e.g. Vitamin D3"))}${fld("Emoji", txt("emoji", "💊", "💊", false))}</div>` +
     `<div class="fld-row">${fld("Dose", txt("dose", "e.g. 1000 IU", "", false))}${fld("Every", `<select name="every"><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option></select>`)}</div>`, "sup-add"),
-  "sup-take": (el) => { state.nutrition.supTaken[el.dataset.id] = todayIso(); addXp(3, "Supplement taken"); toast("Nice — logged 💊"); save(); render(); },
-  "sup-undo": (el) => { delete state.nutrition.supTaken[el.dataset.id]; save(); render(); },
+  "sup-take": (el) => { state.nutrition.supTaken[el.dataset.id] = todayIso(); addXp(3, "Supplement taken"); markLinkedTaskDone("sup", el.dataset.id, true); toast("Nice — logged 💊"); save(); render(); },
+  "sup-undo": (el) => { delete state.nutrition.supTaken[el.dataset.id]; markLinkedTaskDone("sup", el.dataset.id, false); save(); render(); },
   "sup-del": (el) => { state.nutrition.supplements = state.nutrition.supplements.filter(s => s.id !== el.dataset.id); delete state.nutrition.supTaken[el.dataset.id]; save(); render(); },
 
   /* skills / university */
@@ -2733,7 +2822,7 @@ const ACTIONS = {
   "book-search": () => openSearchPicker("book"),
   "media-search": () => openSearchPicker("media"),
   "go-tmdb-key": () => { closeModal(); go("profile"); toast("Add your TMDb key under Connections"); },
-  "book-pick": (el) => { const r = _searchResults[+el.dataset.i]; if (!r) return; const id = createBookFromResult(r); render(); openBookDetail(id); toast("Filled in — review &amp; edit, it's saved"); },
+  "book-pick": (el) => { const r = _searchResults[+el.dataset.i]; if (!r) return; const id = createBookFromResult(r); render(); openBookDetail(id); toast("Filled in — review & edit, it's saved"); },
   "media-pick": async (el) => {
     const r = _searchResults[+el.dataset.i]; if (!r) return;
     const box = $("#searchResults"); if (box) box.innerHTML = `<p class="soft small">Loading details…</p>`;
@@ -2765,15 +2854,6 @@ const ACTIONS = {
   },
   "book-del-d": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b && b.file) mediaDelete(b.file.id); state.reading.books = state.reading.books.filter(b => b.id !== el.dataset.id); save(); closeModal(); render(); toast("Book removed"); },
   "book-format": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.format = el.dataset.v; save(); render(); openBookDetail(b.id); } },
-  "book-file-open": async (el) => {
-    const b = state.reading.books.find(x => x.id === el.dataset.id); if (!b || !b.file) return;
-    const blob = await mediaGet(b.file.id);
-    if (!blob) { toast("That file isn't on this device"); return; }
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  },
   "book-file-del": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b && b.file) { mediaDelete(b.file.id); b.file = null; save(); render(); openBookDetail(b.id); } },
 
   /* recommenders (shared by books + media) */
@@ -2989,8 +3069,11 @@ const SUBMITS = {
   "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360) }); addXp(10, "Memory saved"); },
   "todo-add": (f) => {
     if (!f.text) return;
-    const habitId = f.habitId === "none" ? "" : (f.habitId || suggestHabitForText(f.text));
-    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "", habitId: habitId || "" });
+    let habitId = "", supId = "";
+    if (f.habitId === "none") { /* explicitly unlinked */ }
+    else if (f.habitId) { habitId = f.habitId; }
+    else { const link = suggestLinkForText(f.text); if (link.type === "sup") supId = link.id; else habitId = link.id; }
+    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "", habitId, supId });
   },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { localStorage.removeItem(STORE_KEY); state = seedState(defaultState()); state.profile.onboarded = true; save(); },
@@ -3011,7 +3094,13 @@ const CHANGES = {
   },
   "task-text": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.text = el.value.slice(0, 120); save(); } },
   "task-time": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.time = el.value || ""; save(); } },
-  "task-habit": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.habitId = el.value || ""; save(); render(); openTaskDetail(td.id); } },
+  "task-link": (el) => {
+    const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
+    const v = el.value || "";
+    td.habitId = v.startsWith("h:") ? v.slice(2) : "";
+    td.supId = v.startsWith("s:") ? v.slice(2) : "";
+    save(); render(); openTaskDetail(td.id);
+  },
   "session-media": (el) => {
     const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (!s) return;
     storeMediaFile(el.files[0], (ref) => { s.media = s.media || []; s.media.push(ref); save(); render(); toast(`${ref.kind === "video" ? "Video" : "Photo"} added 📎`); });
