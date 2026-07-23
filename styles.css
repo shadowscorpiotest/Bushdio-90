@@ -722,9 +722,24 @@ input[type="color"] { width: 100%; height: 42px; border: 1px solid var(--line); 
 .goal-habits li:hover { background: var(--surface-2); }
 .goal-habits li b { font-size: 13.5px; font-weight: 600; flex: 1; }
 .hdot { width: 10px; height: 10px; border-radius: 999px; flex: 0 0 auto; }
-.chip-check { display: flex; flex-direction: column; gap: 6px; }
-.goal-check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
-.goal-check input { width: 17px; height: 17px; accent-color: var(--brand); }
+/* "Part of goals" — selectable pills */
+.goal-pick-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.goal-pick {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 12px; border-radius: 999px; cursor: pointer;
+  border: 1.5px solid var(--line); background: var(--surface-2);
+  font-size: 13.5px; font-weight: 600; color: var(--ink-2);
+  transition: border-color .15s, background .15s, color .15s;
+  max-width: 100%;
+}
+.goal-pick:hover { border-color: var(--ink-3); }
+.goal-pick input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.goal-pick .gp-emoji { flex: 0 0 auto; }
+.goal-pick .gp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-pick .gp-tick { display: none; width: 15px; height: 15px; flex: 0 0 auto; }
+.goal-pick .gp-tick svg { width: 15px; height: 15px; }
+.goal-pick:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); color: var(--brand); }
+.goal-pick:has(input:checked) .gp-tick { display: inline-grid; place-items: center; }
 .link-list { display: flex; flex-direction: column; gap: 8px; }
 .link-list .check-inline { padding: 4px 2px; }
 
@@ -1010,7 +1025,7 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 18px 18px; }
 .fld { display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .fld > span { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.fld input, .fld select, .fld textarea {
+.fld input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), .fld select, .fld textarea {
   border: 1px solid var(--line); border-radius: 11px;
   background: var(--surface-2); padding: 10px 12px; width: 100%;
 }
