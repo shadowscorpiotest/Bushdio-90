@@ -567,6 +567,19 @@ li.done .row-txt b { color: var(--ink-3); text-decoration: line-through; }
 .fin-ic.expense { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .fin-amt { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 14.5px; flex: 0 0 auto; }
 
+/* ---------- work prep groups + due tags ---------- */
+.work-groups { display: flex; flex-direction: column; gap: 16px; }
+.work-group .wg-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 2px; }
+.work-group .wg-head b { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+.work-group .wg-head small { color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.due-tag {
+  flex: 0 0 auto; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
+  background: var(--surface-2); color: var(--ink-2); white-space: nowrap;
+}
+.due-tag.soon { background: var(--warn-soft, #fbefda); color: var(--warn, #b5760f); }
+.due-tag.over { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+li.overdue .row-txt small { color: var(--danger); }
+
 /* reading stats strip */
 .read-stats { display: flex; gap: 10px; margin-top: 14px; }
 .read-stats div { flex: 1; background: var(--surface-2); border-radius: 12px; padding: 9px 12px; }
