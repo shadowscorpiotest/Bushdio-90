@@ -239,16 +239,16 @@ function seedState(s) {
     { id: uid(), title: "Stranger Things", type: "Series", status: "watching",  rating: 0, emoji: "🔦", genre: "Sci-Fi Horror", year: "2016", blurb: "Kids in a small town uncover supernatural mysteries and secret experiments.", season: 2, epsDone: 12, epTotal: 34, recommenders: ["Jordan", "Sam"] },
   ];
   s.university.tasks = [
-    { id: uid(), title: "Calculus assignment", due: addDays(t, 3), done: false },
-    { id: uid(), title: "Physics lab report",  due: addDays(t, 5), done: false },
-    { id: uid(), title: "History essay",       due: addDays(t, 8), done: false },
+    { id: uid(), title: "Calculus assignment", course: "Math 201",    due: addDays(t, 3), done: false },
+    { id: uid(), title: "Physics lab report",  course: "Physics 110", due: addDays(t, 5), done: false },
+    { id: uid(), title: "History essay",       course: "History 101", due: addDays(t, 8), done: false },
   ];
   s.work.items = [
-    { id: uid(), title: "Resume building",    done: true },
-    { id: uid(), title: "LinkedIn profile",   done: true },
-    { id: uid(), title: "Cover letter",       done: false },
-    { id: uid(), title: "Portfolio",          done: false },
-    { id: uid(), title: "Interview practice", done: false },
+    { id: uid(), title: "Polish resume",        category: "Resume",       due: "",             done: true },
+    { id: uid(), title: "Update LinkedIn",      category: "Networking",   due: "",             done: true },
+    { id: uid(), title: "Write cover letter",   category: "Applications", due: addDays(t, 7),  done: false },
+    { id: uid(), title: "Build portfolio site", category: "Portfolio",    due: addDays(t, 21), done: false },
+    { id: uid(), title: "Mock interview prep",  category: "Interviews",   due: addDays(t, 14), done: false },
   ];
   s.projects = [
     { id: uid(), name: "LifeHub app",       emoji: "🌿", status: "In progress", progress: 60, note: "" },
@@ -325,6 +325,12 @@ function migrate(s) {
   s.finance = s.finance || { entries: [], importedClasses: [] };
   s.finance.entries = s.finance.entries || [];
   s.finance.importedClasses = s.finance.importedClasses || [];
+  s.work = s.work || { items: [] };
+  (s.work.items || []).forEach(k => { if (k.category == null) k.category = "Other"; if (k.due == null) k.due = ""; });
+  s.university = s.university || { weeklyHours: 20, tasks: [], log: {} };
+  (s.university.tasks || []).forEach(k => { if (k.course == null) k.course = ""; });
+  s.skills = s.skills || { monthlyHours: 10, courses: [], log: {} };
+  (s.skills.courses || []).forEach(c => { if (c.category == null) c.category = ""; });
   s.reading = s.reading || { yearlyGoal: 12, books: [], log: {} };
   (s.reading.books || []).forEach(b => {
     if (b.blurb == null) b.blurb = "";
@@ -1893,14 +1899,26 @@ function vNutrition() {
 }
 
 /* ---------- skills ---------- */
+function skillsTrend() {
+  const out = [];
+  for (let i = 7; i >= 0; i--) {
+    const monday = mondayOf(addDays(todayIso(), -i * 7));
+    let mins = 0;
+    for (let d = 0; d < 7; d++) mins += state.skills.log[addDays(monday, d)] || 0;
+    const hrs = Math.round(mins / 6) / 10;
+    out.push({ label: i === 0 ? "This wk" : niceDate(monday, { month: "short", day: "numeric" }), value: hrs, tip: `Week of ${niceDate(monday)}: ${hrs}h` });
+  }
+  return out;
+}
 function vSkills() {
   const mins = Object.entries(state.skills.log).filter(([d]) => d.startsWith(monthKey())).reduce((a, [, m]) => a + m, 0);
   const hrs = Math.round(mins / 6) / 10;
+  const courses = [...state.skills.courses].sort((a, b) => (a.progress === 100 ? 1 : 0) - (b.progress === 100 ? 1 : 0));
   return `
   <div class="grid">
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">This month</p><h3>${hrs} / ${state.skills.monthlyHours} study hours</h3>${barHtml(100 * hrs / state.skills.monthlyHours, "#8e4ec6")}</div>
+        <div><p class="soft">Self-directed learning · this month</p><h3>${hrs} / ${state.skills.monthlyHours} study hours</h3>${barHtml(100 * hrs / state.skills.monthlyHours, "#8e4ec6")}</div>
         <span class="big-ic" style="--a:#8e4ec6">${I.gradcap}</span>
       </div>
       <div class="pill-row" style="margin-top:14px">
@@ -1908,18 +1926,20 @@ function vSkills() {
         <button class="btn ghost" data-action="study-log" data-kind="skills" data-n="60">+1 h</button>
         <button class="btn ghost" data-action="skills-goal">${I.sliders}Goal</button>
       </div>`)}
-    ${card("span2", cardHead("Current courses", addBtn("New course", "course-add")) + (state.skills.courses.length ? `
+    ${card("span2", cardHead("Study time · last 8 weeks") + `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(skillsTrend()))}' data-color="#8e4ec6" data-label="Study hours per week"></div>`)}
+    ${card("span2", cardHead("Courses &amp; skills", addBtn("New course", "course-add")) + (courses.length ? `
       <ul class="course-list">
-        ${state.skills.courses.map(c => `
-          <li>
-            <span class="row-txt"><b>${esc(c.name)}</b>${barHtml(c.progress, "#8e4ec6")}</span>
+        ${courses.map(c => `
+          <li class="${c.progress === 100 ? "done" : ""}">
+            <span class="row-txt"><b>${esc(c.name)}${c.category ? ` <span class="chip-genre">${esc(c.category)}</span>` : ""}</b>${barHtml(c.progress, "#8e4ec6")}</span>
             <b class="pct">${c.progress}%</b>
             <span class="pill-row">
-              <button class="btn tiny" data-action="course-bump" data-id="${c.id}" data-n="5">+5%</button>
+              ${c.progress < 100 ? `<button class="btn tiny" data-action="course-bump" data-id="${c.id}" data-n="5">+5%</button><button class="btn tiny good" data-action="course-done" data-id="${c.id}">Done</button>` : `<button class="btn tiny ghost" data-action="course-bump" data-id="${c.id}" data-n="-100">Reopen</button>`}
+              <button class="icon-btn ghost" data-action="course-edit" data-id="${c.id}" aria-label="Edit course">${I.edit}</button>
               <button class="icon-btn ghost" data-action="course-del" data-id="${c.id}" aria-label="Delete course">${I.trash}</button>
             </span>
           </li>`).join("")}
-      </ul>` : emptyMsg("gradcap", "Track the things you're learning.", addBtn("Add a course", "course-add"))))}
+      </ul>` : emptyMsg("gradcap", "Track what you're learning on your own — Python, languages, design…", addBtn("Add a course", "course-add"))))}
   </div>`;
 }
 
@@ -2378,35 +2398,57 @@ function vUniversity() {
         <button class="btn ghost" data-action="study-log" data-kind="university" data-n="60">+1 h</button>
         <button class="btn ghost" data-action="uni-goal">${I.sliders}Goal</button>
       </div>`)}
-    ${card("span2", cardHead("Tasks & deadlines", addBtn("Add task", "uni-task-add")) + (tasks.length ? `
+    ${card("span2", cardHead("Assignments & deadlines <small class=\"soft\">your formal coursework</small>", addBtn("Add task", "uni-task-add")) + (tasks.length ? `
       <ul class="check-list">
         ${tasks.map(k => `
-          <li class="${k.done ? "done" : ""}">
+          <li class="${k.done ? "done" : ""} ${!k.done && k.due < todayIso() ? "overdue" : ""}">
             <button class="checkbox" data-action="uni-task-toggle" data-id="${k.id}" aria-label="Toggle ${esc(k.title)}">${I.check}</button>
-            <span class="row-txt"><b>${esc(k.title)}</b><small>${niceDate(k.due)} · ${daysUntil(k.due)}</small></span>
+            <span class="row-txt"><b>${esc(k.title)}</b><small>${k.course ? esc(k.course) + " · " : ""}${niceDate(k.due)}</small></span>
+            ${dueMeta(k.due, k.done)}
+            <button class="icon-btn ghost" data-action="uni-task-edit" data-id="${k.id}" aria-label="Edit">${I.edit}</button>
             <button class="icon-btn ghost" data-action="uni-task-del" data-id="${k.id}" aria-label="Delete task">${I.trash}</button>
           </li>`).join("")}
-      </ul>` : emptyMsg("building", "No tasks — enjoy the calm 🌤️", addBtn("Add a task", "uni-task-add"))))}
+      </ul>` : emptyMsg("building", "No deadlines — enjoy the calm 🌤️", addBtn("Add a task", "uni-task-add"))))}
   </div>`;
 }
 
-/* ---------- work prep ---------- */
+/* ---------- work prep (career tracker) ---------- */
+const WORK_CATS = ["Resume", "Portfolio", "Applications", "Interviews", "Networking", "Skills", "Other"];
+function dueMeta(due, done) {
+  if (!due || done) return "";
+  const d = daysUntil(due);
+  const overdue = due < todayIso();
+  const soon = !overdue && due <= addDays(todayIso(), 3);
+  return `<span class="due-tag ${overdue ? "over" : soon ? "soon" : ""}">${overdue ? "Overdue" : d}</span>`;
+}
 function vWork() {
   const items = state.work.items;
   const pct = items.length ? Math.round(100 * items.filter(i => i.done).length / items.length) : 0;
+  const doneN = items.filter(i => i.done).length;
+  const cats = WORK_CATS.filter(c => items.some(i => (i.category || "Other") === c));
   return `
   <div class="grid">
-    ${card("center", `${ring(pct, { size: 130, sw: 10, color: "#ad6f2d", center: pct + "%", sub: "ready", label: "work preparation progress" })}
-      <p class="soft" style="margin-top:10px">Career preparation</p>`)}
-    ${card("span2", cardHead("Checklist", addBtn("Add item", "work-add")) + (items.length ? `
-      <ul class="check-list">
-        ${items.map(k => `
-          <li class="${k.done ? "done" : ""}">
-            <button class="checkbox" data-action="work-toggle" data-id="${k.id}" aria-label="Toggle ${esc(k.title)}">${I.check}</button>
-            <span class="row-txt"><b>${esc(k.title)}</b></span>
-            <button class="icon-btn ghost" data-action="work-del" data-id="${k.id}" aria-label="Delete item">${I.trash}</button>
-          </li>`).join("")}
-      </ul>` : emptyMsg("briefcase", "Build your career checklist.", addBtn("Add an item", "work-add"))))}
+    ${card("center", `${ring(pct, { size: 130, sw: 10, color: "#ad6f2d", center: pct + "%", sub: "ready", label: "career readiness" })}
+      <p class="soft" style="margin-top:10px">Career readiness · ${doneN}/${items.length} done</p>`)}
+    ${card("span2", cardHead("Career checklist", addBtn("Add item", "work-add")) + (items.length ? `
+      <div class="work-groups">
+        ${cats.map(cat => {
+          const list = items.filter(i => (i.category || "Other") === cat).sort((a, b) => (a.done - b.done) || ((a.due || "9") < (b.due || "9") ? -1 : 1));
+          const cd = list.filter(i => i.done).length;
+          return `<div class="work-group">
+            <div class="wg-head"><b>${esc(cat)}</b><small>${cd}/${list.length}</small></div>
+            <ul class="check-list">
+              ${list.map(k => `<li class="${k.done ? "done" : ""}">
+                <button class="checkbox" data-action="work-toggle" data-id="${k.id}" aria-label="Toggle ${esc(k.title)}">${I.check}</button>
+                <span class="row-txt"><b>${esc(k.title)}</b>${k.due ? `<small>${I.clock} ${niceDate(k.due)}</small>` : ""}</span>
+                ${dueMeta(k.due, k.done)}
+                <button class="icon-btn ghost" data-action="work-edit" data-id="${k.id}" aria-label="Edit">${I.edit}</button>
+                <button class="icon-btn ghost" data-action="work-del" data-id="${k.id}" aria-label="Delete item">${I.trash}</button>
+              </li>`).join("")}
+            </ul>
+          </div>`;
+        }).join("")}
+      </div>` : emptyMsg("briefcase", "Build your career plan — resume, portfolio, applications, interviews.", addBtn("Add an item", "work-add"))))}
   </div>`;
 }
 
@@ -2910,7 +2952,17 @@ const ACTIONS = {
   },
   "skills-goal": () => formModal("Monthly goal", fld("Study hours per month", num("hours", state.skills.monthlyHours, 1)), "skills-goal"),
   "uni-goal": () => formModal("Weekly goal", fld("Study hours per week", num("hours", state.university.weeklyHours, 1)), "uni-goal"),
-  "course-add": () => formModal("New course", fld("Course name", txt("name", "e.g. Python for beginners")), "course-add"),
+  "course-add": () => formModal("New course",
+    fld("Course / skill", txt("name", "e.g. Python for beginners")) +
+    fld("Category (optional)", txt("category", "e.g. Programming, Language", "", false)), "course-add"),
+  "course-edit": (el) => {
+    const c = state.skills.courses.find(x => x.id === el.dataset.id); if (!c) return;
+    formModal("Edit course",
+      fld("Course / skill", txt("name", "", c.name)) +
+      `<div class="fld-row">${fld("Progress %", num("progress", c.progress, 0, 5))}${fld("Category", txt("category", "", c.category || "", false))}</div>` +
+      `<input type="hidden" name="id" value="${c.id}">`, "course-edit");
+  },
+  "course-done": (el) => { const c = state.skills.courses.find(x => x.id === el.dataset.id); if (c && c.progress < 100) { c.progress = 100; addXp(40, `${c.name} completed`); save(); render(); } },
   "course-bump": (el) => {
     const c = state.skills.courses.find(x => x.id === el.dataset.id);
     const was = c.progress;
@@ -2919,8 +2971,16 @@ const ACTIONS = {
     save(); render();
   },
   "course-del": (el) => { state.skills.courses = state.skills.courses.filter(c => c.id !== el.dataset.id); save(); render(); },
-  "uni-task-add": () => formModal("New task",
-    fld("Task", txt("title", "e.g. Calculus assignment")) + fld("Due date", `<input type="date" name="due" value="${addDays(todayIso(), 3)}" required>`), "uni-task-add"),
+  "uni-task-add": () => formModal("New assignment",
+    fld("Task", txt("title", "e.g. Calculus assignment")) +
+    `<div class="fld-row">${fld("Course (optional)", txt("course", "e.g. Math 201", "", false))}${fld("Due date", `<input type="date" name="due" value="${addDays(todayIso(), 3)}" required>`)}</div>`, "uni-task-add"),
+  "uni-task-edit": (el) => {
+    const k = state.university.tasks.find(x => x.id === el.dataset.id); if (!k) return;
+    formModal("Edit assignment",
+      fld("Task", txt("title", "", k.title)) +
+      `<div class="fld-row">${fld("Course", txt("course", "", k.course || "", false))}${fld("Due date", `<input type="date" name="due" value="${k.due || ""}" required>`)}</div>` +
+      `<input type="hidden" name="id" value="${k.id}">`, "uni-task-edit");
+  },
   "uni-task-toggle": (el) => {
     const k = state.university.tasks.find(x => x.id === el.dataset.id);
     k.done = !k.done; if (k.done) addXp(15, k.title);
@@ -3041,7 +3101,16 @@ const ACTIONS = {
   "media-del": (el) => { state.media = state.media.filter(m => m.id !== el.dataset.id); save(); render(); },
 
   /* work / projects / social / memories */
-  "work-add": () => formModal("New checklist item", fld("Item", txt("title", "e.g. Update portfolio")), "work-add"),
+  "work-add": () => formModal("New career item",
+    fld("Item", txt("title", "e.g. Rewrite resume summary")) +
+    `<div class="fld-row">${fld("Category", `<select name="category">${WORK_CATS.map(c => `<option>${c}</option>`).join("")}</select>`)}${fld("Target date (optional)", `<input type="date" name="due" value="">`)}</div>`, "work-add"),
+  "work-edit": (el) => {
+    const k = state.work.items.find(x => x.id === el.dataset.id); if (!k) return;
+    formModal("Edit career item",
+      fld("Item", txt("title", "", k.title)) +
+      `<div class="fld-row">${fld("Category", `<select name="category">${WORK_CATS.map(c => `<option ${(k.category || "Other") === c ? "selected" : ""}>${c}</option>`).join("")}</select>`)}${fld("Target date", `<input type="date" name="due" value="${k.due || ""}">`)}</div>` +
+      `<input type="hidden" name="id" value="${k.id}">`, "work-edit");
+  },
   "work-toggle": (el) => { const k = state.work.items.find(x => x.id === el.dataset.id); k.done = !k.done; if (k.done) addXp(15, k.title); save(); render(); },
   "work-del": (el) => { state.work.items = state.work.items.filter(k => k.id !== el.dataset.id); save(); render(); },
   "project-add": () => formModal("New project", fld("Name", txt("name", "e.g. Portfolio site")) + fld("Emoji", txt("emoji", "🚀", "🚀", false)), "project-add"),
@@ -3171,8 +3240,10 @@ const SUBMITS = {
   "sup-add": (f) => { state.nutrition.supplements.push({ id: uid(), name: f.name, emoji: f.emoji || "💊", dose: f.dose || "", every: ["day", "week", "month"].includes(f.every) ? f.every : "day" }); },
   "skills-goal": (f) => { state.skills.monthlyHours = +f.hours; },
   "uni-goal": (f) => { state.university.weeklyHours = +f.hours; },
-  "course-add": (f) => { state.skills.courses.push({ id: uid(), name: f.name, progress: 0 }); },
-  "uni-task-add": (f) => { state.university.tasks.push({ id: uid(), title: f.title, due: f.due, done: false }); },
+  "course-add": (f) => { state.skills.courses.push({ id: uid(), name: f.name, progress: 0, category: f.category || "" }); },
+  "course-edit": (f) => { const c = state.skills.courses.find(x => x.id === f.id); if (c) { c.name = f.name; c.progress = clamp(+f.progress || 0, 0, 100); c.category = f.category || ""; } },
+  "uni-task-add": (f) => { state.university.tasks.push({ id: uid(), title: f.title, course: f.course || "", due: f.due, done: false }); },
+  "uni-task-edit": (f) => { const k = state.university.tasks.find(x => x.id === f.id); if (k) { k.title = f.title; k.course = f.course || ""; k.due = f.due || k.due; } },
   "book-add": (f) => { state.reading.books.push({ id: uid(), title: f.title, author: f.author || "Unknown", emoji: f.emoji || "📘", cover: f.cover || null, genre: f.genre || "", blurb: "", notes: "", recommenders: [], favorite: false, status: "current", pages: +f.pages, page: 0, rating: 0, started: todayIso() }); },
   "book-edit": (f) => {
     const b = state.reading.books.find(x => x.id === f.id);
@@ -3201,7 +3272,8 @@ const SUBMITS = {
     if (m.type === "Series") { m.season = Math.max(1, +f.season || 1); m.epTotal = Math.max(0, +f.epTotal || 0); m.epsDone = clamp(m.epsDone || 0, 0, m.epTotal || Infinity); }
     else { m.director = f.director || ""; m.cast = f.cast || ""; }
   },
-  "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, done: false }); },
+  "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, category: f.category || "Other", due: f.due || "", done: false }); },
+  "work-edit": (f) => { const k = state.work.items.find(x => x.id === f.id); if (k) { k.title = f.title; k.category = f.category || "Other"; k.due = f.due || ""; } },
   "project-add": (f) => { state.projects.push({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); },
   "fin-entry": (f) => {
     const amt = +f.amount || 0; if (amt <= 0) return;
