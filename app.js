@@ -369,11 +369,12 @@ function load() {
   save();
 }
 function save() {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); return true; }
-  catch (e) {
-    toast("Storage is full — try removing a book cover or two");
-    return false;
-  }
+  let ok = true;
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); }
+  catch (e) { toast("Storage is full — try removing a book cover or two"); ok = false; }
+  /* mirror to the cloud (debounced) when signed in — skip while applying a remote snapshot */
+  if (isSignedIn() && cloud.key && !cloud._applyingRemote) { cloud._dirty = true; schedulePush(); }
+  return ok;
 }
 
 /* ================= media store (IndexedDB — for photos & video) ================= */
@@ -458,6 +459,243 @@ function storeFile(file, cb) {
   if (file.size > 100 * 1024 * 1024) { toast("That file is over 100MB — too large to store here"); return; }
   mediaPut(file).then(id => cb({ id, kind: "file", name: file.name, type: file.type || "" }))
     .catch(() => toast("Couldn't save that file"));
+}
+
+/* ================= cloud sync (Supabase — Auth + REST via fetch; zero-knowledge E2E) =================
+   Free cross-device sync. Local-first: localStorage stays the source of truth, the cloud is only an
+   encrypted mirror. The whole `state` blob is encrypted in the browser (WebCrypto AES-GCM, key derived
+   from the account password with PBKDF2) BEFORE upload — the server only ever stores ciphertext. Row-Level
+   Security means each account can read/write only its own row. Runs on a live HTTPS origin only (won't
+   work inside the CSP-locked artifact — same caveat as book/movie search). */
+const SUPABASE_URL  = "https://kkorqjoltzkgrtngmaiy.supabase.co";
+const SUPABASE_ANON = "sb_publishable_phHHeh4YTbPyxxfHpVIXSA_q6RyfNce";
+const SESSION_KEY  = "lifehub-session";   // {access_token,refresh_token,expires_at,email,user_id,salt,keyRaw}
+const SYNCMETA_KEY = "lifehub-sync";      // {userId,version,updatedAt}
+
+const cloud = { session: null, key: null, status: "idle", lastSync: 0, _pushT: null, _busy: false, _dirty: false, _applyingRemote: false, _conflictRemote: null };
+
+/* base64 <-> ArrayBuffer */
+function bufToB64(buf) { const b = new Uint8Array(buf); let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s); }
+function b64ToBuf(b64) { const bin = atob(b64); const b = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return b.buffer; }
+
+/* ---- WebCrypto: AES-GCM key from password + salt (PBKDF2) ---- */
+async function deriveKey(password, saltB64) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: new Uint8Array(b64ToBuf(saltB64)), iterations: 200000, hash: "SHA-256" },
+    base, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+}
+async function encryptState(obj, key) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify(obj)));
+  return { ciphertext: bufToB64(ct), iv: bufToB64(iv.buffer) };
+}
+async function decryptSnapshot(row, key) {
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(b64ToBuf(row.iv)) }, key, b64ToBuf(row.ciphertext));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+const randomSaltB64 = () => bufToB64(crypto.getRandomValues(new Uint8Array(16)).buffer);
+
+/* ---- session + sync-meta persistence ---- */
+function loadSession() { try { cloud.session = JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch { cloud.session = null; } }
+function saveSession() { if (cloud.session) localStorage.setItem(SESSION_KEY, JSON.stringify(cloud.session)); else localStorage.removeItem(SESSION_KEY); }
+function getSyncMeta() { try { return JSON.parse(localStorage.getItem(SYNCMETA_KEY) || "null"); } catch { return null; } }
+function setSyncMeta(m) { if (m) localStorage.setItem(SYNCMETA_KEY, JSON.stringify(m)); else localStorage.removeItem(SYNCMETA_KEY); }
+const isSignedIn = () => !!(cloud.session && cloud.session.access_token);
+function baseVersion() { const m = getSyncMeta(); return (m && cloud.session && m.userId === cloud.session.user_id) ? m.version : 0; }
+
+/* restore the cached crypto key on startup (local state is already plaintext, so caching adds no exposure) */
+async function restoreKey() {
+  if (!cloud.session || !cloud.session.keyRaw) { cloud.key = null; return; }
+  try { cloud.key = await crypto.subtle.importKey("raw", b64ToBuf(cloud.session.keyRaw), { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]); }
+  catch { cloud.key = null; }
+}
+async function cacheKey(key, saltB64) {
+  cloud.session.keyRaw = bufToB64(await crypto.subtle.exportKey("raw", key));
+  cloud.session.salt = saltB64;
+  saveSession();
+}
+
+/* ---- GoTrue auth (fetch) ---- */
+async function authRequest(path, body) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+    method: "POST", headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON }, body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error_description || data.msg || data.error || `Request failed (${r.status})`);
+  return data;
+}
+function storeAuth(d) {
+  cloud.session = Object.assign(cloud.session || {}, {
+    access_token: d.access_token, refresh_token: d.refresh_token,
+    expires_at: Date.now() + (d.expires_in || 3600) * 1000,
+    email:   (d.user && d.user.email) || (cloud.session && cloud.session.email) || "",
+    user_id: (d.user && d.user.id)    || (cloud.session && cloud.session.user_id) || "",
+  });
+  saveSession();
+}
+async function authSignup(email, password) {
+  const d = await authRequest("signup", { email, password });
+  if (!d.access_token) throw new Error("Almost there — check your email to confirm your address, then sign in.");
+  storeAuth(d); return d;
+}
+async function authSignin(email, password) { storeAuth(await authRequest("token?grant_type=password", { email, password })); }
+async function authRefresh() {
+  if (!cloud.session || !cloud.session.refresh_token) throw new Error("no-refresh");
+  storeAuth(await authRequest("token?grant_type=refresh_token", { refresh_token: cloud.session.refresh_token }));
+}
+function authSignout() { cloud.session = null; cloud.key = null; cloud.status = "idle"; cloud._dirty = false; saveSession(); setSyncMeta(null); }
+
+/* ---- authenticated REST (PostgREST), refresh once on 401 ---- */
+async function restFetch(path, opts = {}, retry = true) {
+  const headers = Object.assign({ apikey: SUPABASE_ANON, Authorization: `Bearer ${cloud.session.access_token}`, "Content-Type": "application/json" }, opts.headers || {});
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, Object.assign({}, opts, { headers }));
+  if (r.status === 401 && retry) { await authRefresh(); return restFetch(path, opts, false); }
+  return r;
+}
+async function fetchRemoteRow() {
+  const r = await restFetch(`snapshots?user_id=eq.${cloud.session.user_id}&select=*`, { method: "GET" });
+  if (!r.ok) throw new Error(`Fetch failed (${r.status})`);
+  const rows = await r.json();
+  return (rows && rows[0]) || null;
+}
+async function upsertRow(row) {
+  const r = await restFetch("snapshots", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(row) });
+  if (!r.ok) throw new Error(`Push failed (${r.status})`);
+}
+
+/* ---- sync status (live badge in the Account card) ---- */
+function timeAgo(t) {
+  if (!t) return "";
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 5) return "just now";
+  if (s < 60) return s + "s ago";
+  const m = Math.round(s / 60); if (m < 60) return m + "m ago";
+  const h = Math.round(m / 60); if (h < 24) return h + "h ago";
+  return Math.round(h / 24) + "d ago";
+}
+function syncLabel() {
+  switch (cloud.status) {
+    case "syncing":  return { cls: "syncing", txt: "Syncing…" };
+    case "synced":   return { cls: "ok",  txt: "Synced " + timeAgo(cloud.lastSync) };
+    case "offline":  return { cls: "off", txt: "Offline — will sync when back online" };
+    case "conflict": return { cls: "err", txt: "Paused — needs your choice" };
+    case "error":    return { cls: "err", txt: "Sync error — tap Sync now" };
+    default:         return { cls: "",    txt: "Not synced yet" };
+  }
+}
+function setSyncStatus(s) {
+  cloud.status = s;
+  if (s === "synced") cloud.lastSync = Date.now();
+  const el = document.querySelector("[data-sync-status]");
+  if (el) { const { cls, txt } = syncLabel(); el.className = "sync-badge " + cls; el.textContent = txt; }
+}
+
+/* ---- sync engine ---- */
+function schedulePush() {
+  if (!isSignedIn() || !cloud.key) return;
+  clearTimeout(cloud._pushT);
+  cloud._pushT = setTimeout(() => pushSnapshot(), 2500);
+}
+async function pushSnapshot(force = false) {
+  if (!isSignedIn() || !cloud.key || cloud._busy) return;
+  if (!cloud.session.salt) { setSyncStatus("error"); return; }
+  cloud._busy = true; setSyncStatus("syncing");
+  try {
+    const base = baseVersion();
+    const remote = await fetchRemoteRow();
+    if (remote && remote.version > base && !force) { cloud._busy = false; setSyncStatus("conflict"); promptConflict(remote); return; }
+    const version = (remote ? remote.version : base) + 1;
+    const enc = await encryptState(state, cloud.key);
+    const updated_at = new Date().toISOString();
+    await upsertRow({ user_id: cloud.session.user_id, ciphertext: enc.ciphertext, iv: enc.iv, salt: cloud.session.salt, version, updated_at });
+    setSyncMeta({ userId: cloud.session.user_id, version, updatedAt: updated_at });
+    cloud._dirty = false; setSyncStatus("synced");
+  } catch (e) {
+    setSyncStatus(navigator.onLine === false ? "offline" : "error");
+  } finally { cloud._busy = false; }
+}
+async function pullSnapshot(opts = {}) {
+  if (!isSignedIn() || !cloud.key || cloud._busy) return;
+  cloud._busy = true; setSyncStatus("syncing");
+  try {
+    const remote = await fetchRemoteRow();
+    if (!remote) { cloud._busy = false; await pushSnapshot(true); return; }   // seed the cloud from this device
+    const base = baseVersion();
+    if (remote.version > base || opts.force) {
+      const incoming = migrate(Object.assign(defaultState(), await decryptSnapshot(remote, cloud.key)));
+      cloud._applyingRemote = true;
+      state = incoming;
+      setSyncMeta({ userId: cloud.session.user_id, version: remote.version, updatedAt: remote.updated_at });
+      save();
+      cloud._applyingRemote = false;
+      cloud._dirty = false; setSyncStatus("synced");
+      applyTheme(); render();
+    } else {
+      setSyncStatus("synced");
+      if (cloud._dirty) schedulePush();
+    }
+  } catch (e) {
+    cloud._applyingRemote = false;
+    if (e && /decrypt/i.test(e.name + e.message)) { setSyncStatus("error"); toast("Couldn't decrypt your cloud data — is the password correct?"); }
+    else setSyncStatus(navigator.onLine === false ? "offline" : "error");
+  } finally { cloud._busy = false; }
+}
+
+/* ---- conflict (two devices diverged) ---- */
+function promptConflict(remote) {
+  cloud._conflictRemote = remote;
+  openModal(`
+    <header class="modal-head"><h3>Sync conflict</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body"><p class="soft">This account was changed on another device since this one last synced. Which version should win? The other is kept in the cloud history either way.</p></div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="conflict-keep-remote">Load the other device</button>
+      <button type="button" class="btn primary" data-action="conflict-keep-local">Keep this device</button>
+    </footer>`);
+}
+
+/* ---- sign in / sign up (async; called from the auth form) ---- */
+function openAuthModal(mode) {
+  const signup = mode === "signup";
+  openModal(`
+    <form data-submit="${signup ? "auth-signup" : "auth-signin"}">
+      <header class="modal-head"><h3>${signup ? "Create your free account" : "Sign in"}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+      <div class="modal-body">
+        <p class="soft" style="margin-bottom:12px">${signup
+          ? "Free forever. Your data is encrypted on this device before it's uploaded — no one but you can read it."
+          : "Welcome back — sign in to sync this device with your account."}</p>
+        ${fld("Email", `<input type="email" name="email" required autocomplete="email" placeholder="you@email.com">`)}
+        ${fld("Password", `<input type="password" name="password" required minlength="6" autocomplete="${signup ? "new-password" : "current-password"}" placeholder="${signup ? "At least 6 characters" : "Your password"}">`)}
+        ${signup ? `<p class="soft note">${I.zap} Remember this password — it also encrypts your data. If you ever forget it your cloud copy can't be decrypted, but your data stays safe on this device.</p>` : ""}
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="btn ghost" data-action="${signup ? "auth-switch-signin" : "auth-switch-signup"}">${signup ? "I already have an account" : "Create an account"}</button>
+        <button type="submit" class="btn primary">${signup ? "Create account" : "Sign in"}</button>
+      </footer>
+    </form>`);
+}
+async function doAuth(mode, email, password) {
+  const btn = document.querySelector("#modal button[type=submit]");
+  const reset = () => { if (btn) { btn.disabled = false; btn.textContent = mode === "signup" ? "Create account" : "Sign in"; } };
+  if (btn) { btn.disabled = true; btn.textContent = mode === "signup" ? "Creating…" : "Signing in…"; }
+  try {
+    if (mode === "signup") await authSignup(email, password); else await authSignin(email, password);
+    const remote = await fetchRemoteRow();
+    const salt = (remote && remote.salt) || randomSaltB64();
+    cloud.key = await deriveKey(password, salt);
+    await cacheKey(cloud.key, salt);
+    setSyncMeta(null);
+    closeModal();
+    toast(mode === "signup" ? "Account created 🎉 Syncing…" : "Signed in ✓ Syncing…");
+    render();
+    await pullSnapshot({ force: !!remote });
+  } catch (e) { reset(); toast(e.message || "Something went wrong"); }
+}
+async function initCloud() {
+  loadSession();
+  if (!isSignedIn()) return;
+  await restoreKey();
+  if (cloud.key) pullSnapshot(); else setSyncStatus("error");
 }
 
 /* ================= day navigation (Habits / Workout / Skills) ================= */
@@ -2668,10 +2906,36 @@ function vIntegrations() {
 }
 
 /* ---------- profile ---------- */
+function accountCard() {
+  if (isSignedIn()) {
+    const { cls, txt } = syncLabel();
+    return card("span2", cardHead("Account &amp; sync") + `
+      <div class="acct-row">
+        <span class="acct-avatar">${I.user}</span>
+        <div class="acct-meta">
+          <b>${esc(cloud.session.email || "Signed in")}</b>
+          <span class="sync-badge ${cls}" data-sync-status>${esc(txt)}</span>
+        </div>
+      </div>
+      <div class="pill-row" style="margin-top:14px">
+        <button class="btn ghost" data-action="sync-now">${I.zap}Sync now</button>
+        <button class="btn ghost" data-action="auth-signout">Sign out</button>
+      </div>
+      <p class="soft note">${I.check} Your habits, books, workouts and everything else sync privately across your devices. It's all <b>end-to-end encrypted</b> — only you can read it. Photos &amp; videos stay on this device for now.</p>`);
+  }
+  return card("span2", cardHead(`Account &amp; sync <small class="soft">— free forever</small>`) + `
+    <p class="soft">Create a free account to <b>sync LifeHub across all your devices</b> — phone, laptop, tablet. Your data is <b>encrypted on your device before it ever leaves</b>, so it stays completely private. No paywall, ever.</p>
+    <div class="pill-row" style="margin-top:14px">
+      <button class="btn primary" data-action="auth-open">${I.user}Sign in / Create account</button>
+    </div>
+    <p class="soft note">${I.zap} Everything keeps working offline — the cloud is just an encrypted mirror. Sync runs on the live site (not the in-chat preview).</p>`);
+}
+
 function vProfile() {
   const li = levelInfo();
   return `
   <div class="grid">
+    ${accountCard()}
     ${card("center span2", `
       <button class="avatar-big" data-action="profile-edit" aria-label="Edit profile">${esc(state.profile.avatar)}</button>
       <h2 style="margin-top:10px">${esc(state.profile.name || "Set your name")}</h2>
@@ -2765,6 +3029,27 @@ const ACTIONS = {
   "theme-toggle": toggleTheme,
   "quick-add": openQuickAdd,
   "go-journal": () => { closeModal(); go("journal"); },
+
+  /* account + cloud sync */
+  "auth-open": () => openAuthModal("signin"),
+  "auth-switch-signup": () => openAuthModal("signup"),
+  "auth-switch-signin": () => openAuthModal("signin"),
+  "auth-signout": () => { authSignout(); toast("Signed out — your data stays on this device"); render(); },
+  "sync-now": async () => { await pullSnapshot(); if (cloud._dirty) await pushSnapshot(); },
+  "conflict-keep-local": () => { closeModal(); pushSnapshot(true); },
+  "conflict-keep-remote": async () => {
+    closeModal();
+    const remote = cloud._conflictRemote; if (!remote) return;
+    cloud._busy = true; setSyncStatus("syncing");
+    try {
+      const incoming = migrate(Object.assign(defaultState(), await decryptSnapshot(remote, cloud.key)));
+      cloud._applyingRemote = true; state = incoming;
+      setSyncMeta({ userId: cloud.session.user_id, version: remote.version, updatedAt: remote.updated_at });
+      save(); cloud._applyingRemote = false; cloud._dirty = false;
+      setSyncStatus("synced"); applyTheme(); render();
+    } catch { setSyncStatus("error"); toast("Couldn't load the other version"); }
+    finally { cloud._busy = false; }
+  },
 
   /* Today agenda + tasks */
   "ag-habit": (el) => {
@@ -3204,6 +3489,10 @@ function ensureJournal() {
 
 /* form submits */
 const SUBMITS = {
+  /* account (async — return true so the framework leaves the modal open; doAuth closes on success) */
+  "auth-signin": (f) => { doAuth("signin", f.email, f.password); return true; },
+  "auth-signup": (f) => { doAuth("signup", f.email, f.password); return true; },
+
   "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: f.kind ? "workout" : "", goalIds: [], milestones: [], log: {} }); },
   "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = f.kind ? "workout" : ""; } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
@@ -3463,6 +3752,12 @@ bindEvents();
 bindTip();
 render();
 maybeOnboard();
+
+/* cloud sync: restore any saved session, then pull the latest snapshot (HTTPS origins only) */
+if (location.protocol === "https:" && window.crypto && crypto.subtle) {
+  initCloud();
+  window.addEventListener("online", () => { if (isSignedIn() && cloud.key && cloud._dirty) schedulePush(); });
+}
 
 /* PWA: register the service worker for offline + installability (HTTPS/localhost only) */
 if ("serviceWorker" in navigator && location.protocol === "https:") {

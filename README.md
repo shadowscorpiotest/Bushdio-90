@@ -52,8 +52,20 @@ autofill still need a connection since they query outside databases.
 - Accessible: keyboard focus styles, aria labels, 44px touch targets, reduced-motion support, colorblind-validated chart palette.
 - Hand-drawn SVG icon set, no icon fonts, no dependencies — plain HTML/CSS/JS.
 
+## ☁️ Free cross-device sync (optional)
+
+Create a **free account** (Profile → **Account & sync**) to keep LifeHub in step across your phone, laptop and tablet. It's **free forever** — no paywall.
+
+- **Local-first.** Your device stays the source of truth; the cloud is only a mirror. Everything keeps working **offline** and syncs when you're back.
+- **Zero-knowledge encryption.** Your whole LifeHub is **encrypted in your browser** (WebCrypto AES-GCM, key derived from your password with PBKDF2) *before* it's uploaded — the server only ever stores ciphertext. Nobody but you can read your journal, health or finances.
+- **Row-Level Security.** The database itself only ever returns your own row.
+- **Sign in on a new device** and your data appears; a **conflict prompt** protects you if two devices diverge.
+- Because it's encrypted with your password: if you ever forget it, the *cloud copy* can't be decrypted — but your data is still safe on your device.
+
+> Photos & videos stay on-device for now (they live in IndexedDB); media cloud-sync is a follow-up. Sync runs on the **live site** over HTTPS (not the in-chat preview, whose sandbox blocks network calls — same as search).
+
 ## 🔒 Your data
 
-Structured data lives in `localStorage` under the `lifehub-v1` key. Use **Profile → Export JSON** for backups and **Import** to restore. **Uploaded photos & videos** are stored separately in your browser's **IndexedDB** (`lifehub-media`) so large media doesn't blow the localStorage limit — this media stays on the device/browser you added it in and isn't part of the JSON export.
+Structured data lives in `localStorage` under the `lifehub-v1` key. Use **Profile → Export JSON** for backups and **Import** to restore. **Uploaded photos & videos** are stored separately in your browser's **IndexedDB** (`lifehub-media`) so large media doesn't blow the localStorage limit — this media stays on the device/browser you added it in and isn't part of the JSON export. With an account, your structured data is also mirrored to the cloud, **end-to-end encrypted** (see above).
 
 **Starting out:** LifeHub opens with sample content so you can see how everything works. When you're ready, **Profile → Your data** gives you **Start fresh** (clears the demo content + media but keeps your name, theme and keys), **Load sample data** (brings the demo back), and **Reset everything** (a full wipe, including your profile).
