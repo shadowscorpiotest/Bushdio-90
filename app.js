@@ -130,7 +130,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 1;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 2;                             // bump when you append a step to MIGRATIONS
 let state = null;
 
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
@@ -155,11 +155,12 @@ function defaultState() {
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
     workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
     nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70, fiber: 30 }, meals: [], log: {}, photos: {}, supplements: [], supTaken: {}, shopping: [] },
-    skills: { monthlyHours: 10, courses: [], log: {} }, // log[date]=minutes
+    skills: { monthlyHours: 10, courses: [] },
+    study: { log: {} },        // log[date]={skills:mins, university:mins} — ONE ledger, split by source
     reflections: {},           // {date: text}
     reading: { yearlyGoal: 12, books: [], log: {} },
     media: [],                 // {id,title,type,status,rating}
-    university: { weeklyHours: 20, tasks: [], log: {} },
+    university: { weeklyHours: 20, tasks: [] },
     work: { items: [] },       // {id,title,done}
     projects: [],              // {id,name,emoji,status,progress,note}
     finance: { entries: [], importedClasses: [] }, // entries {id,date,type:income|expense,amount,category,note}
@@ -375,6 +376,34 @@ const MIGRATIONS = [
     if (m.started == null) m.started = "";
     if (m.finished == null) m.finished = "";
   });
+  },
+
+  /* 1 → 2 · de-duplicate two facts the app was storing twice.
+     (a) Mood lived in BOTH health.log[d].mood and journal[].mood, so the app could hold two
+         different answers to "how did you feel today". Health is now the single source of truth;
+         a journal mood is adopted only for days Health has none, then the duplicate is dropped.
+     (b) Study minutes lived in skills.log and university.log with no combined total. Both fold
+         into one study.log[d] = {skills, university} ledger, so total study time is one lookup. */
+  (s) => {
+    s.health = s.health || { goals: {}, log: {} };
+    s.health.log = s.health.log || {};
+    (s.journal || []).forEach(j => {
+      if (!j || !j.mood) return;
+      const day = s.health.log[j.date] = s.health.log[j.date] || {};
+      if (!day.mood) day.mood = j.mood;
+      delete j.mood;
+    });
+
+    s.study = s.study || { log: {} };
+    s.study.log = s.study.log || {};
+    [["skills", "skills"], ["university", "university"]].forEach(([slice, key]) => {
+      const old = (s[slice] && s[slice].log) || {};
+      Object.keys(old).forEach(d => {
+        const day = s.study.log[d] = s.study.log[d] || {};
+        day[key] = (day[key] || 0) + (+old[d] || 0);
+      });
+      if (s[slice]) delete s[slice].log;
+    });
   },
 ];
 
@@ -969,9 +998,16 @@ const weekOfDate = (d) => { const m = mondayOf(d); return [...Array(7)].map((_, 
 function workoutsThisWeek() {
   return weekDates().reduce((n, d) => n + ((state.workout.log[d] || []).length ? 1 : 0), 0);
 }
-function studyMinutesToday() {
-  const t = todayIso();
-  return (state.skills.log[t] || 0) + (state.university.log[t] || 0);
+/* one study ledger; pass a kind for just that source, omit it for the combined total */
+const studyOn = (d) => state.study.log[d] || {};
+const studyMins = (d, kind) => { const x = studyOn(d); return kind ? (x[kind] || 0) : ((x.skills || 0) + (x.university || 0)); };
+const studyRange = (days, kind) => days.reduce((a, d) => a + studyMins(d, kind), 0);
+function studyMinutesToday() { return studyMins(todayIso()); }
+/* one mood per day, owned by Health and shared with Journal */
+const moodOn = (d) => (state.health.log[d] || {}).mood || "";
+function setMoodOn(d, m) {
+  const l = state.health.log[d] = healthOn(d);
+  l.mood = l.mood === m ? "" : m;
 }
 function nutritionOn(d) {
   const checked = state.nutrition.log[d] || {};
@@ -1013,12 +1049,12 @@ function areaProgressToday(id) {
     case "workout": return Math.round(100 * clamp(workoutsThisWeek() / state.workout.weeklyGoal, 0, 1));
     case "nutrition": { const n = state.nutrition.meals.length, c = state.nutrition.log[t] || {};
       return n ? Math.round(100 * Object.keys(c).filter(k => c[k]).length / n) : 0; }
-    case "skills": { const mins = Object.entries(state.skills.log).filter(([d]) => d.startsWith(monthKey())).reduce((a, [, m]) => a + m, 0);
+    case "skills": { const mins = Object.keys(state.study.log).filter(d => d.startsWith(monthKey())).reduce((a, d) => a + studyMins(d, "skills"), 0);
       return Math.round(100 * clamp(mins / 60 / state.skills.monthlyHours, 0, 1)); }
     case "reading": { const done = state.reading.books.filter(b => b.status === "done").length;
       return Math.round(100 * clamp(done / state.reading.yearlyGoal, 0, 1)); }
     case "media": { const n = state.media.length; return n ? Math.round(100 * state.media.filter(m => m.status === "done").length / n) : 0; }
-    case "university": { const mins = weekDates().reduce((a, d) => a + (state.university.log[d] || 0), 0);
+    case "university": { const mins = studyRange(weekDates(), "university");
       return Math.round(100 * clamp(mins / 60 / state.university.weeklyHours, 0, 1)); }
     case "work": { const n = state.work.items.length; return n ? Math.round(100 * state.work.items.filter(i => i.done).length / n) : 0; }
     case "projects": { const n = state.projects.length; return n ? Math.round(state.projects.reduce((a, p) => a + p.progress, 0) / n) : 0; }
@@ -1085,7 +1121,7 @@ const BADGES = [
   { id: "librarian",   name: "Librarian",        desc: "Finish 5 books",                 emoji: "📚", test: () => state.reading.books.filter(b => b.status === "done").length >= 5 },
   { id: "athlete",     name: "Athlete",          desc: "Log 10 workouts",                emoji: "🏋️", test: () => Object.values(state.workout.log).reduce((a, v) => a + v.length, 0) >= 10 },
   { id: "hydrated",    name: "Hydro homie",      desc: "Hit your water goal 7 times",    emoji: "💧", test: () => Object.values(state.health.log).filter(l => (l.water || 0) >= state.health.goals.water).length >= 7 },
-  { id: "scholar",     name: "Scholar",          desc: "Log 10 hours of study",          emoji: "🎓", test: () => (Object.values(state.skills.log).reduce((a, b) => a + b, 0) + Object.values(state.university.log).reduce((a, b) => a + b, 0)) >= 600 },
+  { id: "scholar",     name: "Scholar",          desc: "Log 10 hours of study",          emoji: "🎓", test: () => Object.keys(state.study.log).reduce((a, d) => a + studyMins(d), 0) >= 600 },
   { id: "journalist",  name: "Dear diary",       desc: "Write 7 journal entries",        emoji: "✒️", test: () => state.journal.length >= 7 },
   { id: "keeper",      name: "Memory keeper",    desc: "Save 5 memories",                emoji: "📸", test: () => state.memories.length >= 5 },
   { id: "shipper",     name: "Shipped it",       desc: "Complete a project",             emoji: "🚢", test: () => state.projects.some(p => p.status === "Done") },
@@ -1648,7 +1684,7 @@ function vDashboard() {
   const li = levelInfo(), t = todayIso();
   const missionsDone = MISSIONS.filter(m => m.done()).length;
   const wk = socialWeek();
-  const studiedH = Math.round(weekDates().reduce((a, d) => a + (state.university.log[d] || 0) + (state.skills.log[d] || 0), 0) / 6) / 10;
+  const studiedH = Math.round(studyRange(weekDates()) / 6) / 10;
   const todos = state.todos.filter(td => !td.date || td.date === t);
   const undone = todos.filter(td => !td.done).sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
   const done = todos.filter(td => td.done);
@@ -2010,6 +2046,17 @@ function vHealth() {
     ${card("span2", cardHead("Steps this week") + `
       <div data-chart-type="bar" data-chart='${esc(JSON.stringify(stepsData))}' data-goal="${g.steps}" data-color="#30a46c" data-h="160" data-label="Steps that week"></div>
       <p class="chart-note">${I.target} goal line at ${g.steps.toLocaleString()} steps</p>`)}
+
+    ${card("span2", cardHead("Mood · last 14 days") + (() => {
+      const days = [...Array(14)].map((_, i) => addDays(d, i - 13));
+      const logged = days.filter(x => moodOn(x)).length;
+      return `<div class="mood-strip">${days.map(x => `
+        <button class="mood-day ${x === d ? "on" : ""}" data-action="mood-goto" data-d="${x}" title="${niceDate(x, { weekday: "long", month: "short", day: "numeric" })}">
+          <span class="md-face">${moodOn(x) || "·"}</span>
+          <small>${niceDate(x, { day: "numeric" })}</small>
+        </button>`).join("")}</div>
+      <p class="chart-note">${I.heart} ${logged} of 14 days logged${logged ? " — tap a day to jump to it" : ""}. Journal and Health share one mood.</p>`;
+    })())}
   </div>`;
 }
 
@@ -2279,15 +2326,20 @@ function skillsTrend() {
   for (let i = 7; i >= 0; i--) {
     const monday = mondayOf(addDays(todayIso(), -i * 7));
     let mins = 0;
-    for (let d = 0; d < 7; d++) mins += state.skills.log[addDays(monday, d)] || 0;
+    let self = 0, uni = 0;
+    for (let d = 0; d < 7; d++) { const x = addDays(monday, d); self += studyMins(x, "skills"); uni += studyMins(x, "university"); }
+    mins = self + uni;
     const hrs = Math.round(mins / 6) / 10;
-    out.push({ label: i === 0 ? "This wk" : niceDate(monday, { month: "short", day: "numeric" }), value: hrs, tip: `Week of ${niceDate(monday)}: ${hrs}h` });
+    const h = (m) => Math.round(m / 6) / 10;
+    out.push({ label: i === 0 ? "This wk" : niceDate(monday, { month: "short", day: "numeric" }), value: hrs,
+      tip: `Week of ${niceDate(monday)}: ${hrs}h · ${h(self)}h self-directed + ${h(uni)}h coursework` });
   }
   return out;
 }
 function vSkills() {
   const cur = dayCursor("skills"), curMonth = cur.slice(0, 7);
-  const mins = Object.entries(state.skills.log).filter(([d]) => d.startsWith(curMonth)).reduce((a, [, m]) => a + m, 0);
+  const mins = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "skills"), 0);
+  const uniMins = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "university"), 0);
   const hrs = Math.round(mins / 6) / 10;
   const courses = [...state.skills.courses].sort((a, b) => (a.progress === 100 ? 1 : 0) - (b.progress === 100 ? 1 : 0));
   return `
@@ -2295,7 +2347,7 @@ function vSkills() {
     ${card("span2 daynav-card", dayNav("skills"))}
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">Self-directed learning · this month</p><h3>${hrs} / ${state.skills.monthlyHours} study hours</h3>${barHtml(100 * hrs / state.skills.monthlyHours, "#8e4ec6")}</div>
+        <div><p class="soft">Self-directed learning · this month</p><h3>${hrs} / ${state.skills.monthlyHours} study hours</h3>${barHtml(100 * hrs / state.skills.monthlyHours, "#8e4ec6")}<small class="soft study-total">${I.building} plus <b>${Math.round(uniMins / 6) / 10} h</b> coursework · <b>${Math.round((mins + uniMins) / 6) / 10} h</b> studied in total this month</small></div>
         <span class="big-ic" style="--a:#8e4ec6">${I.gradcap}</span>
       </div>
       <div class="pill-row" style="margin-top:14px">
@@ -2761,7 +2813,8 @@ function openMediaDetail(id) {
 /* ---------- university ---------- */
 function vUniversity() {
   const cur = dayCursor("university");
-  const mins = weekOfDate(cur).reduce((a, d) => a + (state.university.log[d] || 0), 0);
+  const mins = studyRange(weekOfDate(cur), "university");
+  const selfMins = studyRange(weekOfDate(cur), "skills");
   const hrs = Math.round(mins / 6) / 10;
   const tasks = [...state.university.tasks].sort((a, b) => (a.done - b.done) || (a.due < b.due ? -1 : 1));
   return `
@@ -2769,7 +2822,7 @@ function vUniversity() {
     ${card("span2 daynav-card", dayNav("university"))}
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">${cur === todayIso() ? "This week" : "Week of " + niceDate(mondayOf(cur))}</p><h3>${hrs} / ${state.university.weeklyHours} study hours</h3>${barHtml(100 * hrs / state.university.weeklyHours, "#3e63dd")}</div>
+        <div><p class="soft">${cur === todayIso() ? "This week" : "Week of " + niceDate(mondayOf(cur))}</p><h3>${hrs} / ${state.university.weeklyHours} study hours</h3>${barHtml(100 * hrs / state.university.weeklyHours, "#3e63dd")}<small class="soft study-total">${I.gradcap} plus <b>${Math.round(selfMins / 6) / 10} h</b> self-directed · <b>${Math.round((mins + selfMins) / 6) / 10} h</b> studied in total this week</small></div>
         <span class="big-ic" style="--a:#3e63dd">${I.building}</span>
       </div>
       <div class="pill-row" style="margin-top:14px">
@@ -2992,7 +3045,7 @@ function vJournal() {
     ${card("span2", cardHead(`${isToday ? "Today" : niceDate(d, { weekday: "long" })} · ${niceDate(d, { month: "long", day: "numeric" })}`) + `
       <textarea class="journal-input" id="journalText" placeholder="What's on your mind? A few honest lines beat a perfect page…">${esc(entry?.text || "")}</textarea>
       <div class="journal-foot">
-        <span class="mood-row">${moods.map(m => `<button class="mood ${entry?.mood === m ? "on" : ""}" data-action="journal-mood" data-m="${m}">${m}</button>`).join("")}</span>
+        <span class="mood-row">${moods.map(m => `<button class="mood ${moodOn(d) === m ? "on" : ""}" data-action="journal-mood" data-m="${m}">${m}</button>`).join("")}</span>
         <span class="pill-row">
           ${["Grateful", "Happy", "Focused", "Tired"].map(tag => `<button class="tag ${entry?.tags?.includes(tag) ? "on" : ""}" data-action="journal-tag" data-tag="${tag}">${tag}</button>`).join("")}
         </span>
@@ -3001,7 +3054,7 @@ function vJournal() {
       </div>`)}
     ${past.length ? card("span2", cardHead("Earlier entries") + `
       <ul class="journal-list">
-        ${past.map(j => `<li data-action="journal-open" data-d="${j.date}" class="j-open"><span class="j-date"><b>${niceDate(j.date)}</b>${j.mood ? `<span>${j.mood}</span>` : ""}</span><p>${esc(j.text)}</p>${j.tags?.length ? `<span class="j-tags">${j.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}</li>`).join("")}
+        ${past.map(j => `<li data-action="journal-open" data-d="${j.date}" class="j-open"><span class="j-date"><b>${niceDate(j.date)}</b>${moodOn(j.date) ? `<span>${moodOn(j.date)}</span>` : ""}</span><p>${esc(j.text)}</p>${j.tags?.length ? `<span class="j-tags">${j.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}</li>`).join("")}
       </ul>`) : ""}
   </div>`;
 }
@@ -3298,7 +3351,8 @@ const ACTIONS = {
   /* health */
   "steps-add": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.steps = (l.steps || 0) + +el.dataset.n; save(); render(); },
   "water-add": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.water = +((l.water || 0) + +el.dataset.n).toFixed(2); save(); render(); },
-  "mood-set": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.mood = l.mood === el.dataset.m ? "" : el.dataset.m; save(); render(); },
+  "mood-goto": (el) => { setCursor("health", el.dataset.d); render(); },
+  "mood-set": (el) => { setMoodOn(dayCursor("health"), el.dataset.m); save(); render(); },
   "health-goals": () => formModal("Health goals",
     fld("Daily steps", num("steps", state.health.goals.steps, 1000, 500)) +
     fld("Water (L)", num("water", state.health.goals.water, 0.5, 0.25)) +
@@ -3465,7 +3519,8 @@ const ACTIONS = {
   /* skills / university */
   "study-log": (el) => {
     const k = el.dataset.kind, t = dayCursor(k);
-    state[k].log[t] = (state[k].log[t] || 0) + +el.dataset.n;
+    const day = state.study.log[t] = state.study.log[t] || {};
+    day[k] = (day[k] || 0) + +el.dataset.n;
     addXp(Math.round(+el.dataset.n / 6), "Study time");
     save(); render();
   },
@@ -3670,7 +3725,7 @@ const ACTIONS = {
   "memory-del": (el) => { deleteWithUndo(() => state.memories, el.dataset.id, "Memory deleted"); },
 
   /* journal */
-  "journal-mood": (el) => { const e = ensureJournalOn(dayCursor("journal")); e.mood = e.mood === el.dataset.m ? "" : el.dataset.m; save(); render(); },
+  "journal-mood": (el) => { setMoodOn(dayCursor("journal"), el.dataset.m); save(); render(); },   /* same store as Health */
   "journal-open": (el) => { setCursor("journal", el.dataset.d); render(); window.scrollTo({ top: 0 }); },
   "journal-tag": (el) => {
     const e = ensureJournalOn(dayCursor("journal")); e.tags = e.tags || [];
