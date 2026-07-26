@@ -21,10 +21,10 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 | 🚀 **Projects** | Project cards with status and progress; shipping one earns big XP |
 | 💸 **Finance** | Income & expense log with categories, a this-month **net** summary, a **6-month spending trend**, and it **imports your Workout class-package spend**. A task like *"Pay yoga tuition"* auto-routes here and, when you check it, pops a quick amount box and records the expense |
 | 🫂 **Social** | Weekly connection goals (family calls, meetups…) with per-week counters |
-| 📸 **Memories** | A wall of memory cards with dates and notes |
+| 📸 **Memories** | A wall of memory cards with **photos**, dates, notes and **tags**. Open one for a full-size photo gallery, **search** everything you've saved, filter by tag, and see **On this day** — what you were doing a year ago |
 | ✒️ **Journal** | Daily entry with mood and tags, past-entry timeline. **Any day is editable** — navigate back, or tap a past entry to open and rewrite it. Its mood is **the same value Health tracks**, so the two can never disagree |
 | 📊 **Progress** | Totals, per-area progress, XP-per-day chart, 16-week habit-consistency heatmap |
-| ⚡ **Integrations** | Placeholder toggles for Calendar / Notion / Fit / Spotify / YouTube |
+| ⚡ **Connections** | An honest list of what LifeHub actually talks to — cloud sync, the book database, TMDb, install &amp; offline — each showing its **real** status, plus a clearly separated "not built yet" list. No switches that do nothing |
 | 👤 **Profile** | Avatar & name, badge gallery (17 badges), theme, JSON export / import / reset |
 
 ## 🕹️ Gamification

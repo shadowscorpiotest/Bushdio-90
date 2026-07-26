@@ -1331,6 +1331,34 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .card.daynav-card { padding: 6px 10px; }
 .card.daynav-card .day-nav { margin: 0; }
 
+/* memories: photos, detail gallery, on-this-day */
+.memory.has-photo { background: var(--surface-2); }
+.mem-photo { position: absolute; inset: 0; overflow: hidden; }
+.mem-photo img, .mem-photo video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.memory.has-photo figcaption { position: relative; z-index: 1; }
+.memory-open { position: absolute; top: 6px; right: 74px; background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.mem-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 14px; }
+.mem-shot { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+.mem-shot img, .mem-shot video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mem-shot .photo-x { position: absolute; top: 4px; right: 4px; }
+.mem-add {
+  aspect-ratio: 1; border: 2px dashed var(--line); border-radius: 12px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  color: var(--ink-3); font-size: 12px; transition: border-color .15s, color .15s;
+}
+.mem-add:hover { border-color: var(--brand); color: var(--brand); }
+.mem-add svg { width: 20px; height: 20px; }
+
+/* connections: real status instead of switches that do nothing */
+.int-state {
+  display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto;
+  font-size: 12px; font-weight: 600; color: var(--ink-3);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px;
+}
+.int-state svg { width: 13px; height: 13px; }
+.int-state.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); border-color: transparent; }
+.int-list.muted li { opacity: .62; }
+
 /* pick-a-book sheet (a fed reading habit with more than one book on the go) */
 .pick-book { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
   padding: 9px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2);

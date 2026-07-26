@@ -10,6 +10,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+const parseTags = (v) => String(v || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 8);
 const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(+n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 const DAY_MS = 86400000;
@@ -130,7 +131,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 3;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 4;                             // bump when you append a step to MIGRATIONS
 let state = null;
 
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
@@ -165,15 +166,8 @@ function defaultState() {
     projects: [],              // {id,name,emoji,status,progress,note}
     finance: { entries: [], importedClasses: [] }, // entries {id,date,type:income|expense,amount,category,note}
     social: { items: [], log: {} }, // items {id,title,emoji,target}; log[weekKey]={itemId:count}
-    memories: [],              // {id,date,title,note,emoji,hue}
+    memories: [],              // {id,date,title,note,emoji,hue,photos:[],tags:[]}
     journal: [],               // {id,date,text,mood,tags:[]}
-    integrations: [
-      { id: "gcal",    name: "Google Calendar", desc: "Sync events & tasks",     on: true },
-      { id: "notion",  name: "Notion",          desc: "Sync notes & tasks",      on: true },
-      { id: "gfit",    name: "Google Fit",      desc: "Sync health data",        on: false },
-      { id: "spotify", name: "Spotify",         desc: "Sync what you listen to", on: false },
-      { id: "youtube", name: "YouTube",         desc: "Sync watch history",      on: false },
-    ],
   };
 }
 
@@ -415,6 +409,17 @@ const MIGRATIONS = [
       const v = s.reading.log[d];
       s.reading.log[d] = (v === true || v === false) ? 0 : (+v || 0);
     });
+  },
+
+  /* 3 → 4 · memories gain photos + tags, and the placeholder "connected apps" toggles are dropped.
+     They persisted an on/off state for five services that were never wired to anything, so the app
+     stored — and synced — settings that could not possibly do anything. */
+  (s) => {
+    (s.memories || []).forEach(m => {
+      if (!Array.isArray(m.photos)) m.photos = [];
+      if (!Array.isArray(m.tags)) m.tags = [];
+    });
+    delete s.integrations;
   },
 ];
 
@@ -3167,20 +3172,71 @@ function vSocial() {
 
 /* ---------- memories ---------- */
 function vMemories() {
-  const mem = [...state.memories].sort((a, b) => b.date < a.date ? -1 : 1);
+  const q = (ui.memorySearch || "").trim().toLowerCase();
+  const all = [...state.memories].sort((a, b) => b.date < a.date ? -1 : 1);
+  const mem = q ? all.filter(m => [m.title, m.note, ...(m.tags || [])].join(" ").toLowerCase().includes(q)) : all;
+  const t = todayIso().slice(5);
+  const onThisDay = all.filter(m => m.date.slice(5) === t && m.date !== todayIso());
+  const tags = [...new Set(all.flatMap(m => m.tags || []))].slice(0, 12);
   return `
   <div class="grid">
-    ${card("span2", cardHead(`Your memories <small class="soft">${mem.length}</small>`, addBtn("Add memory", "memory-add")) + (mem.length ? `
-      <div class="memory-grid">
+    ${card("span2", cardHead(`Your memories <small class="soft">${all.length}</small>`, addBtn("Add memory", "memory-add")) + `
+      ${all.length ? `<div class="search-bar">
+        <input type="search" placeholder="Search your memories…" value="${esc(ui.memorySearch || "")}" data-change="memory-search" aria-label="Search memories">
+        ${q ? `<button class="btn ghost tiny" data-action="memory-search-clear">Clear</button>` : ""}
+      </div>
+      ${tags.length ? `<div class="chip-row" style="margin-bottom:12px">${tags.map(x => `<button class="tag ${q === x.toLowerCase() ? "on" : ""}" data-action="memory-tag-filter" data-t="${esc(x)}">${esc(x)}</button>`).join("")}</div>` : ""}` : ""}
+      ${mem.length ? `<div class="memory-grid">
         ${mem.map(m => `
-          <figure class="memory" style="--h:${m.hue}">
-            <span class="memory-emoji">${esc(m.emoji)}</span>
-            <figcaption><b>${esc(m.title)}</b><small>${niceDate(m.date, { month: "short", day: "numeric", year: "numeric" })}</small>${m.note ? `<p>${esc(m.note)}</p>` : ""}</figcaption>
+          <figure class="memory ${(m.photos || []).length ? "has-photo" : ""}" style="--h:${m.hue}">
+            ${(m.photos || []).length
+              ? `<span class="mem-photo" data-media="${m.photos[0].id}" data-media-kind="${m.photos[0].kind}"><span class="media-missing">…</span></span>`
+              : `<span class="memory-emoji">${esc(m.emoji)}</span>`}
+            <figcaption>
+              <b>${esc(m.title)}</b><small>${niceDate(m.date, { month: "short", day: "numeric", year: "numeric" })}${(m.photos || []).length > 1 ? ` · ${m.photos.length} photos` : ""}</small>
+              ${m.note ? `<p>${esc(m.note)}</p>` : ""}
+              ${(m.tags || []).length ? `<span class="j-tags">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
+            </figcaption>
+            <button class="icon-btn ghost memory-open" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}">${I.chevR}</button>
             <button class="icon-btn ghost memory-edit" data-action="memory-edit" data-id="${m.id}" aria-label="Edit memory">${I.edit}</button>
             <button class="icon-btn ghost memory-del" data-action="memory-del" data-id="${m.id}" aria-label="Delete memory">${I.x}</button>
           </figure>`).join("")}
-      </div>` : emptyMsg("camera", "Collect moments, not things.", addBtn("Save your first memory", "memory-add"))))}
+      </div>` : (q ? `<p class="soft small" style="padding:8px 2px">Nothing matches “${esc(q)}”.</p>`
+                   : emptyMsg("camera", "Collect moments, not things.", addBtn("Save your first memory", "memory-add")))}`)}
+
+    ${onThisDay.length ? card("span2", cardHead("On this day") + `
+      <ul class="mini-agenda">${onThisDay.map(m => `<li data-action="memory-open" data-id="${m.id}">
+        <span class="a-ic" style="--a:#00a2c7">${esc(m.emoji)}</span>
+        <span class="row-txt"><b>${esc(m.title)}</b><small>${niceDate(m.date, { year: "numeric", month: "long", day: "numeric" })}</small></span>
+      </li>`).join("")}</ul>`) : ""}
   </div>`;
+}
+
+/* a memory, full size — photos, note, tags */
+function openMemoryDetail(id) {
+  const m = state.memories.find(x => x.id === id);
+  if (!m) { closeModal(); return; }
+  openModal(`
+    <header class="modal-head"><h3>${esc(m.emoji)} ${esc(m.title)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="soft small">${niceDate(m.date, { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+      ${m.note ? `<p style="margin-top:8px">${esc(m.note)}</p>` : ""}
+      ${(m.tags || []).length ? `<span class="j-tags" style="margin-top:8px">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
+      <div class="mem-gallery">
+        ${(m.photos || []).map(ph => `<span class="mem-shot">
+          <span class="media-host" data-media="${ph.id}" data-media-kind="${ph.kind}"><span class="media-missing">…</span></span>
+          <button class="photo-x" data-action="memory-photo-del" data-id="${m.id}" data-ref="${ph.id}" aria-label="Remove photo">${I.x}</button>
+        </span>`).join("")}
+        <label class="mem-add" aria-label="Add a photo to this memory">
+          <input type="file" accept="image/*,video/*" data-change="memory-photo-add" data-id="${m.id}" hidden>
+          ${I.camera}<span>Add photo</span>
+        </label>
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="memory-edit" data-id="${m.id}">${I.edit}Edit</button>
+      <button type="button" class="btn danger" data-action="memory-del" data-id="${m.id}">${I.trash}Delete</button>
+    </footer>`);
 }
 
 /* ---------- journal ---------- */
@@ -3240,19 +3296,37 @@ function vProgress() {
 
 /* ---------- integrations ---------- */
 function vIntegrations() {
-  const logos = { gcal: "📅", notion: "📝", gfit: "❤️", spotify: "🎧", youtube: "▶️" };
+  const live = [
+    { emoji: "☁️", name: "Cloud sync", desc: "Your own encrypted Supabase project — free, end-to-end encrypted", on: isSignedIn(), hint: isSignedIn() ? "Signed in" : "Set it up in Profile", nav: "profile" },
+    { emoji: "📚", name: "Book database", desc: "Search & autofill titles, covers, authors and page counts", on: true, hint: "No key needed", nav: "reading" },
+    { emoji: "🎬", name: "Movie database (TMDb)", desc: "Search & autofill posters, cast, director and runtime", on: !!state.profile.tmdbKey, hint: state.profile.tmdbKey ? "Key added" : "Add a free key in Profile", nav: state.profile.tmdbKey ? "media" : "profile" },
+    { emoji: "📲", name: "Install & offline", desc: "Add to your Home Screen — works with no connection", on: true, hint: "Built in" },
+  ];
+  const planned = [
+    ["📅", "Calendar", "Two-way sync for deadlines and time-blocking"],
+    ["❤️", "Apple Health / Google Fit", "Pull steps and sleep instead of typing them"],
+    ["🔔", "Reminders", "Nudges when something is due, even with the app closed"],
+    ["📝", "Notion", "Mirror notes and tasks"],
+  ];
   return `
   <div class="grid">
-    ${card("span2", cardHead("Connected apps") + `
+    ${card("span2", cardHead("What LifeHub connects to") + `
       <ul class="int-list">
-        ${state.integrations.map(x => `
-          <li>
-            <span class="int-logo">${logos[x.id] || "🔌"}</span>
+        ${live.map(x => `
+          <li ${x.nav ? `data-nav="${x.nav}"` : ""} ${x.nav ? 'style="cursor:pointer"' : ""}>
+            <span class="int-logo">${x.emoji}</span>
             <span class="row-txt"><b>${esc(x.name)}</b><small>${esc(x.desc)}</small></span>
-            <button class="switch ${x.on ? "on" : ""}" data-action="int-toggle" data-id="${x.id}" role="switch" aria-checked="${x.on}" aria-label="Toggle ${esc(x.name)}"><i></i></button>
+            <span class="int-state ${x.on ? "on" : ""}">${x.on ? I.check : ""}${esc(x.hint)}</span>
           </li>`).join("")}
+      </ul>`)}
+
+    ${card("span2", cardHead("Not built yet") + `
+      <ul class="int-list muted">
+        ${planned.map(([e, n, d]) => `
+          <li><span class="int-logo">${e}</span><span class="row-txt"><b>${esc(n)}</b><small>${esc(d)}</small></span>
+            <span class="int-state">soon</span></li>`).join("")}
       </ul>
-      <p class="soft note">${I.zap} Connections here are placeholders — LifeHub stores everything locally in your browser. Real syncing would need each service's API.</p>`)}
+      <p class="soft note">${I.zap} These are honest placeholders — nothing here is half-wired behind a switch. Each one needs that service's API, and reminders need a small server, so they'll arrive as real features rather than toggles.</p>`)}
   </div>`;
 }
 
@@ -3660,6 +3734,7 @@ const ACTIONS = {
       fld("Title", txt("title", "", x.title)) +
       fld("Note", `<textarea name="note" maxlength="240">${esc(x.note || "")}</textarea>`) +
       `<div class="fld-row">${fld("Emoji", txt("emoji", "📸", x.emoji || "📸", false))}${fld("Date", `<input type="date" name="date" value="${x.date}" required>`)}</div>` +
+      fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "e.g. family, travel", (x.tags || []).join(", "), false)) +
       `<input type="hidden" name="id" value="${x.id}">`, "memory-edit");
   },
   "fin-edit": (el) => {
@@ -3902,8 +3977,25 @@ const ACTIONS = {
   "social-del": (el) => { deleteWithUndo(() => state.social.items, el.dataset.id, "Goal deleted"); },
   "memory-add": () => formModal("New memory",
     fld("Title", txt("title", "e.g. Sunset picnic")) + fld("Note", `<textarea name="note" placeholder="What made it special?" maxlength="240"></textarea>`) +
-    `<div class="fld-row">${fld("Emoji", txt("emoji", "🌅", "🌅", false))}${fld("Date", `<input type="date" name="date" value="${todayIso()}" required>`)}</div>`, "memory-add"),
-  "memory-del": (el) => { deleteWithUndo(() => state.memories, el.dataset.id, "Memory deleted"); },
+    `<div class="fld-row">${fld("Emoji", txt("emoji", "🌅", "🌅", false))}${fld("Date", `<input type="date" name="date" value="${todayIso()}" required>`)}</div>` +
+    fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "e.g. family, travel", "", false)) +
+    `<p class="soft note">${I.camera} Save it, then open the memory to add photos.</p>`, "memory-add"),
+  "memory-open": (el) => openMemoryDetail(el.dataset.id),
+  "memory-search-clear": () => { ui.memorySearch = ""; render(); },
+  "memory-tag-filter": (el) => { const t = el.dataset.t.toLowerCase(); ui.memorySearch = ui.memorySearch === t ? "" : t; render(); },
+  "memory-photo-del": (el) => {
+    const m = state.memories.find(x => x.id === el.dataset.id); if (!m) return;
+    m.photos = (m.photos || []).filter(ph => ph.id !== el.dataset.ref);
+    mediaDelete(el.dataset.ref);
+    save(); render(); openMemoryDetail(m.id);
+  },
+  "memory-del": (el) => {
+    const m = state.memories.find(x => x.id === el.dataset.id);
+    const refs = (m && m.photos || []).map(ph => ph.id);
+    closeModal();
+    deleteWithUndo(() => state.memories, el.dataset.id, "Memory deleted",
+      () => refs.forEach(r => mediaDelete(r)));   // photos outlive the undo window
+  },
 
   /* journal */
   "journal-mood": (el) => { setMoodOn(dayCursor("journal"), el.dataset.m); save(); render(); },   /* same store as Health */
@@ -3922,13 +4014,6 @@ const ACTIONS = {
     const e = ensureJournalOn(d); e.text = text;
     if (!existed) addXp(15, "Journal entry");
     save(); render(); toast(existed ? "Entry updated" : "Entry saved");
-  },
-
-  /* integrations */
-  "int-toggle": (el) => {
-    const x = state.integrations.find(i => i.id === el.dataset.id);
-    x.on = !x.on; save(); render();
-    toast(x.on ? `${x.name} connected (simulated)` : `${x.name} disconnected`);
   },
 
   /* profile & data */
@@ -4008,7 +4093,7 @@ const SUBMITS = {
   "sup-edit": (f) => { const x = state.nutrition.supplements.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.dose = f.dose || ""; x.every = ["day","week","month"].includes(f.every) ? f.every : x.every; } },
   "project-edit": (f) => { const x = state.projects.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.status = f.status || x.status; x.note = f.note || ""; if (x.status === "Done") x.progress = 100; } },
   "social-edit": (f) => { const x = state.social.items.find(v => v.id === f.id); if (x) { x.title = f.title; x.emoji = f.emoji || x.emoji; x.target = Math.max(1, +f.target || 1); } },
-  "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; } },
+  "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; x.tags = parseTags(f.tags); } },
   "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
   "class-edit": (f) => { const x = state.workout.classes.find(v => v.id === f.id); if (x) { x.name = f.name; x.total = Math.max(1, +f.total || x.total); x.price = +f.price || 0; x.start = f.start || x.start; } },
   "sup-add": (f) => { state.nutrition.supplements.push({ id: uid(), name: f.name, emoji: f.emoji || "💊", dose: f.dose || "", every: ["day", "week", "month"].includes(f.every) ? f.every : "day" }); },
@@ -4056,7 +4141,7 @@ const SUBMITS = {
     addXp(3, type === "income" ? "Income logged" : "Expense logged");
   },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
-  "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360) }); addXp(10, "Memory saved"); },
+  "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360), photos: [], tags: parseTags(f.tags) }); addXp(10, "Memory saved"); },
   "todo-add": (f) => {
     if (!f.text) return;
     let habitId = "", supId = "", areaId = "";
@@ -4170,6 +4255,11 @@ const CHANGES = {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
     if (!b) return;
     storeFile(el.files[0], (ref) => { if (b.file) mediaDelete(b.file.id); b.file = ref; save(); render(); openBookDetail(b.id); toast("File attached 📎"); });
+  },
+  "memory-search": (el) => { ui.memorySearch = el.value; render(); const q = $('[data-change="memory-search"]'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } },
+  "memory-photo-add": (el) => {
+    const m = state.memories.find(x => x.id === el.dataset.id); if (!m) return;
+    storeMediaFile(el.files[0], (ref) => { m.photos = m.photos || []; m.photos.push(ref); save(); render(); openMemoryDetail(m.id); toast("Photo added 📸"); });
   },
   "tmdb-key": (el) => { state.profile.tmdbKey = el.value.trim(); save(); },
   "book-cover-new": (el) => {
