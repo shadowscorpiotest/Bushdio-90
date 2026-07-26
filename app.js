@@ -129,7 +129,17 @@ const NAV_GROUPS = [
 
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
+const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
+const SCHEMA = 1;                             // bump when you append a step to MIGRATIONS
 let state = null;
+
+/* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
+   which tab is open are per-device, per-moment; keeping them in `state` meant switching a tab wrote
+   to disk and uploaded the whole encrypted database. */
+const ui = { cursor: {}, readingTab: "current", mediaTab: "watchlist" };
+
+/* set when startup couldn't read saved data — blocks cloud pushes so we never overwrite good data */
+let loadIssue = null;
 
 function defaultState() {
   return {
@@ -279,7 +289,14 @@ function seedState(s) {
 }
 
 /* ensure nested fields exist on states saved before a feature shipped */
-function migrate(s) {
+/* Ordered migration steps: MIGRATIONS[i] upgrades schema i → i+1.
+   NEVER edit a step once it has shipped — append a new one and bump SCHEMA. Without this ladder
+   there is no way to tell old data from new, so a *transforming* migration (renaming a field,
+   changing units, restructuring) can't be written safely — especially now that one cloud row is
+   shared by several devices that may be on different versions. */
+const MIGRATIONS = [
+  /* 0 → 1 · everything that predates schema versioning (idempotent field backfills) */
+  (s) => {
   s.profile = s.profile || {};
   if (s.profile.apiKey == null) s.profile.apiKey = "";
   if (s.profile.tmdbKey == null) s.profile.tmdbKey = "";
@@ -358,15 +375,62 @@ function migrate(s) {
     if (m.started == null) m.started = "";
     if (m.finished == null) m.finished = "";
   });
+  },
+];
+
+function migrate(s) {
+  let v = Number.isInteger(s.schema) ? s.schema : 0;
+  if (v > SCHEMA) {
+    /* Written by a newer LifeHub. Refuse rather than silently mangling fields we don't understand. */
+    throw Object.assign(new Error("Saved by a newer version of LifeHub"), { code: "schema-too-new" });
+  }
+  for (; v < SCHEMA; v++) MIGRATIONS[v](s);
+  s.schema = SCHEMA;
+  /* these used to be persisted; they're per-device UI state now (see `ui`) */
+  delete s._cursor; delete s._readingTab; delete s._mediaTab;
   return s;
 }
 
 function load() {
+  let raw = null;
+  try { raw = localStorage.getItem(STORE_KEY); }
+  catch { loadIssue = { kind: "unavailable" }; }        // private mode / storage blocked
+
+  if (!raw) { state = migrate(seedState(defaultState())); save(); return; }
+
   try {
-    const raw = localStorage.getItem(STORE_KEY);
-    state = migrate(raw ? Object.assign(defaultState(), JSON.parse(raw)) : seedState(defaultState()));
-  } catch { state = seedState(defaultState()); }
-  save();
+    state = migrate(Object.assign(defaultState(), JSON.parse(raw)));
+    save();
+  } catch (e) {
+    /* Never overwrite data we failed to read. Park the original byte-for-byte so it stays
+       recoverable, start EMPTY (sample data here reads as "my life was deleted"), and say so.
+       Deliberately no save() — the untouched original must survive this session. */
+    try { localStorage.setItem(CORRUPT_KEY, raw); } catch {}
+    loadIssue = { kind: e && e.code === "schema-too-new" ? "too-new" : "corrupt" };
+    state = migrate(defaultState());
+  }
+}
+
+/* Blocking recovery prompt shown once at startup when load() couldn't read the saved data. */
+function showLoadIssue() {
+  if (!loadIssue) return;
+  if (loadIssue.kind === "unavailable") {
+    toast("This browser is blocking local storage — LifeHub can't save here");
+    loadIssue = null;
+    return;
+  }
+  const tooNew = loadIssue.kind === "too-new";
+  openModal(`
+    <header class="modal-head"><h3>${tooNew ? "This device is out of date" : "We couldn't open your saved data"}</h3>
+      <button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body"><p class="soft">${tooNew
+      ? "Your data was saved by a newer version of LifeHub, so this device can't open it safely. <b>Nothing has been changed or deleted.</b> Reload to get the latest version."
+      : "Your saved data couldn't be read, so LifeHub started empty. <b>Your original data has not been overwritten</b> — download a copy before you make changes."}</p></div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="recover-download">${I.download}Download my data</button>
+      ${tooNew ? `<button type="button" class="btn primary" data-action="recover-reload">Reload</button>`
+               : `<button type="button" class="btn primary" data-action="recover-fresh">Start fresh</button>`}
+    </footer>`);
 }
 function save() {
   let ok = true;
@@ -592,13 +656,17 @@ function setSyncStatus(s) {
 }
 
 /* ---- sync engine ---- */
+/* Never upload while the local copy is untrustworthy: if we couldn't read local data, or the last
+   pull failed, pushing would overwrite good cloud data with an empty or stale snapshot. */
+function syncBlocked() { return !!loadIssue || !!cloud._pullFailed; }
+
 function schedulePush() {
-  if (!isSignedIn() || !cloud.key) return;
+  if (!isSignedIn() || !cloud.key || syncBlocked()) return;
   clearTimeout(cloud._pushT);
   cloud._pushT = setTimeout(() => pushSnapshot(), 2500);
 }
 async function pushSnapshot(force = false) {
-  if (!isSignedIn() || !cloud.key || cloud._busy) return;
+  if (!isSignedIn() || !cloud.key || cloud._busy || syncBlocked()) return;
   if (!cloud.session.salt) { setSyncStatus("error"); return; }
   cloud._busy = true; setSyncStatus("syncing");
   try {
@@ -629,16 +697,21 @@ async function pullSnapshot(opts = {}) {
       setSyncMeta({ userId: cloud.session.user_id, version: remote.version, updatedAt: remote.updated_at });
       save();
       cloud._applyingRemote = false;
-      cloud._dirty = false; setSyncStatus("synced");
+      cloud._dirty = false; cloud._pullFailed = false; setSyncStatus("synced");
       applyTheme(); render();
     } else {
+      cloud._pullFailed = false;
       setSyncStatus("synced");
       if (cloud._dirty) schedulePush();
     }
   } catch (e) {
     cloud._applyingRemote = false;
-    if (e && /decrypt/i.test(e.name + e.message)) { setSyncStatus("error"); toast("Couldn't decrypt your cloud data — is the password correct?"); }
-    else setSyncStatus(navigator.onLine === false ? "offline" : "error");
+    /* a failed pull blocks pushes (see syncBlocked) so we can't clobber good cloud data */
+    cloud._pullFailed = true;
+    setSyncStatus("error");
+    if (e && e.code === "schema-too-new") toast("Your account was synced from a newer LifeHub — reload this page to update");
+    else if (e && /decrypt/i.test(e.name + e.message)) toast("Couldn't decrypt your cloud data — is the password correct?");
+    else { cloud._pullFailed = navigator.onLine !== false; setSyncStatus(navigator.onLine === false ? "offline" : "error"); }
   } finally { cloud._busy = false; }
 }
 
@@ -699,8 +772,8 @@ async function initCloud() {
 }
 
 /* ================= day navigation (Habits / Workout / Skills) ================= */
-function dayCursor(view) { state._cursor = state._cursor || {}; return state._cursor[view] || todayIso(); }
-function setCursor(view, d) { state._cursor = state._cursor || {}; state._cursor[view] = d; }
+function dayCursor(view) { return ui.cursor[view] || todayIso(); }
+function setCursor(view, d) { ui.cursor[view] = d; }
 function dayNav(view) {
   const d = dayCursor(view), atToday = d >= todayIso();
   return `<div class="day-nav">
@@ -974,17 +1047,21 @@ const MISSIONS = [
     sub: () => healthToday().mood ? `Feeling ${healthToday().mood}` : "How are you feeling?",
     done: () => !!healthToday().mood },
 ];
+/* Runs on every render, so it must not write unless a mission genuinely completed — an
+   unconditional save() here meant rendering wrote to disk and pushed to the cloud. */
 function checkMissions() {
   const t = todayIso();
   state.claimed[t] = state.claimed[t] || {};
+  let claimed = false;
   MISSIONS.forEach(m => {
     if (m.done() && !state.claimed[t][m.id]) {
       state.claimed[t][m.id] = true;
+      claimed = true;
       addXp(m.xp, m.title());
       if (m.id === "habits") { toast("Perfect day! Every habit done 🌟", "badge"); celebrate(); }
     }
   });
-  save();
+  if (claimed) save();   // a real state change — worth persisting and syncing
 }
 
 /* ----- badges ----- */
@@ -1093,7 +1170,8 @@ function renderTopbar() {
 function go(viewId) {
   if (viewId === "_areas") { openDrawer(); return; }
   currentView = viewId;
-  if (areaOf(viewId)) { state.visited[viewId] = true; checkBadges(); save(); }
+  /* only write the first time an area is visited — re-navigating is a read, not a change */
+  if (areaOf(viewId) && !state.visited[viewId]) { state.visited[viewId] = true; checkBadges(); save(); }
   closeDrawer(); closeModal();
   render();
   window.scrollTo({ top: 0 });
@@ -2390,7 +2468,7 @@ function posterCard(o) {
 
 function vReading() {
   const st = readingStats();
-  const tab = state._readingTab || "current";
+  const tab = ui.readingTab;
   const tabs = [["current", "Reading"], ["wishlist", "Wishlist"], ["done", "Completed"]];
   const books = state.reading.books.filter(b => b.status === tab).sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0));
   return `
@@ -2535,7 +2613,7 @@ function mediaStats() {
   };
 }
 function vMedia() {
-  const tab = state._mediaTab || "watchlist";
+  const tab = ui.mediaTab;
   const tabs = [["watchlist", "Watchlist"], ["watching", "Watching"], ["done", "Completed"]];
   const items = state.media
     .filter(m => m.status === tab)
@@ -3031,6 +3109,21 @@ const ACTIONS = {
   "go-journal": () => { closeModal(); go("journal"); },
 
   /* account + cloud sync */
+  /* data recovery (shown when startup couldn't read saved data) */
+  "recover-download": () => {
+    let raw = ""; try { raw = localStorage.getItem(CORRUPT_KEY) || ""; } catch {}
+    const blob = new Blob([raw], { type: "application/json" });
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `lifehub-recovered-${todayIso()}.json` });
+    a.click(); URL.revokeObjectURL(a.href);
+  },
+  "recover-reload": () => location.reload(),
+  "recover-fresh": () => {
+    /* keep CORRUPT_KEY — the old data stays downloadable even after starting over */
+    loadIssue = null; state = migrate(defaultState()); save();
+    closeModal(); applyTheme(); render();
+    toast("Started fresh — your old data is still saved in this browser");
+  },
+
   "auth-open": () => openAuthModal("signin"),
   "auth-switch-signup": () => openAuthModal("signup"),
   "auth-switch-signin": () => openAuthModal("signin"),
@@ -3274,7 +3367,7 @@ const ACTIONS = {
   "uni-task-del": (el) => { state.university.tasks = state.university.tasks.filter(k => k.id !== el.dataset.id); save(); render(); },
 
   /* reading */
-  "reading-tab": (el) => { state._readingTab = el.dataset.id; render(); },
+  "reading-tab": (el) => { ui.readingTab = el.dataset.id; render(); },
   "book-add": () => formModal("Add book",
     `<button type="button" class="btn primary slim autofill-btn" data-action="book-search">${I.search}Search &amp; autofill</button>
      <p class="autofill-or"><span>or add it manually</span></p>
@@ -3306,9 +3399,9 @@ const ACTIONS = {
   "book-start-d": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.status = "current"; b.started = todayIso(); save(); render(); openBookDetail(b.id); } },
   "book-finish-d": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
-    if (b) { const was = b.status; b.status = "done"; b.page = b.pages; b.finished = todayIso(); if (was !== "done") addXp(50, `Finished ${b.title}`); state._readingTab = "done"; save(); checkBadges(); render(); openBookDetail(b.id); }
+    if (b) { const was = b.status; b.status = "done"; b.page = b.pages; b.finished = todayIso(); if (was !== "done") addXp(50, `Finished ${b.title}`); ui.readingTab = "done"; save(); checkBadges(); render(); openBookDetail(b.id); }
   },
-  "book-reread": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.status = "current"; b.page = 0; b.started = todayIso(); state._readingTab = "current"; save(); render(); openBookDetail(b.id); } },
+  "book-reread": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.status = "current"; b.page = 0; b.started = todayIso(); ui.readingTab = "current"; save(); render(); openBookDetail(b.id); } },
   "book-cover-clear": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.cover = null; save(); render(); openBookDetail(b.id); } },
   "book-edit": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
@@ -3335,7 +3428,7 @@ const ACTIONS = {
   },
 
   /* media */
-  "media-tab": (el) => { state._mediaTab = el.dataset.id; render(); },
+  "media-tab": (el) => { ui.mediaTab = el.dataset.id; render(); },
   "media-add": () => formModal("Add a title",
     `<button type="button" class="btn primary slim autofill-btn" data-action="media-search">${I.search}Search &amp; autofill</button>
      <p class="autofill-or"><span>or add it manually</span></p>` +
@@ -3363,11 +3456,11 @@ const ACTIONS = {
       m.status = "done"; m.finished = todayIso();
       if (m.epTotal) m.epsDone = m.epTotal;
       addXp(10, `Finished ${m.title}`);
-      state._mediaTab = "done";
+      ui.mediaTab = "done";
     }
     save(); checkBadges(); render(); openMediaDetail(m.id);
   },
-  "media-rewatch": (el) => { const m = state.media.find(x => x.id === el.dataset.id); if (m) { m.status = "watching"; m.epsDone = 0; m.started = todayIso(); state._mediaTab = "watching"; save(); render(); openMediaDetail(m.id); } },
+  "media-rewatch": (el) => { const m = state.media.find(x => x.id === el.dataset.id); if (m) { m.status = "watching"; m.epsDone = 0; m.started = todayIso(); ui.mediaTab = "watching"; save(); render(); openMediaDetail(m.id); } },
   "media-edit": (el) => {
     const m = state.media.find(x => x.id === el.dataset.id);
     if (!m) return;
@@ -3737,6 +3830,7 @@ function bindEvents() {
 
 /* ================= onboarding ================= */
 function maybeOnboard() {
+  if (loadIssue) return;          // recovery prompt takes precedence over onboarding
   if (state.profile.onboarded) return;
   formModal("Welcome to LifeHub 🌿",
     `<p class="soft" style="margin-bottom:12px">All your life, in one place — habits, health, learning, projects and more. Earn XP, keep streaks, collect badges.</p>` +
@@ -3751,6 +3845,7 @@ applyTheme();
 bindEvents();
 bindTip();
 render();
+showLoadIssue();
 maybeOnboard();
 
 /* cloud sync: restore any saved session, then pull the latest snapshot (HTTPS origins only) */
