@@ -534,7 +534,29 @@ async function mediaPut(blob) {
     tx.objectStore("blobs").put(blob, id);
     tx.oncomplete = res; tx.onerror = () => rej(tx.error);
   });
+  scheduleMediaSync();     // a new file should reach your other devices without being asked twice
   return id;
+}
+/* store under a KNOWN id — used when pulling a blob down from the cloud, where the id already exists
+   in the synced records and must match on every device */
+async function mediaPutAt(id, blob) {
+  const db = await mediaDB();
+  await new Promise((res, rej) => {
+    const tx = db.transaction("blobs", "readwrite");
+    tx.objectStore("blobs").put(blob, id);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+  return id;
+}
+/* cheap existence check — never pull a 200MB video into memory just to ask "is it here?" */
+async function mediaHas(id) {
+  try {
+    const db = await mediaDB();
+    return await new Promise((res) => {
+      const rq = db.transaction("blobs", "readonly").objectStore("blobs").count(id);
+      rq.onsuccess = () => res(rq.result > 0); rq.onerror = () => res(false);
+    });
+  } catch { return false; }
 }
 async function mediaGet(id) {
   const db = await mediaDB();
@@ -557,6 +579,7 @@ async function mediaDelete(id) {
     await new Promise((res) => { const tx = db.transaction("blobs", "readwrite"); tx.objectStore("blobs").delete(id); tx.oncomplete = res; tx.onerror = res; });
   } catch {}
   if (_urlCache[id]) { URL.revokeObjectURL(_urlCache[id]); delete _urlCache[id]; }
+  mediaDeleteRemote(id);   // deleting a memory should not leave its file paid for in the cloud
 }
 /* wipe every stored photo/video/file (used by Start fresh / Reset) */
 function clearAllMedia() {
@@ -564,10 +587,14 @@ function clearAllMedia() {
   try { if (_mdb) { _mdb.close(); _mdb = null; } } catch {}
   try { indexedDB.deleteDatabase(MEDIA_DB); } catch {}
 }
-/* The record synced but the file didn't — photos and videos live in this browser's IndexedDB and are
-   not part of the encrypted snapshot yet. Say which of those two situations it is. */
-function mediaMissingText() {
-  return isSignedIn() ? "Added on another device" : "Not on this device";
+/* The record is here but the file isn't. There are three genuinely different reasons for that, and
+   guessing wrong is worse than saying nothing — so read the ref and say which one it is. */
+function mediaMissingText(id) {
+  const flag = blobFlag(id);
+  if (flag === UP_TOOBIG) return "Too large to sync — on its own device";
+  if (!isSignedIn()) return "Not on this device";
+  if (flag === UP_DONE) return cloud.media.busy ? "Downloading…" : "Not downloaded yet";
+  return "Added on another device";
 }
 /* swap [data-media] hosts for <img>/<video> from IndexedDB, after each render */
 async function hydrateMedia() {
@@ -579,13 +606,13 @@ async function hydrateMedia() {
       let url = _urlCache[id];
       if (!url) {
         const blob = await mediaGet(id);
-        if (!blob) { host.innerHTML = `<span class="media-missing">${mediaMissingText()}</span>`; continue; }
+        if (!blob) { host.innerHTML = `<span class="media-missing">${mediaMissingText(id)}</span>`; continue; }
         url = URL.createObjectURL(blob); _urlCache[id] = url;
       }
       host.innerHTML = host.dataset.mediaKind === "video"
         ? `<video src="${url}" controls playsinline preload="metadata"></video>`
         : `<img src="${url}" alt="" loading="lazy">`;
-    } catch { host.innerHTML = `<span class="media-missing">${mediaMissingText()}</span>`; }
+    } catch { host.innerHTML = `<span class="media-missing">${mediaMissingText(id)}</span>`; }
   }
   healPosters();
 }
@@ -756,7 +783,8 @@ const SUPABASE_ANON = "sb_publishable_phHHeh4YTbPyxxfHpVIXSA_q6RyfNce";
 const SESSION_KEY  = "lifehub-session";   // {access_token,refresh_token,expires_at,email,user_id,salt,keyRaw}
 const SYNCMETA_KEY = "lifehub-sync";      // {userId,version,updatedAt}
 
-const cloud = { session: null, key: null, status: "idle", lastSync: 0, _pushT: null, _busy: false, _dirty: false, _applyingRemote: false, _conflictRemote: null };
+const cloud = { session: null, key: null, status: "idle", lastSync: 0, _pushT: null, _busy: false, _dirty: false, _applyingRemote: false, _conflictRemote: null,
+  media: { busy: false, done: 0, total: 0, failed: 0, dir: "", lastRun: 0 } };
 
 /* base64 <-> ArrayBuffer */
 function bufToB64(buf) { const b = new Uint8Array(buf); let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s); }
@@ -933,6 +961,188 @@ async function pullSnapshot(opts = {}) {
     else if (e && /decrypt/i.test(e.name + e.message)) toast("Couldn't decrypt your cloud data — is the password correct?");
     else { cloud._pullFailed = navigator.onLine !== false; setSyncStatus(navigator.onLine === false ? "offline" : "error"); }
   } finally { cloud._busy = false; }
+  scheduleMediaSync();
+}
+
+/* ================= media sync (Supabase Storage — same zero-knowledge rule) ==========================
+   Until now the *record* synced and the *file* stayed put, so a memory added on the iPad showed an
+   empty frame on the phone. Files now travel too, encrypted in the browser exactly like the snapshot:
+   the server stores ciphertext it cannot read, and each account can only touch its own folder.
+
+   Two deliberate limits, both surfaced in the UI rather than hidden:
+     · a size cap, because a 300MB clip is both a memory problem on a phone (encrypting it needs the
+       file twice over in RAM) and most of a free storage tier. Over the cap the file stays on its own
+       device — but its POSTER still syncs, so the memory still looks like itself everywhere;
+     · nothing is ever deleted from a device to save space. This adds copies, it doesn't move them. */
+const MEDIA_BUCKET = "media";
+const MEDIA_SYNC_MAX = 40 * 1024 * 1024;
+const UP_DONE = 1, UP_TOOBIG = "x";     // per-blob cloud state, recorded on the ref itself
+
+/* Encrypt a blob for upload. The MIME type goes INSIDE the ciphertext — the server shouldn't learn
+   whether you stored a photo or a video any more than it learns what's in it. */
+async function encryptBlob(blob, key) {
+  const mime = new TextEncoder().encode((blob.type || "application/octet-stream").slice(0, 120));
+  const body = new Uint8Array(await blob.arrayBuffer());
+  const plain = new Uint8Array(1 + mime.length + body.length);
+  plain[0] = mime.length; plain.set(mime, 1); plain.set(body, 1 + mime.length);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plain));
+  const out = new Uint8Array(12 + ct.length);
+  out.set(iv, 0); out.set(ct, 12);
+  return out;
+}
+async function decryptBlob(bytes, key) {
+  const pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(0, 12) }, key, bytes.slice(12)));
+  const n = pt[0];
+  return new Blob([pt.slice(1 + n)], { type: new TextDecoder().decode(pt.slice(1, 1 + n)) });
+}
+
+async function storageFetch(path, opts = {}, retry = true) {
+  const headers = Object.assign({ apikey: SUPABASE_ANON, Authorization: `Bearer ${cloud.session.access_token}` }, opts.headers || {});
+  const r = await fetch(`${SUPABASE_URL}/storage/v1/${path}`, Object.assign({}, opts, { headers }));
+  if (r.status === 401 && retry) { await authRefresh(); return storageFetch(path, opts, false); }
+  return r;
+}
+const mediaKey = (id) => `${cloud.session.user_id}/${id}`;
+
+async function mediaUploadOne(id) {
+  const blob = await mediaGet(id);
+  if (!blob) return "missing";
+  if (blob.size > MEDIA_SYNC_MAX) return "big";
+  const r = await storageFetch(`object/${MEDIA_BUCKET}/${mediaKey(id)}`, {
+    method: "POST", headers: { "Content-Type": "application/octet-stream", "x-upsert": "true" },
+    body: await encryptBlob(blob, cloud.key),
+  });
+  if (!r.ok) throw new Error("upload " + r.status);
+  return "ok";
+}
+async function mediaDownloadOne(id) {
+  const r = await storageFetch(`object/${MEDIA_BUCKET}/${mediaKey(id)}`, { method: "GET" });
+  if (r.status === 404 || r.status === 400) return "gone";
+  if (!r.ok) throw new Error("download " + r.status);
+  await mediaPutAt(id, await decryptBlob(new Uint8Array(await r.arrayBuffer()), cloud.key));
+  return "ok";
+}
+function mediaDeleteRemote(id) {
+  if (!isSignedIn()) return;   // an orphan left by a signed-out delete is swept by the GC later
+  storageFetch(`object/${MEDIA_BUCKET}/${mediaKey(id)}`, { method: "DELETE" }).catch(() => {});
+}
+
+/* every media ref anywhere in state, and every blob each one owns */
+function allMediaRefs() {
+  const out = [];
+  const scan = (arr) => (arr || []).forEach(p => { if (p && p.id) out.push(p); });
+  (state.memories || []).forEach(m => scan(m.photos));
+  ((state.workout || {}).sessions || []).forEach(s => scan(s.media));
+  Object.values((state.nutrition || {}).photos || {}).forEach(day => Object.values(day || {}).forEach(scan));
+  ((state.reading || {}).books || []).forEach(b => { if (b && b.file && b.file.id) out.push(b.file); });
+  return out;
+}
+const refBlobs = (ref) => ref.poster ? [{ id: ref.id, flag: "up" }, { id: ref.poster, flag: "pup" }] : [{ id: ref.id, flag: "up" }];
+
+/* Read and write a blob's cloud state BY ID rather than through a held reference: a pull can replace
+   the whole `state` object mid-transfer, and a mutation applied to the old one would vanish. */
+function blobFlag(id) {
+  for (const ref of allMediaRefs()) {
+    if (ref.id === id) return ref.up;
+    if (ref.poster === id) return ref.pup;
+  }
+  return undefined;
+}
+function markBlob(id, value) {
+  let hit = false;
+  allMediaRefs().forEach(ref => {
+    if (ref.id === id) { ref.up = value; hit = true; }
+    if (ref.poster === id) { ref.pup = value; hit = true; }
+  });
+  return hit;
+}
+
+/* What needs to move, and which way. A blob the ref says is uploaded but that isn't here came from
+   another device; a blob that's here but unmarked has never been sent. */
+async function mediaPlan() {
+  const up = [], down = [], seen = new Set();
+  for (const ref of allMediaRefs()) {
+    for (const b of refBlobs(ref)) {
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      const mark = ref[b.flag], here = await mediaHas(b.id);
+      if (here) { if (mark !== UP_DONE && mark !== UP_TOOBIG) up.push({ ref, id: b.id, flag: b.flag }); }
+      else if (mark === UP_DONE) down.push({ ref, id: b.id, flag: b.flag });
+    }
+  }
+  return { up, down };
+}
+
+function mediaLabel() {
+  const m = cloud.media;
+  if (m.busy) return m.total ? `${m.dir} ${Math.min(m.done + 1, m.total)} of ${m.total}…` : "Checking files…";
+  if (m.failed) return `${m.failed} file${m.failed === 1 ? "" : "s"} didn't transfer — try again`;
+  if (m.lastRun) return m.total ? `${m.total} file${m.total === 1 ? "" : "s"} synced ${timeAgo(m.lastRun)}` : "All files synced";
+  return "Not checked yet";
+}
+function setMediaStatus() {
+  const el = document.querySelector("[data-media-status]");
+  if (el) el.textContent = mediaLabel();
+}
+
+let _mediaT = null;
+function scheduleMediaSync() {
+  if (!isSignedIn() || !cloud.key) return;
+  clearTimeout(_mediaT);
+  _mediaT = setTimeout(() => syncMedia(), 4000);
+}
+async function syncMedia(opts = {}) {
+  const m = cloud.media;
+  if (!isSignedIn() || !cloud.key || syncBlocked() || m.busy) return 0;
+  m.busy = true; m.done = 0; m.total = 0; m.failed = 0; m.dir = "Checking";
+  setMediaStatus();
+  let changed = false;
+  try {
+    const plan = await mediaPlan();
+    m.total = plan.up.length + plan.down.length;
+    setMediaStatus();
+    const run = async (items, dir, fn) => {
+      m.dir = dir;
+      for (const it of items) {
+        try {
+          const r = await fn(it.id);
+          if (r === "ok") changed = markBlob(it.id, UP_DONE) || changed;
+          else if (r === "big") changed = markBlob(it.id, UP_TOOBIG) || changed;
+          else if (r === "gone") changed = markBlob(it.id, 0) || changed;   // deleted from another device
+        } catch { m.failed++; }
+        m.done++; setMediaStatus();
+      }
+    };
+    await run(plan.up, "Uploading", mediaUploadOne);
+    await run(plan.down, "Downloading", mediaDownloadOne);
+    if (opts.gc) await gcRemoteMedia().catch(() => {});
+    m.lastRun = Date.now();
+  } catch { m.failed++; }
+  m.busy = false; m.dir = "";
+  if (changed) { save(); render(); }
+  setMediaStatus();
+  return m.total;
+}
+
+/* Files whose records are gone — a deleted memory, a cleared meal photo — shouldn't sit in storage
+   forever burning quota. Runs on an explicit sync, not on every automatic one. */
+async function gcRemoteMedia() {
+  const r = await storageFetch(`object/list/${MEDIA_BUCKET}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: cloud.session.user_id + "/", limit: 1000 }),
+  });
+  if (!r.ok) return 0;
+  const rows = await r.json().catch(() => []);
+  const keep = new Set();
+  allMediaRefs().forEach(ref => refBlobs(ref).forEach(b => keep.add(b.id)));
+  const dead = (rows || []).map(x => x && x.name).filter(n => n && !keep.has(n));
+  if (!dead.length) return 0;
+  await storageFetch(`object/${MEDIA_BUCKET}`, {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefixes: dead.map(n => `${cloud.session.user_id}/${n}`) }),
+  });
+  return dead.length;
 }
 
 /* ---- conflict (two devices diverged) ---- */
@@ -3518,7 +3728,7 @@ function openMemoryDetail(id) {
 
       <div class="fld"><span>Who was there</span>${recEditor("memory", m.id, m.people || [])}</div>
       ${(m.tags || []).length ? `<span class="j-tags" style="margin-top:10px">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
-      <p class="soft note">${I.camera} Photos and videos stay on <b>the device you added them on</b> — the memory itself syncs, but the file doesn't yet, so on your other devices it reads <i>“Added on another device”</i>. They're also not in the JSON export. Videos up to ${VIDEO_MAX_MB}MB.</p>
+      <p class="soft note">${I.camera} Photos and videos <b>sync with your account</b>, encrypted — they'll appear on your other devices a moment after you add them. Clips over ${MEDIA_SYNC_MAX / 1024 / 1024}MB stay on this device (their cover still travels). Videos up to ${VIDEO_MAX_MB}MB, and media isn't part of the JSON export.</p>
     </div>
     <footer class="modal-foot">
       <button type="button" class="btn ghost" data-action="memory-edit" data-id="${m.id}">${I.edit}Edit</button>
@@ -3585,6 +3795,8 @@ function vProgress() {
 function vIntegrations() {
   const live = [
     { emoji: "☁️", name: "Cloud sync", desc: "Your own encrypted Supabase project — free, end-to-end encrypted", on: isSignedIn(), hint: isSignedIn() ? "Signed in" : "Set it up in Profile", nav: "profile" },
+    { emoji: "🖼️", name: "Photo & video sync", desc: "Your files follow your account, encrypted before they leave this device",
+      on: isSignedIn(), hint: isSignedIn() ? mediaLabel() : "Needs an account", nav: "profile" },
     { emoji: "📚", name: "Book database", desc: "Search & autofill titles, covers, authors and page counts", on: true, hint: "No key needed", nav: "reading" },
     { emoji: "🎬", name: "Movie database (TMDb)", desc: "Search & autofill posters, cast, director and runtime", on: !!state.profile.tmdbKey, hint: state.profile.tmdbKey ? "Key added" : "Add a free key in Profile", nav: state.profile.tmdbKey ? "media" : "profile" },
     { emoji: "📲", name: "Install & offline", desc: "Add to your Home Screen — works with no connection", on: true, hint: "Built in" },
@@ -3797,11 +4009,20 @@ function accountCard() {
           <span class="sync-badge ${cls}" data-sync-status>${esc(txt)}</span>
         </div>
       </div>
+      <div class="acct-row" style="margin-top:12px">
+        <span class="acct-avatar">${I.camera}</span>
+        <div class="acct-meta">
+          <b>Photos &amp; videos</b>
+          <span class="sync-badge" data-media-status>${esc(mediaLabel())}</span>
+        </div>
+      </div>
       <div class="pill-row" style="margin-top:14px">
         <button class="btn ghost" data-action="sync-now">${I.zap}Sync now</button>
+        <button class="btn ghost" data-action="media-sync">${I.camera}Sync files</button>
         <button class="btn ghost" data-action="auth-signout">Sign out</button>
       </div>
-      <p class="soft note">${I.check} Your habits, books, workouts and everything else sync privately across your devices. It's all <b>end-to-end encrypted</b> — only you can read it. Photos &amp; videos stay on this device for now.</p>`);
+      <p class="soft note">${I.check} Habits, books, workouts — and now your <b>photos and videos too</b>. Files are encrypted in this browser before they're uploaded, so only you can open them.</p>
+      <p class="soft note">${I.zap} Clips over <b>${MEDIA_SYNC_MAX / 1024 / 1024}MB</b> stay on the device you added them on, but their <b>cover still syncs</b> so memories look right everywhere. Nothing is ever removed from a device to save room.</p>`);
   }
   return card("span2", cardHead(`Account &amp; sync <small class="soft">— free forever</small>`) + `
     <p class="soft">Create a free account to <b>sync LifeHub across all your devices</b> — phone, laptop, tablet. Your data is <b>encrypted on your device before it ever leaves</b>, so it stays completely private. No paywall, ever.</p>
@@ -3940,6 +4161,13 @@ const ACTIONS = {
   "auth-switch-signin": () => openAuthModal("signin"),
   "auth-signout": () => { authSignout(); toast("Signed out — your data stays on this device"); render(); },
   "sync-now": async () => { await pullSnapshot(); if (cloud._dirty) await pushSnapshot(); },
+  /* an explicit file sync also sweeps files whose records are gone */
+  "media-sync": async () => {
+    if (!isSignedIn()) { toast("Sign in first — files sync with your account"); return; }
+    const n = await syncMedia({ gc: true });
+    toast(cloud.media.failed ? `${cloud.media.failed} file${cloud.media.failed === 1 ? "" : "s"} didn't transfer — check your connection`
+      : n ? `${n} file${n === 1 ? "" : "s"} synced 📸` : "Your files are already up to date");
+  },
   "conflict-keep-local": () => { closeModal(); pushSnapshot(true); },
   "conflict-keep-remote": async () => {
     closeModal();

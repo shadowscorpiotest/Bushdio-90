@@ -62,7 +62,16 @@ Create a **free account** (Profile → **Account & sync**) to keep LifeHub in st
 - **Sign in on a new device** and your data appears; a **conflict prompt** protects you if two devices diverge.
 - Because it's encrypted with your password: if you ever forget it, the *cloud copy* can't be decrypted — but your data is still safe on your device.
 
-> **Photos & videos are not synced yet.** They live in your browser's IndexedDB on the device you added them on — the *memory, meal or session* syncs, but the file stays put, so on another device it reads **"Added on another device"** in place of the picture. Media cloud-sync (Supabase Storage) is the follow-up. Sync runs on the **live site** over HTTPS (not the in-chat preview, whose sandbox blocks network calls — same as search).
+### 📸 Photos & videos sync too
+
+Your files travel with your account, **encrypted in the browser exactly like the rest of your data** — the server stores ciphertext it can't read, and each account can only touch its own folder. Add a photo on your iPad and it appears on your phone.
+
+- **Automatic.** New files upload a few seconds after you add them; missing ones download when you open the app or sign in. **Profile → Sync files** forces a pass and also sweeps files whose records you've deleted, so nothing sits in storage you're not using.
+- **Clips over 40MB stay put.** Encrypting a 300MB video needs it twice over in a phone's memory, and it would swallow a free storage tier. Its **cover still syncs**, so the memory looks right on every device — only the clip itself stays home, and the app says so where the video would be.
+- **Nothing is ever removed from a device to save space.** This adds copies; it doesn't move them. Deleting a memory deletes its files everywhere.
+- If a file hasn't arrived yet the frame says which it is — *"Added on another device"*, *"Not downloaded yet"*, or *"Too large to sync"* — rather than a blank box.
+
+Sync runs on the **live site** over HTTPS (not the in-chat preview, whose sandbox blocks network calls — same as search).
 
 ## 🔔 Reminders
 
@@ -89,6 +98,34 @@ Every delete — a habit, book, meal, memory, journal entry, expense, project �
 
 ## 🔒 Your data
 
-Structured data lives in `localStorage` under the `lifehub-v1` key. Use **Profile → Export JSON** for backups and **Import** to restore. **Uploaded photos & videos** are stored separately in your browser's **IndexedDB** (`lifehub-media`) so large media doesn't blow the localStorage limit — this media stays on the device/browser you added it in and isn't part of the JSON export. With an account, your structured data is also mirrored to the cloud, **end-to-end encrypted** (see above).
+### Setting up your own Supabase project
+
+If you're running your own copy, the SQL Editor needs the snapshot table, and **Storage** needs a private `media` bucket with policies scoped to each user's own folder:
+
+```sql
+-- the encrypted snapshot (structured data)
+create table if not exists public.snapshots (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  ciphertext text not null, iv text not null, salt text not null,
+  version bigint not null default 1, updated_at timestamptz not null default now()
+);
+alter table public.snapshots enable row level security;
+create policy "own row" on public.snapshots
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- encrypted photos & videos, one folder per account
+insert into storage.buckets (id, name, public) values ('media', 'media', false)
+on conflict (id) do nothing;
+
+create policy "own media" on storage.objects for all to authenticated
+  using      (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);
+```
+
+The bucket is **private** — files are only reachable with your own access token, and they're ciphertext even then.
+
+### Where things are stored
+
+Structured data lives in `localStorage` under the `lifehub-v1` key. Use **Profile → Export JSON** for backups and **Import** to restore. **Uploaded photos & videos** are stored separately in your browser's **IndexedDB** (`lifehub-media`) so large media doesn't blow the localStorage limit. They aren't part of the JSON export — but with an account they **do sync**, encrypted, to Supabase Storage (see above). Your structured data is mirrored the same way.
 
 **Starting out:** LifeHub opens with sample content so you can see how everything works. When you're ready, **Profile → Your data** gives you **Start fresh** (clears the demo content + media but keeps your name, theme and keys), **Load sample data** (brings the demo back), and **Reset everything** (a full wipe, including your profile).
