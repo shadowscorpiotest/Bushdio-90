@@ -82,6 +82,7 @@ const I = (() => {
     chevL:     w('<path d="M15 5l-7 7 7 7"/>'),
     chevR:     w('<path d="M9 5l7 7-7 7"/>'),
     play:      w('<path d="M7 5v14l11-7-11-7Z"/>'),
+    bell:      w('<path d="M18 8.6a6 6 0 1 0-12 0c0 6-2.5 7.4-2.5 7.4h17S18 14.6 18 8.6Z"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/>'),
     link:      w('<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/>'),
     tv:        w('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 21h8M12 3l4 3H8l4-3Z"/>'),
     calc:      w('<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h.01M12 11h.01M16 11h4M8 15h.01M12 15h.01M8 19h.01M12 19h.01M16 15v4"/>'),
@@ -131,7 +132,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 5;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 6;                             // bump when you append a step to MIGRATIONS
 let state = null;
 
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
@@ -168,6 +169,9 @@ function defaultState() {
     social: { items: [], log: {} }, // items {id,title,emoji,target}; log[weekKey]={itemId:count}
     memories: [],              // {id,date,title,note,felt,emoji,hue,photos:[],tags:[],people:[],starred}
     journal: [],               // {id,date,text,mood,tags:[]}
+    /* local reminders (stage 1 — no push server; see the reminders module for the honest scope) */
+    reminders: { enabled: false, after: "18:00", quietFrom: "22:00",
+      kinds: { habits: true, supplements: true, streak: true, deadlines: true, tasks: true } },
   };
 }
 
@@ -429,6 +433,19 @@ const MIGRATIONS = [
       if (!Array.isArray(m.people)) m.people = [];
       if (m.starred == null) m.starred = false;
     });
+  },
+
+  /* 5 → 6 · local reminders. Opt-in by default: an app that starts notifying you without being
+     asked is an app you turn off, and the OS permission prompt has to be user-triggered anyway. */
+  (s) => {
+    const r = s.reminders && typeof s.reminders === "object" ? s.reminders : {};
+    s.reminders = {
+      enabled: !!r.enabled,
+      after: r.after || "18:00",
+      quietFrom: r.quietFrom || "22:00",
+      kinds: Object.assign({ habits: true, supplements: true, streak: true, deadlines: true, tasks: true }, r.kinds || {}),
+    };
+    (s.habits || []).forEach(h => { if (h.remindAt == null) h.remindAt = ""; });
   },
 ];
 
@@ -2131,7 +2148,9 @@ function habitFormFields(h) {
     `<div class="fld-row"><label class="fld"><span>On these days</span>${weekdayPicker(c.days || [0, 1, 2, 3, 4])}</label>${fld("× per week", num("perWeek", c.perWeek || 3, 1))}</div>` +
     fld("Filled in by <small class=\"soft\">— let an area log it for you</small>",
       `<select name="kind"><option value="">Nothing — I tick it myself</option>${HABIT_SOURCES.map(x =>
-        `<option value="${x.id}" ${h.kind === x.id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>`);
+        `<option value="${x.id}" ${h.kind === x.id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>`) +
+    fld("Remind me at <small class=\"soft\">— leave empty to use the general nudge time</small>",
+      `<input type="time" name="remindAt" value="${esc(h.remindAt || "")}">`);
 }
 function parseCadence(f) {
   const mode = f.cmode || "daily";
@@ -3518,11 +3537,14 @@ function vIntegrations() {
     { emoji: "📚", name: "Book database", desc: "Search & autofill titles, covers, authors and page counts", on: true, hint: "No key needed", nav: "reading" },
     { emoji: "🎬", name: "Movie database (TMDb)", desc: "Search & autofill posters, cast, director and runtime", on: !!state.profile.tmdbKey, hint: state.profile.tmdbKey ? "Key added" : "Add a free key in Profile", nav: state.profile.tmdbKey ? "media" : "profile" },
     { emoji: "📲", name: "Install & offline", desc: "Add to your Home Screen — works with no connection", on: true, hint: "Built in" },
+    { emoji: "🔔", name: "Reminders", desc: "Nudges while the app is open or in the background — not yet with it fully closed",
+      on: (state.reminders || {}).enabled && notifyPermission() === "granted",
+      hint: notifyPermission() === "denied" ? "Blocked in browser settings" : ((state.reminders || {}).enabled && notifyPermission() === "granted" ? "On" : "Turn on in Profile"), nav: "profile" },
   ];
   const planned = [
     ["📅", "Calendar", "Two-way sync for deadlines and time-blocking"],
     ["❤️", "Apple Health / Google Fit", "Pull steps and sleep instead of typing them"],
-    ["🔔", "Reminders", "Nudges when something is due, even with the app closed"],
+    ["🔔", "Reminders with the app closed", "Silent at 8am — needs a push server"],
     ["📝", "Notion", "Mirror notes and tasks"],
   ];
   return `
@@ -3545,6 +3567,171 @@ function vIntegrations() {
       </ul>
       <p class="soft note">${I.zap} These are honest placeholders — nothing here is half-wired behind a switch. Each one needs that service's API, and reminders need a small server, so they'll arrive as real features rather than toggles.</p>`)}
   </div>`;
+}
+
+/* ================= reminders (stage 1 — local) ======================================================
+   The honest scope, stated here and in the UI: with no push server the browser only runs this code
+   while LifeHub is open or still alive in the background. That genuinely covers "I opened the app and
+   something is overdue" and "a reminder time passed while it was up" — it is NOT a silent 8am alarm
+   with the app fully closed. That needs Web Push (server + VAPID) and is a separate step. */
+const NUDGE_KEY = "lifehub-nudges";   // per-DEVICE delivery log: what's been said today, never synced
+let _nudgeTimer = null;
+
+const remindersSupported = () => typeof Notification !== "undefined" && "serviceWorker" in navigator;
+const notifyPermission = () => remindersSupported() ? Notification.permission : "unsupported";
+const pad2 = (n) => String(n).padStart(2, "0");
+const nowHM = () => { const d = new Date(); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); };
+
+function nudgeLog() {
+  try { const r = JSON.parse(localStorage.getItem(NUDGE_KEY) || "{}");
+    return r && r.date === todayIso() ? { date: r.date, sent: r.sent || {} } : { date: todayIso(), sent: {} };
+  } catch { return { date: todayIso(), sent: {} }; }
+}
+const alreadyNudged = (key) => !!nudgeLog().sent[key];
+function markNudged(key) {
+  const l = nudgeLog(); l.sent[key] = Date.now();
+  try { localStorage.setItem(NUDGE_KEY, JSON.stringify(l)); } catch {}
+}
+
+/* Everything worth a nudge right now. Pure: reads state + the clock, writes nothing — so the whole
+   decision layer can be asserted directly without any notification plumbing in the way. */
+function dueNudges(now) {
+  now = now || nowHM();
+  const r = (state && state.reminders) || {};
+  if (!r.enabled) return [];
+  if (r.quietFrom && now >= r.quietFrom) return [];      // don't buzz someone at midnight
+  const t = todayIso(), k = r.kinds || {}, out = [];
+  const late = !r.after || now >= r.after;
+
+  if (k.supplements) state.nutrition.supplements.filter(s => supStatus(s).due).forEach(s =>
+    out.push({ key: `sup:${s.id}:${t}`, title: `${s.name} is due`,
+      body: s.dose ? `${s.dose} · ${SUP_LABEL[s.every] || "daily"}` : "Tap to mark it taken", nav: "nutrition" }));
+
+  if (k.deadlines) {
+    state.university.tasks.filter(x => !x.done && x.due === t).forEach(x =>
+      out.push({ key: `uni:${x.id}:${t}`, title: "Due today", body: x.title + (x.course ? ` · ${x.course}` : ""), nav: "university" }));
+    state.work.items.filter(x => !x.done && x.due === t).forEach(x =>
+      out.push({ key: `work:${x.id}:${t}`, title: "Due today", body: x.title, nav: "work" }));
+  }
+
+  if (k.tasks) state.todos.filter(x => !x.done && x.date === t && x.time && now >= x.time).forEach(x =>
+    out.push({ key: `task:${x.id}:${t}`, title: x.text, body: `You planned this for ${x.time}`, nav: "dashboard" }));
+
+  /* a habit with its own time fires on the clock; everything else waits for the nudge hour */
+  state.habits.filter(h => h.remindAt && now >= h.remindAt && isScheduled(h, t) && !isSkipped(h, t) && !habitMet(h, t))
+    .forEach(h => out.push({ key: `habit:${h.id}:${t}`, title: `${h.emoji} ${h.name}`, body: h.why || "Time for this one", nav: "habits" }));
+
+  if (late && k.habits) {
+    /* one summary, not one buzz per habit */
+    const open = state.habits.filter(h => !h.remindAt && isScheduled(h, t) && !isSkipped(h, t) && !habitMet(h, t));
+    if (open.length) out.push({ key: `habits:${t}`,
+      title: open.length === 1 ? `${open[0].emoji} ${open[0].name} is still open` : `${open.length} habits still open`,
+      body: open.slice(0, 3).map(h => h.name).join(" · ") + (open.length > 3 ? " …" : ""), nav: "habits" });
+  }
+  if (late && k.streak) {
+    const s = perfectStreak();
+    if (s >= 3 && !isPerfectDay(t)) out.push({ key: `streak:${t}`, title: `Your ${s}-day streak needs today`,
+      body: "One more day keeps the flame alive.", nav: "habits" });
+  }
+  return out;
+}
+
+async function sendNudge(n) {
+  if (notifyPermission() !== "granted") return false;
+  const opts = { body: n.body, tag: n.key, icon: "./icon-192.png", badge: "./icon-192.png", data: { nav: n.nav || "" } };
+  try {
+    /* iOS only delivers notifications shown by the service worker, so prefer it and fall back */
+    const reg = navigator.serviceWorker.getRegistration ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg && reg.showNotification) { await reg.showNotification(n.title, opts); return true; }
+    new Notification(n.title, opts);
+    return true;
+  } catch { return false; }
+}
+
+/* Never carpet-bomb: a wall of notifications is one you swipe away forever. The cap is a moving
+   WINDOW rather than a per-call limit, because several triggers can land at once — coming back to
+   the tab fires both `visibilitychange` and `focus` — and a per-call cap would let each of them
+   spend its own budget. Anything held back simply goes out on a later tick. */
+const NUDGE_BURST = 3;
+const NUDGE_WINDOW = 60000;
+/* `now` is injectable purely so the delivery path can be driven at a chosen time of day in tests —
+   in the app it is always the real clock. */
+async function tickReminders(now) {
+  if (!state || !(state.reminders || {}).enabled || notifyPermission() !== "granted") return 0;
+  const t0 = Date.now();
+  let budget = NUDGE_BURST - Object.values(nudgeLog().sent).filter(ts => t0 - ts < NUDGE_WINDOW).length;
+  let sent = 0;
+  for (const n of dueNudges(now)) {
+    if (budget <= 0) break;
+    if (alreadyNudged(n.key)) continue;
+    if (await sendNudge(n)) { markNudged(n.key); sent++; budget--; }
+  }
+  return sent;
+}
+function startReminders() {
+  clearInterval(_nudgeTimer); _nudgeTimer = null;
+  if (!state || !(state.reminders || {}).enabled) return;
+  tickReminders();
+  _nudgeTimer = setInterval(tickReminders, 60000);   // catches a reminder time passing while open
+}
+async function enableReminders() {
+  if (!remindersSupported()) { toast("This browser can't show reminders"); return; }
+  let perm = Notification.permission;
+  if (perm === "default") { try { perm = await Notification.requestPermission(); } catch { perm = "denied"; } }
+  if (perm !== "granted") {
+    state.reminders.enabled = false; save(); render();
+    toast("Reminders are blocked — allow notifications for this site in your browser settings");
+    return;
+  }
+  state.reminders.enabled = true; save(); render(); startReminders();
+  toast("Reminders on 🔔");
+}
+
+function remindersCard() {
+  const r = state.reminders, perm = notifyPermission();
+  const timed = state.habits.filter(h => h.remindAt);
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const standalone = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+  const head = cardHead("Reminders", r.enabled && perm === "granted"
+    ? `<span class="int-state on">${I.check}On</span>` : `<span class="int-state">Off</span>`);
+
+  if (perm === "unsupported") return card("span2", head + `
+    <p class="soft note">${I.bell} This browser can't show notifications, so reminders aren't available here. Everything else works normally.</p>`);
+
+  if (perm === "denied") return card("span2", head + `
+    <p class="soft note">${I.bell} Notifications are <b>blocked</b> for this site. Turn them back on in your browser or phone settings for LifeHub, then reload this page.</p>`);
+
+  if (!r.enabled || perm !== "granted") return card("span2", head + `
+    <p class="soft">Get a nudge when a supplement is due, a deadline lands today, or your habits are still open in the evening.</p>
+    <div class="pill-row" style="margin-top:12px"><button class="btn primary" data-action="rem-enable">${I.bell}Turn on reminders</button></div>
+    ${remindersHonesty(ios, standalone)}`);
+
+  return card("span2", head + `
+    <div class="fld-row">
+      <label class="fld"><span>Nudge me after</span><input type="time" data-change="rem-after" value="${esc(r.after)}"></label>
+      <label class="fld"><span>Quiet from</span><input type="time" data-change="rem-quiet" value="${esc(r.quietFrom)}"></label>
+    </div>
+    <p class="soft note" style="margin-top:-2px">Evening nudges — habits still open, streak at risk — start at the first time and stop at the second. Deadlines, timed tasks and habits with their own time ignore both.</p>
+    <div class="fld"><span>What to nudge about</span>
+      <div class="chip-checks">
+        ${[["habits", "🎯 Habits still open"], ["supplements", "💊 Supplements due"], ["streak", "🔥 Streak at risk"],
+           ["deadlines", "🎓 Deadlines today"], ["tasks", "✅ Timed tasks"]].map(([id, label]) =>
+          `<label class="chip-check"><input type="checkbox" data-change="rem-kind" data-id="${id}" ${r.kinds[id] ? "checked" : ""}><span>${label}</span></label>`).join("")}
+      </div>
+    </div>
+    ${timed.length ? `<p class="soft note">${I.clock} Own time: ${timed.map(h => `<b>${esc(h.emoji)} ${esc(h.name)}</b> at ${esc(h.remindAt)}`).join(", ")} — set it on a habit's Edit form.</p>`
+      : `<p class="soft note">${I.clock} You can give any single habit its own time on its <b>Edit</b> form.</p>`}
+    <div class="pill-row" style="margin-top:12px">
+      <button class="btn ghost" data-action="rem-test">${I.bell}Send a test</button>
+      <button class="btn ghost" data-action="rem-off">Turn off</button>
+    </div>
+    ${remindersHonesty(ios, standalone)}`);
+}
+/* Said plainly, in the app, where it matters — not buried in a README. */
+function remindersHonesty(ios, standalone) {
+  return `<p class="soft note">${I.zap} <b>What this can and can't do.</b> These arrive while LifeHub is open or still running in the background — so you'll get them when you pick your phone up, not silently at 8am with the app closed. Always-on reminders need a push server, which is the next step.
+  ${ios && !standalone ? `<br><b>On iPhone:</b> notifications only work once LifeHub is added to your Home Screen (Share → Add to Home Screen).` : ""}</p>`;
 }
 
 /* ---------- profile ---------- */
@@ -3578,6 +3765,7 @@ function vProfile() {
   return `
   <div class="grid">
     ${accountCard()}
+    ${remindersCard()}
     ${card("center span2", `
       <button class="avatar-big" data-action="profile-edit" aria-label="Edit profile">${esc(state.profile.avatar)}</button>
       <h2 style="margin-top:10px">${esc(state.profile.name || "Set your name")}</h2>
@@ -3669,6 +3857,14 @@ const ACTIONS = {
   "modal-close": closeModal,
   "close-drawer": closeDrawer,
   "theme-toggle": toggleTheme,
+
+  /* reminders */
+  "rem-enable": () => enableReminders(),
+  "rem-off": () => { state.reminders.enabled = false; save(); render(); startReminders(); toast("Reminders off"); },
+  "rem-test": async () => {
+    const ok = await sendNudge({ key: "test:" + Date.now(), title: "🌿 LifeHub", body: "This is what a nudge looks like.", nav: "dashboard" });
+    toast(ok ? "Sent — check your notifications" : "Couldn't show it. Your browser or system may have notifications muted.");
+  },
   "quick-add": openQuickAdd,
   "go-journal": () => { closeModal(); go("journal"); },
 
@@ -4280,8 +4476,8 @@ const SUBMITS = {
   "auth-signin": (f) => { doAuth("signin", f.email, f.password); return true; },
   "auth-signup": (f) => { doAuth("signup", f.email, f.password); return true; },
 
-  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", goalIds: [], milestones: [], log: {} }); },
-  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; } },
+  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {} }); },
+  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.remindAt = f.remindAt || ""; } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
   "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", progress: [], habitIds: [], milestones: [] }); },
   "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; syncGoalMilestones(g); } },
@@ -4483,6 +4679,11 @@ const CHANGES = {
     storeMediaFile(el.files[0], (ref) => { m.photos = m.photos || []; m.photos.push(ref); save(); render(); openMemoryDetail(m.id); toast("Photo added 📸"); });
   },
   "tmdb-key": (el) => { state.profile.tmdbKey = el.value.trim(); save(); },
+
+  /* reminders */
+  "rem-after": (el) => { state.reminders.after = el.value || "18:00"; save(); startReminders(); },
+  "rem-quiet": (el) => { state.reminders.quietFrom = el.value || "22:00"; save(); startReminders(); },
+  "rem-kind":  (el) => { state.reminders.kinds[el.dataset.id] = el.checked; save(); startReminders(); },
   "book-cover-new": (el) => {
     processCover(el.files[0], (dataUrl) => {
       const field = $("#coverField"), preview = $("#coverPreview");
@@ -4547,6 +4748,8 @@ function maybeOnboard() {
 /* ================= init ================= */
 load();
 applyTheme();
+/* a notification tap can open us cold at #habits — honour it before the first paint */
+{ const h = (location.hash || "").replace(/^#/, ""); if (h && VIEWS[h]) currentView = h; }
 bindEvents();
 bindTip();
 render();
@@ -4566,4 +4769,15 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => { /* offline unsupported here — app still works */ });
   });
+  /* tapping a notification asks the worker to focus us and land on the right section */
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    const d = e.data || {};
+    if (d.type === "nav" && d.view && VIEWS[d.view]) { go(d.view); window.scrollTo({ top: 0 }); }
+  });
 }
+
+/* reminders: start the local nudge loop, and re-check whenever the app comes back to the foreground.
+   Coming back into view is the moment that matters — it's when the browser is guaranteed to run us. */
+startReminders();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tickReminders(); });
+window.addEventListener("focus", () => tickReminders());

@@ -682,6 +682,16 @@ li.overdue .row-txt small { color: var(--danger); }
 .mini-badge { display: inline-grid; place-items: center; vertical-align: middle; }
 .mini-badge svg { width: 13px; height: 13px; color: #f76b15; }
 .wday { cursor: pointer; background: none; border: 1px solid transparent; }
+/* a row of togglable chips — reads as a set of choices, not a stack of form rows */
+.chip-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-check { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px 7px 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  font-size: 13px; color: var(--ink-2); cursor: pointer; transition: border-color .16s, background .16s, color .16s; }
+.chip-check input { width: 16px; height: 16px; accent-color: var(--brand); margin: 0; flex: none; }
+.chip-check:hover { border-color: var(--brand); }
+.chip-check:has(input:checked) { border-color: var(--brand); color: var(--ink); background: color-mix(in srgb, var(--brand) 8%, var(--surface)); }
+.chip-check:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
+
 .check-inline { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .check-inline input { width: 17px; height: 17px; accent-color: var(--brand); }
 .ms-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }

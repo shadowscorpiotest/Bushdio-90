@@ -24,8 +24,8 @@ No server, no account, no build step. Open `index.html` (or host the folder anyw
 | 📸 **Memories** | Not a list of rows — an **editorial wall** where the photo is the subject: serif titles over the image, and time told as **distance** (*“three years ago”*, with the date kept quiet underneath). Each memory holds **how it felt** in your own words, **who was there** as avatars, photos and video, and tags. A **video gets a real cover**: LifeHub grabs a frame from just inside the clip when you add it, so it shows as a still with a ▶ mark instead of a black rectangle — it plays when you open the memory. **Star** the ones that matter and they rise to a **Treasured** shelf; everything else flows down a **timeline** (This month → last months → 2024). Plus **search** across names, feelings and places, and **On this day** |
 | ✒️ **Journal** | Daily entry with mood and tags, past-entry timeline. **Any day is editable** — navigate back, or tap a past entry to open and rewrite it. Its mood is **the same value Health tracks**, so the two can never disagree |
 | 📊 **Progress** | Totals, per-area progress, XP-per-day chart, 16-week habit-consistency heatmap |
-| ⚡ **Connections** | An honest list of what LifeHub actually talks to — cloud sync, the book database, TMDb, install &amp; offline — each showing its **real** status, plus a clearly separated "not built yet" list. No switches that do nothing |
-| 👤 **Profile** | Avatar & name, badge gallery (17 badges), theme, JSON export / import / reset |
+| ⚡ **Connections** | An honest list of what LifeHub actually talks to — cloud sync, the book database, TMDb, install &amp; offline, reminders — each showing its **real** status, plus a clearly separated "not built yet" list. No switches that do nothing |
+| 👤 **Profile** | Avatar & name, badge gallery (17 badges), theme, **reminders**, JSON export / import / reset |
 
 ## 🕹️ Gamification
 
@@ -63,6 +63,12 @@ Create a **free account** (Profile → **Account & sync**) to keep LifeHub in st
 - Because it's encrypted with your password: if you ever forget it, the *cloud copy* can't be decrypted — but your data is still safe on your device.
 
 > Photos & videos stay on-device for now (they live in IndexedDB); media cloud-sync is a follow-up. Sync runs on the **live site** over HTTPS (not the in-chat preview, whose sandbox blocks network calls — same as search).
+
+## 🔔 Reminders
+
+Turn them on in **Profile → Reminders** and LifeHub nudges you about the things that are actually due: a **supplement** you haven't taken, a **deadline landing today**, a **timed task** whose time has passed, your **habits still open** in the evening (one summary, not one buzz per habit), and a **streak at risk**. Any single habit can carry **its own time** — set it on the habit's Edit form. You choose the nudge hour, a quiet-from time, and which of those five kinds you want at all.
+
+> **What this can and can't do.** These arrive while LifeHub is **open or still running in the background** — so you get them when you pick your phone up, not silently at 8am with the app closed. Always-on reminders need a push server; that's the next step. On **iPhone**, notifications only work once LifeHub is added to your Home Screen. Nothing is ever sent without your permission, nothing is repeated, and at most three arrive in any minute.
 
 ## 🔗 Log it once, it counts everywhere
 
