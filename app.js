@@ -568,6 +568,44 @@ async function hydrateMedia() {
         : `<img src="${url}" alt="" loading="lazy">`;
     } catch { host.innerHTML = `<span class="media-missing">media unavailable</span>`; }
   }
+  healPosters();
+}
+/* Clips saved before posters existed show their first frame, which is usually black. The first time
+   such a cover is drawn we capture a real frame from the stored blob, keep it, and swap it in — so an
+   old memory heals itself the moment you look at it, without touching the clip. */
+let _healing = false;
+async function healPosters() {
+  if (_healing) return;
+  const hosts = $$("[data-poster-heal]");
+  if (!hosts.length) return;
+  _healing = true;
+  let changed = false;
+  for (const host of hosts) {
+    host.removeAttribute("data-poster-heal");
+    const id = host.dataset.media;
+    try {
+      const blob = await mediaGet(id);
+      if (!blob) continue;
+      const poster = await new Promise(r => videoPoster(blob, r));
+      if (!poster) continue;
+      const pid = await mediaPut(poster);
+      const refs = mediaRefsFor(id);
+      if (!refs.length) { mediaDelete(pid); continue; }   // the memory went away mid-capture
+      refs.forEach(ref => { ref.poster = pid; });
+      changed = true;
+    } catch {}
+  }
+  _healing = false;
+  if (changed) { save(); render(); }
+}
+/* every stored media ref pointing at one blob, wherever in state it lives */
+function mediaRefsFor(id) {
+  const out = [];
+  const scan = (arr) => (arr || []).forEach(p => { if (p && p.id === id) out.push(p); });
+  (state.memories || []).forEach(m => scan(m.photos));
+  ((state.workout || {}).sessions || []).forEach(s => scan(s.media));
+  Object.values((state.nutrition || {}).photos || {}).forEach(day => Object.values(day || {}).forEach(scan));
+  return out;
 }
 /* read a File into IndexedDB; images are downscaled unless they're already small */
 const MB = (n) => Math.round(n / 1024 / 1024);
@@ -602,11 +640,12 @@ function videoPoster(file, cb) {
   const finish = (blob) => {
     if (done) return; done = true;
     clearTimeout(timer);
-    try { v.removeAttribute("src"); v.load(); } catch {}
+    try { v.pause(); v.removeAttribute("src"); v.load(); } catch {}
     if (url) URL.revokeObjectURL(url);
     cb(blob);
   };
-  const timer = setTimeout(() => finish(null), 10000);
+  /* if the seek never lands, take whatever frame is decoded rather than giving up */
+  const timer = setTimeout(() => { if (!done) grab(); }, 6000);
   const grab = () => {
     try {
       const w = v.videoWidth, h = v.videoHeight;
@@ -624,6 +663,8 @@ function videoPoster(file, cb) {
     v.onerror = () => finish(null);
     v.onseeked = grab;
     v.onloadeddata = () => {
+      /* iOS won't always decode a frame for a video it has never played; muted+inline play is allowed */
+      try { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); } catch {}
       const d = v.duration;
       if (d && isFinite(d) && d > 0.4) v.currentTime = Math.min(0.6, d / 3);
       else grab();
@@ -3304,7 +3345,7 @@ function memoryCard(m, big) {
   <article class="mem-card ${big ? "big" : ""} ${m.starred ? "starred" : ""}" style="--h:${m.hue}">
     <button class="mem-hit" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}"></button>
     <div class="mc-frame">
-      ${cover ? `<span class="mc-photo" data-media="${cover.id}" data-media-kind="${cover.kind}"${cover.kind === "video" ? " data-media-still=\"1\"" : ""}></span>`
+      ${cover ? `<span class="mc-photo" data-media="${cover.id}" data-media-kind="${cover.kind}"${cover.kind === "video" ? ` data-media-still="1" data-poster-heal="1"` : ""}></span>`
               : `<span class="mc-blank"><span class="mc-glyph">${esc(m.emoji || "📸")}</span></span>`}
       <span class="mc-scrim" aria-hidden="true"></span>
       ${vid ? `<span class="mc-play" aria-hidden="true">${I.play}</span>` : ""}
