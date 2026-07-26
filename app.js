@@ -551,11 +551,17 @@ async function hydrateMedia() {
   }
 }
 /* read a File into IndexedDB; images are downscaled unless they're already small */
+const MB = (n) => Math.round(n / 1024 / 1024);
+const VIDEO_MAX_MB = 300;   // a phone clip is often 130-400MB per minute; 60MB rejected almost everything
 function storeMediaFile(file, cb) {
   if (!file) return;
   const kind = file.type.startsWith("video") ? "video" : "image";
-  if (kind === "video" && file.size > 60 * 1024 * 1024) { toast("That video is over 60MB — try a shorter clip"); return; }
-  const finish = (blob) => mediaPut(blob).then(id => cb({ id, kind })).catch(() => toast("Couldn't save that media"));
+  if (kind === "video" && file.size > VIDEO_MAX_MB * 1024 * 1024) {
+    toast(`That clip is ${MB(file.size)}MB — too big to store. Trim it under ${VIDEO_MAX_MB}MB and try again.`);
+    return;
+  }
+  if (kind === "video") toast(`Saving ${MB(file.size)}MB video…`);
+  const finish = (blob) => mediaPut(blob).then(id => cb({ id, kind })).catch((e) => toast(`Couldn't save that ${kind} — ${e && e.name === "QuotaExceededError" ? "this device is out of storage" : "storage refused it"}`));
   if (kind === "image") {
     processCover(file, (dataUrl) => fetch(dataUrl).then(r => r.blob()).then(finish), 900);
   } else {
@@ -1372,6 +1378,9 @@ function deleteWithUndo(getArr, id, label, onExpire, onRestore) {
 function openModal(html) {
   $("#modal").innerHTML = html;
   $("#modalBackdrop").hidden = false;
+  /* modal content is injected outside the render cycle, so it needs hydrating too — without this
+     any [data-media] inside a modal stays a "…" placeholder forever */
+  hydrateMedia();
   const f = $("#modal input:not([type=hidden]), #modal textarea, #modal select");
   if (f) f.focus();
 }
@@ -3197,9 +3206,7 @@ function vMemories() {
               ${m.note ? `<p>${esc(m.note)}</p>` : ""}
               ${(m.tags || []).length ? `<span class="j-tags">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
             </figcaption>
-            <button class="icon-btn ghost memory-open" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}">${I.chevR}</button>
-            <button class="icon-btn ghost memory-edit" data-action="memory-edit" data-id="${m.id}" aria-label="Edit memory">${I.edit}</button>
-            <button class="icon-btn ghost memory-del" data-action="memory-del" data-id="${m.id}" aria-label="Delete memory">${I.x}</button>
+            <button class="mem-hit" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}"></button>
           </figure>`).join("")}
       </div>` : (q ? `<p class="soft small" style="padding:8px 2px">Nothing matches “${esc(q)}”.</p>`
                    : emptyMsg("camera", "Collect moments, not things.", addBtn("Save your first memory", "memory-add")))}`)}
@@ -3227,11 +3234,12 @@ function openMemoryDetail(id) {
           <span class="media-host" data-media="${ph.id}" data-media-kind="${ph.kind}"><span class="media-missing">…</span></span>
           <button class="photo-x" data-action="memory-photo-del" data-id="${m.id}" data-ref="${ph.id}" aria-label="Remove photo">${I.x}</button>
         </span>`).join("")}
-        <label class="mem-add" aria-label="Add a photo to this memory">
+        <label class="mem-add" aria-label="Add a photo or video to this memory">
           <input type="file" accept="image/*,video/*" data-change="memory-photo-add" data-id="${m.id}" hidden>
-          ${I.camera}<span>Add photo</span>
+          ${I.camera}<span>Add photo<br>or video</span>
         </label>
       </div>
+      <p class="soft note">${I.camera} Photos and videos are stored on this device only — they aren't part of sync or the JSON export yet. Videos up to ${VIDEO_MAX_MB}MB.</p>
     </div>
     <footer class="modal-foot">
       <button type="button" class="btn ghost" data-action="memory-edit" data-id="${m.id}">${I.edit}Edit</button>
