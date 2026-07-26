@@ -4250,8 +4250,10 @@ if (location.protocol === "https:" && window.crypto && crypto.subtle) {
   window.addEventListener("online", () => { if (isSignedIn() && cloud.key && cloud._dirty) schedulePush(); });
 }
 
-/* PWA: register the service worker for offline + installability (HTTPS/localhost only) */
-if ("serviceWorker" in navigator && location.protocol === "https:") {
+/* PWA: register the service worker for offline + installability.
+   localhost counts as a secure context, so it registers there too — which is what makes the
+   caching behaviour testable instead of only observable in production. */
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => { /* offline unsupported here — app still works */ });
   });
