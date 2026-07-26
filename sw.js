@@ -5,7 +5,7 @@
    for one launch, which made the app look broken after a fix. A short timeout falls back to the
    cached copy, so a slow or dead connection still opens instantly and offline still works.
    Icons are cache-first: they're the heavy part and they almost never change. */
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = "lifehub-" + VERSION;
 const NET_TIMEOUT = 4000;
 
@@ -62,6 +62,22 @@ function cacheFirst(req) {
     return cached || network;
   });
 }
+
+/* Tapping a reminder should land you on the thing it was about: focus an open window and tell it
+   where to go, or open one. (Notifications themselves are shown by the page for now — stage 2 adds
+   a "push" listener here once there's a server to push from.) */
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const view = ((e.notification.data || {}).nav) || "";
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ("focus" in c) { try { c.postMessage({ type: "nav", view }); } catch {} return c.focus(); }
+      }
+      return self.clients.openWindow("./" + (view ? "#" + view : ""));
+    })
+  );
+});
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
