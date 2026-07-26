@@ -130,7 +130,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 2;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 3;                             // bump when you append a step to MIGRATIONS
 let state = null;
 
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
@@ -403,6 +403,17 @@ const MIGRATIONS = [
         day[key] = (day[key] || 0) + (+old[d] || 0);
       });
       if (s[slice]) delete s[slice].log;
+    });
+  },
+
+  /* 2 → 3 · reading.log[d] was a write-only boolean ("something happened today"). It becomes a
+     per-day PAGE COUNT so a "Read 20 pages" habit can be fed by the pages you actually log. */
+  (s) => {
+    s.reading = s.reading || { yearlyGoal: 12, books: [], log: {} };
+    s.reading.log = s.reading.log || {};
+    Object.keys(s.reading.log).forEach(d => {
+      const v = s.reading.log[d];
+      s.reading.log[d] = (v === true || v === false) ? 0 : (+v || 0);
     });
   },
 ];
@@ -854,12 +865,43 @@ function isScheduled(h, d) {
 function isSkipped(h, d) { const e = habitEntry(h, d); return !!(e && e.skip); }
 /* did the habit's goal get met that day? */
 function workoutDone(d) { return ((state.workout.log[d] || []).length) > 0; }
+/* A habit can be FED by the area that already records the same fact, so you never log it twice.
+   "workout" was the first of these; the rest generalize the same idea. */
+const HABIT_SOURCES = [
+  { id: "workout", area: "workout", label: "Workout — logging a session completes it" },
+  { id: "reading", area: "reading", label: "Reading — pages you log on a book", unit: "pages" },
+  { id: "water",   area: "health",  label: "Health — water you log", unit: "L" },
+  { id: "steps",   area: "health",  label: "Health — steps you log", unit: "steps" },
+  { id: "sleep",   area: "health",  label: "Health — hours you slept", unit: "h" },
+  { id: "study",   area: "skills",  label: "Study — minutes logged (self-directed + coursework)", unit: "min" },
+];
+const habitSource = (h) => HABIT_SOURCES.find(x => x.id === h.kind) || null;
+const pagesOn = (d) => +state.reading.log[d] || 0;
+/* only forward progress counts — correcting a page number down shouldn't erase the day's reading */
+function logPages(delta) { if (delta > 0) { const t = todayIso(); state.reading.log[t] = pagesOn(t) + delta; } }
+function sourceAmount(kind, d) {
+  switch (kind) {
+    case "reading": return pagesOn(d);
+    case "water":   return healthOn(d).water || 0;
+    case "steps":   return healthOn(d).steps || 0;
+    case "sleep":   return healthOn(d).sleep || 0;
+    case "study":   return studyMins(d);
+    default:        return 0;
+  }
+}
+/* a fed habit's amount is DERIVED from its area — never entered twice, so it can't drift */
+function habitAmount(h, d) {
+  if (h.kind && h.kind !== "workout") return sourceAmount(h.kind, d);
+  const e = habitEntry(h, d);
+  return (e && e.amount) || 0;
+}
 function habitMet(h, d) {
   const e = habitEntry(h, d);
   // a workout habit is one with your Workout section: logging a session IS completing it
   if (h.kind === "workout") return workoutDone(d) || !!(e && e.done);
   if (h.type === "avoid") return !(e && e.slip);
-  if (h.type === "quantity") return ((e && e.amount) || 0) >= (h.target || 1);
+  if (h.type === "quantity") return habitAmount(h, d) >= (h.target || 1);
+  if (h.kind) return habitAmount(h, d) > 0 || !!(e && e.done);   // build habit fed by an area
   return !!(e && e.done);
 }
 const habitDone = habitMet; // back-compat alias used across views
@@ -1689,8 +1731,19 @@ function vDashboard() {
   const undone = todos.filter(td => !td.done).sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
   const done = todos.filter(td => td.done);
   const dueHabits = state.habits.filter(h => isScheduled(h, t) && !isSkipped(h, t));
-  const deadlines = state.university.tasks.filter(k => !k.done && k.due <= addDays(t, 5)).sort((a, b) => a.due < b.due ? -1 : 1);
-  const remaining = undone.length + dueHabits.filter(h => !habitMet(h, t)).length;
+  /* everything with a date, not just University — this card is the one place you look for "what's coming" */
+  const deadlines = [
+    ...state.university.tasks.filter(k => !k.done && k.due && k.due <= addDays(t, 5))
+      .map(k => ({ title: k.title, due: k.due, nav: "university", area: "university" })),
+    ...state.work.items.filter(k => !k.done && k.due && k.due <= addDays(t, 5))
+      .map(k => ({ title: k.title, due: k.due, nav: "work", area: "work" })),
+    ...state.goals.filter(g => g.deadline && g.deadline <= addDays(t, 5) && !goalReached(g))
+      .map(g => ({ title: g.title, due: g.deadline, nav: "habits", area: "habits" })),
+  ].sort((a, b) => a.due < b.due ? -1 : 1);
+  /* coursework due today or overdue is a thing you must do today — it belongs in Today's Focus */
+  const uniDue = state.university.tasks.filter(k => !k.done && k.due && k.due <= t)
+    .sort((a, b) => a.due < b.due ? -1 : 1);
+  const remaining = undone.length + uniDue.length + dueHabits.filter(h => !habitMet(h, t)).length;
   return `
   <div class="grid dash">
     ${card("today-hero span2", `
@@ -1713,7 +1766,11 @@ function vDashboard() {
       </div>`)}
 
     ${card("span2", cardHead(`Today's focus <small class="soft">${undone.length} to do</small>`) + `
-      <ul class="todo-list">${undone.length ? undone.map(taskRow).join("") : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`}</ul>
+      <ul class="todo-list">${uniDue.map(k => `
+        <li class="${k.due < t ? "overdue" : ""}">
+          <button class="checkbox" data-action="ag-uni" data-id="${k.id}" aria-label="Mark ${esc(k.title)} done">${I.check}</button>
+          <span class="row-txt" data-nav="university"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.course || "University")}</span> · due ${daysUntil(k.due)}</small></span>
+        </li>`).join("")}${undone.length ? undone.map(taskRow).join("") : (uniDue.length ? "" : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`)}</ul>
       ${taskAddForm()}
       <p class="soft note">${I.spark} Name a task after a habit, supplement or area (e.g. "Take Vitamin D3", "Pay yoga tuition") — it auto-links, and checking it logs there too.</p>
       ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
@@ -1745,7 +1802,7 @@ function vDashboard() {
       </div>`)}
 
     ${deadlines.length ? card("", cardHead("Upcoming") + `
-      <ul class="mini-agenda">${deadlines.map(k => `<li data-nav="university"><span class="a-ic" style="--a:#3e63dd">${I.building}</span><span class="row-txt"><b>${esc(k.title)}</b><small>university</small></span><span class="a-when">${daysUntil(k.due)}</span></li>`).join("")}</ul>`) : ""}
+      <ul class="mini-agenda">${deadlines.map(k => { const a = areaOf(k.area); return `<li data-nav="${k.nav}"><span class="a-ic" style="--a:${a.hue}">${I[a.icon]}</span><span class="row-txt"><b>${esc(k.title)}</b><small>${esc(a.name.toLowerCase())}</small></span><span class="a-when ${k.due < t ? "over" : ""}">${daysUntil(k.due)}</span></li>`; }).join("")}</ul>`) : ""}
 
     ${card("", cardHead("Reflection") + `
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
@@ -1767,6 +1824,15 @@ function vDashboard() {
 function goalCurrent(g) {
   if (!g.progress || !g.progress.length) return g.start;
   return g.progress[g.progress.length - 1].value;
+}
+/* an outcome goal is reached when its latest logged value passes the target in its direction;
+   a checklist goal is reached when every milestone is ticked */
+function goalReached(g) {
+  if (g.type === "outcome") {
+    const cur = goalCurrent(g);
+    return g.direction === "down" ? cur <= g.target : cur >= g.target;
+  }
+  return !!(g.milestones || []).length && g.milestones.every(m => m.done);
 }
 function goalProgress(g) {
   const tot = g.milestones.length, done = g.milestones.filter(m => m.done).length;
@@ -1791,9 +1857,17 @@ function syncGoalMilestones(g) {
 function habitRow(h, d) {
   const e = habitEntry(h, d) || {}, met = habitMet(h, d), streak = habitStreak(h);
   let control, sub;
+  const src = habitSource(h);
   if (h.kind === "workout") {
     control = `<button class="checkbox" data-action="habit-workout-jump" data-id="${h.id}" aria-label="${met ? "Workout logged — open Workout" : "Log a workout"}">${I.check}</button>`;
     sub = met ? `Workout logged · ${streak} day streak` : `Log it in Workout · ${streak}🔥`;
+  } else if (src) {
+    /* fed by another area — the number is derived, so tapping goes there instead of editing here */
+    const amt = habitAmount(h, d);
+    control = `<button class="checkbox ${met ? "" : ""}" data-action="habit-source-jump" data-id="${h.id}" aria-label="Open ${esc(areaOf(src.area).name)}">${I.check}</button>`;
+    sub = h.type === "quantity"
+      ? `${amt}${h.unit ? " " + h.unit : ""} of ${h.target}${h.unit ? " " + h.unit : ""} · from ${areaOf(src.area).name} · ${streak}🔥`
+      : `${met ? "Done" : "Not yet"} · from ${areaOf(src.area).name} · ${streak}🔥`;
   } else if (h.type === "avoid") {
     control = `<button class="checkbox avoid ${e.slip ? "slip" : "kept"}" data-action="habit-toggle" data-id="${h.id}" aria-label="${e.slip ? "Slipped" : "Kept"}">${e.slip ? I.x : I.check}</button>`;
     sub = `${streak} days clean${e.slip ? " · slipped" : ""}`;
@@ -1894,7 +1968,9 @@ function habitFormFields(h) {
       <option value="perWeek" ${c.mode === "perWeek" ? "selected" : ""}>A number of times per week</option>
     </select>`) +
     `<div class="fld-row"><label class="fld"><span>On these days</span>${weekdayPicker(c.days || [0, 1, 2, 3, 4])}</label>${fld("× per week", num("perWeek", c.perWeek || 3, 1))}</div>` +
-    `<label class="check-inline"><input type="checkbox" name="kind" ${h.kind === "workout" ? "checked" : ""}> <span>Workout habit (can log to Workout)</span></label>`;
+    fld("Filled in by <small class=\"soft\">— let an area log it for you</small>",
+      `<select name="kind"><option value="">Nothing — I tick it myself</option>${HABIT_SOURCES.map(x =>
+        `<option value="${x.id}" ${h.kind === x.id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>`);
 }
 function parseCadence(f) {
   const mode = f.cmode || "daily";
@@ -1910,9 +1986,14 @@ function habitDayControl(h, d, e) {
     </div>`;
   }
   if (h.type === "quantity") {
-    const amt = e.amount || 0, met = habitMet(h, d);
-    return `<div class="detail-control">
-      <div class="progress-line"><span>${amt} / ${h.target}${h.unit ? " " + h.unit : ""}</span>${barHtml(100 * amt / (h.target || 1), "#6a5ae0")}<b>${met ? "✓" : Math.round(100 * amt / (h.target || 1)) + "%"}</b></div>
+    const src = habitSource(h), amt = habitAmount(h, d), met = habitMet(h, d);
+    const bar = `<div class="progress-line"><span>${amt} / ${h.target}${h.unit ? " " + h.unit : ""}</span>${barHtml(100 * amt / (h.target || 1), "#6a5ae0")}<b>${met ? "✓" : Math.round(100 * amt / (h.target || 1)) + "%"}</b></div>`;
+    /* fed habits have no manual controls — the number comes from the area, so editing it here
+       would be a value the app ignores. Send them to the source instead. */
+    if (src) return `<div class="detail-control">${bar}
+      <div class="pill-row"><button class="btn ghost slim" data-action="habit-source-jump" data-id="${h.id}">${I[areaOf(src.area).icon]}Log it in ${esc(areaOf(src.area).name)}</button></div>
+    </div>`;
+    return `<div class="detail-control">${bar}
       <div class="pill-row"><button class="btn tiny ghost" data-action="habit-dec" data-id="${h.id}">−${habitStep(h)}</button>
         <input class="num-input" type="number" step="any" min="0" value="${amt}" data-change="habit-amount" data-id="${h.id}" aria-label="Amount">
         <button class="btn tiny ghost" data-action="habit-inc" data-id="${h.id}">+${habitStep(h)}</button>
@@ -1940,12 +2021,18 @@ function openHabitDetail(id) {
       <label class="fld"><span>What did you do? · ${niceDate(d, { month: "short", day: "numeric" })}</span>
         <textarea data-change="habit-note" data-id="${h.id}" placeholder="A line about how it went…" maxlength="600">${esc(e.note || "")}</textarea></label>
       <div class="fld"><span>Last 4 weeks · ${habitCompletion(h, 30)}% completion</span>${habitHistoryRow(h)}</div>
-      ${h.kind === "workout"
-        ? `<div class="pill-row">${workoutDone(d)
-            ? `<span class="soft small">${I.check} Completed by ${(state.workout.log[d] || []).length} workout session${(state.workout.log[d] || []).length > 1 ? "s" : ""}</span><button class="btn tiny ghost" data-action="habit-log-workout" data-id="${h.id}">Open workout</button>`
-            : `<button class="btn ghost slim" data-action="habit-log-workout" data-id="${h.id}">${I.dumbbell}Log a workout</button>`}
-           <span class="spacer"></span><button class="btn tiny ghost" data-action="habit-unmake-workout" data-id="${h.id}">Not a workout habit</button></div>`
-        : `<button class="btn ghost slim" data-action="habit-make-workout" data-id="${h.id}">${I.dumbbell}This is a workout habit</button>`}
+      ${(() => {
+        const src = habitSource(h);
+        if (!src) return `<p class="soft note">${I.link} Not linked to an area — you tick this one by hand. Add a source in <b>Edit</b> to have it fill itself in.</p>`;
+        const a = areaOf(src.area);
+        return `<div class="fed-note">
+          <span class="tile-ic" style="--a:${a.hue}">${I[a.icon]}</span>
+          <span class="row-txt"><b>Filled in by ${esc(a.name)}</b><small>${h.kind === "workout"
+            ? (workoutDone(d) ? `${(state.workout.log[d] || []).length} session${(state.workout.log[d] || []).length > 1 ? "s" : ""} logged that day` : "No session logged that day")
+            : `${habitAmount(h, d)}${h.unit ? " " + esc(h.unit) : ""} on that day`}</small></span>
+          <button class="btn tiny ghost" data-action="habit-source-jump" data-id="${h.id}">Open</button>
+        </div>`;
+      })()}
       <div class="fld"><span>Milestones</span>
         ${h.milestones.length ? `<ul class="ms-list">
           ${h.milestones.map(m => `<li class="${m.done ? "done" : ""}"><button class="checkbox sm" data-action="ms-toggle" data-h="${h.id}" data-m="${m.id}" aria-label="Toggle milestone">${I.check}</button><span>${esc(m.text)}</span><button class="icon-btn ghost" data-action="ms-del" data-h="${h.id}" data-m="${m.id}" aria-label="Delete milestone">${I.x}</button></li>`).join("")}
@@ -3274,6 +3361,12 @@ const ACTIONS = {
     setCursor("habits", todayIso()); toggleHabit(el.dataset.id); syncHabitToTask(el.dataset.id); render();
   },
   "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
+  "ag-uni": (el) => {
+    const k = state.university.tasks.find(x => x.id === el.dataset.id);
+    if (!k) return;
+    k.done = true; addXp(10, k.title);
+    save(); checkBadges(); render(); toast("Assignment done ✓");
+  },
   "ag-task": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); render(); } },
   "ag-reflect": openReflectModal,
   "todo-open": (el) => openTaskDetail(el.dataset.id),
@@ -3314,6 +3407,13 @@ const ACTIONS = {
   "habit-inc": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { addHabitAmount(h, dayCursor("habits"), habitStep(h)); render(); if ($("#modal").innerHTML) openHabitDetail(h.id); } },
   "habit-dec": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { addHabitAmount(h, dayCursor("habits"), -habitStep(h)); render(); openHabitDetail(h.id); } },
   "habit-skip": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.skip = !e.skip; if (!e.skip && !e.done && !e.note && !e.amount && !e.workoutId && !e.slip) delete h.log[dayCursor("habits")]; save(); render(); openHabitDetail(h.id); } },
+  "habit-source-jump": (el) => {
+    const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
+    const src = habitSource(h); if (!src) return;
+    if (src.area === "workout" || src.area === "health") setCursor(src.area, dayCursor("habits"));
+    closeModal(); go(src.area);
+    toast(`Log it here — it fills in “${h.name}” for you`);
+  },
   "habit-make-workout": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.kind = "workout"; save(); render(); openHabitDetail(h.id); } },
   "habit-unmake-workout": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { h.kind = ""; save(); render(); openHabitDetail(h.id); } },
   // workout habits are completed by logging a real session — jump to the Workout section for that day
@@ -3590,7 +3690,11 @@ const ACTIONS = {
   "book-fav": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.favorite = !b.favorite; if (b.favorite) toast("Added to favorites ♥"); save(); render(); openBookDetail(b.id); } },
   "book-page": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
-    if (b) { b.page = clamp((b.page || 0) + +el.dataset.d, 0, b.pages); state.reading.log[todayIso()] = true; save(); render(); openBookDetail(b.id); }
+    if (!b) return;
+    const from = b.page || 0;
+    b.page = clamp(from + +el.dataset.d, 0, b.pages);
+    logPages(b.page - from);
+    save(); render(); openBookDetail(b.id);
   },
   "book-start-d": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.status = "current"; b.started = todayIso(); save(); render(); openBookDetail(b.id); } },
   "book-finish-d": (el) => {
@@ -3791,8 +3895,8 @@ const SUBMITS = {
   "auth-signin": (f) => { doAuth("signin", f.email, f.password); return true; },
   "auth-signup": (f) => { doAuth("signup", f.email, f.password); return true; },
 
-  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: f.kind ? "workout" : "", goalIds: [], milestones: [], log: {} }); },
-  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = f.kind ? "workout" : ""; } },
+  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", goalIds: [], milestones: [], log: {} }); },
+  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
   "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", progress: [], habitIds: [], milestones: [] }); },
   "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; syncGoalMilestones(g); } },
@@ -3939,7 +4043,11 @@ const CHANGES = {
   },
   "book-page-set": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
-    if (b) { b.page = clamp(+el.value || 0, 0, b.pages); state.reading.log[todayIso()] = true; save(); render(); openBookDetail(b.id); }
+    if (!b) return;
+    const from = b.page || 0;
+    b.page = clamp(+el.value || 0, 0, b.pages);
+    logPages(b.page - from);
+    save(); render(); openBookDetail(b.id);
   },
   "book-notes": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);

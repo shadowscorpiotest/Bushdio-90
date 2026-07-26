@@ -64,6 +64,19 @@ Create a **free account** (Profile → **Account & sync**) to keep LifeHub in st
 
 > Photos & videos stay on-device for now (they live in IndexedDB); media cloud-sync is a follow-up. Sync runs on the **live site** over HTTPS (not the in-chat preview, whose sandbox blocks network calls — same as search).
 
+## 🔗 Log it once, it counts everywhere
+
+Areas feed each other, so the same fact is never entered twice. A habit can be **filled in by** the section that already records it — pick a source when you create or edit it:
+
+| Habit | Filled in by |
+|---|---|
+| *Read 20 pages* | pages you log on a book in **Reading** |
+| *Drink 2 L* / *Sleep 8 h* / *10k steps* | what you log in **Health** |
+| *Study 1 h* | minutes logged in **Skills or University** (both count) |
+| *Workout* | any session logged in **Workout** |
+
+Fed habits have no manual counter — the number is derived, so it can never drift from the truth, and tapping one takes you to the place that logs it. **Today's Focus** also shows university assignments due today (checking one there marks it done), and **Upcoming** now gathers deadlines from University, Work Prep *and* your goals.
+
 ## ↩️ Nothing is lost by accident
 
 Every delete — a habit, book, meal, memory, journal entry, expense, project — shows an **Undo** button for a few seconds and puts the record back exactly where it was. Attached photos and files are only destroyed once that window closes, so an undo restores the whole thing intact. Everything you can create you can also **edit**, including supplements, projects, connection goals, memories, expenses and class packages.
