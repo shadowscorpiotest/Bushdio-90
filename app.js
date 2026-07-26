@@ -878,7 +878,7 @@ const HABIT_SOURCES = [
 const habitSource = (h) => HABIT_SOURCES.find(x => x.id === h.kind) || null;
 const pagesOn = (d) => +state.reading.log[d] || 0;
 /* only forward progress counts — correcting a page number down shouldn't erase the day's reading */
-function logPages(delta) { if (delta > 0) { const t = todayIso(); state.reading.log[t] = pagesOn(t) + delta; } }
+function logPages(delta, d) { if (delta > 0) { const t = d || todayIso(); state.reading.log[t] = pagesOn(t) + delta; } }
 function sourceAmount(kind, d) {
   switch (kind) {
     case "reading": return pagesOn(d);
@@ -889,6 +889,49 @@ function sourceAmount(kind, d) {
     default:        return 0;
   }
 }
+/* A fed habit's "+" must write to the AREA it reads from. Writing to the habit instead would store a
+   number habitAmount() ignores, so the tap would silently do nothing — which is exactly what it did. */
+const currentBooks = () => state.reading.books.filter(b => b.status === "current");
+function applyPages(b, n, d) {
+  const from = b.page || 0;
+  b.page = clamp(from + n, 0, b.pages || 999999);
+  logPages(b.page - from, d);
+}
+function logToSource(h, n) {
+  const d = dayCursor("habits");
+  switch (h.kind) {
+    case "water": case "steps": case "sleep": {
+      const l = state.health.log[d] = healthOn(d);
+      l[h.kind] = Math.max(0, Math.round(((l[h.kind] || 0) + n) * 100) / 100);
+      if (h.kind === "sleep") l.sleep = clamp(l.sleep, 0, 24);
+      return true;
+    }
+    case "study": {
+      const day = state.study.log[d] = state.study.log[d] || {};
+      day.skills = Math.max(0, (day.skills || 0) + n);
+      return true;
+    }
+    case "reading": {
+      const cur = currentBooks();
+      if (!cur.length) { toast("Start reading a book first 📖"); go("reading"); return false; }
+      if (cur.length === 1) { applyPages(cur[0], n, d); return true; }
+      openBookPicker(n, d);          // more than one on the go — ask which
+      return false;
+    }
+    default: return false;
+  }
+}
+function openBookPicker(n, d) {
+  openModal(`
+    <header class="modal-head"><h3>Which book?</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body"><p class="soft" style="margin-bottom:10px">Add ${n} page${n > 1 ? "s" : ""} to…</p>
+      <ul class="link-list">${currentBooks().map(b => `
+        <li><button class="pick-book" data-action="book-log-pages" data-id="${b.id}" data-n="${n}" data-d="${d || todayIso()}">
+          <span class="book-cover sm ${b.cover ? "" : "ph"}" ${b.cover ? `style="background-image:url('${b.cover}')"` : ""}>${b.cover ? "" : esc(b.emoji || "📘")}</span>
+          <span class="row-txt"><b>${esc(b.title)}</b><small>page ${b.page || 0}${b.pages ? " of " + b.pages : ""}</small></span>
+        </button></li>`).join("")}</ul></div>`);
+}
+
 /* a fed habit's amount is DERIVED from its area — never entered twice, so it can't drift */
 function habitAmount(h, d) {
   if (h.kind && h.kind !== "workout") return sourceAmount(h.kind, d);
@@ -2466,7 +2509,22 @@ function readingStats() {
   const pages = books.reduce((a, b) => a + (b.page || 0), 0);
   const rated = done.filter(b => b.rating > 0);
   const avg = rated.length ? (rated.reduce((a, b) => a + b.rating, 0) / rated.length).toFixed(1) : "—";
-  return { done: done.length, pages, avg, favs: books.filter(b => b.favorite).length };
+  const t = todayIso();
+  const today = pagesOn(t);
+  const week = weekDates().reduce((a, d) => a + pagesOn(d), 0);
+  /* consecutive days ending today (or yesterday, so an unread today doesn't look like a broken streak) */
+  let streak = 0;
+  for (let i = pagesOn(t) > 0 ? 0 : 1; i < 400; i++) { if (pagesOn(addDays(t, -i)) > 0) streak++; else break; }
+  const logged = Object.keys(state.reading.log).filter(d => pagesOn(d) > 0);
+  const avgDay = logged.length ? Math.round(logged.reduce((a, d) => a + pagesOn(d), 0) / logged.length) : 0;
+  return { done: done.length, pages, avg, favs: books.filter(b => b.favorite).length, today, week, streak, avgDay };
+}
+function readingTrend() {
+  const t = todayIso();
+  return [...Array(14)].map((_, i) => {
+    const d = addDays(t, i - 13), v = pagesOn(d);
+    return { label: +d.slice(-2), value: v, tip: `${niceDate(d)} · ${v} page${v === 1 ? "" : "s"}` };
+  });
 }
 /* ---------- search & autofill (Reading + Movies) ---------- */
 let _searchResults = [];
@@ -2679,10 +2737,15 @@ function vReading() {
         <span class="big-ic" style="--a:#0091ff">${I.book}</span>
       </div>
       <div class="read-stats">
-        <div><b>${st.pages.toLocaleString()}</b><small>pages read</small></div>
-        <div><b>${st.avg}</b><small>avg rating</small></div>
-        <div><b>${st.favs}</b><small>favorites</small></div>
+        <div><b>${st.today}</b><small>pages today</small></div>
+        <div><b>${st.week}</b><small>this week</small></div>
+        <div><b>${st.streak}</b><small>day streak</small></div>
+        <div><b>${st.pages.toLocaleString()}</b><small>pages total</small></div>
       </div>`)}
+
+    ${card("span2", cardHead("Pages per day · last 14 days", `<button class="btn ghost tiny" data-nav="habits">Link a habit</button>`) + `
+      <div data-chart-type="bar" data-chart='${esc(JSON.stringify(readingTrend()))}' data-color="#0091ff" data-h="150" data-label="Pages read per day"></div>
+      <p class="chart-note">${I.book} ${st.avgDay ? `About <b>${st.avgDay}</b> pages on a day you read` : "Log pages on a book and they show up here"}${st.streak > 1 ? ` · <b>${st.streak}</b> days in a row` : ""}. A habit set to <b>Filled in by Reading</b> fills itself from this.</p>`)}
     ${card("span2", `
       <div class="tab-row">${tabs.map(([id, lbl]) => `<button class="tab ${tab === id ? "on" : ""}" data-action="reading-tab" data-id="${id}">${lbl}</button>`).join("")}
         <span class="spacer"></span>${addBtn("Add book", "book-add")}</div>
@@ -3404,8 +3467,22 @@ const ACTIONS = {
   "habit-open": (el) => openHabitDetail(el.dataset.id),
   "habit-toggle": (el) => { toggleHabit(el.dataset.id); syncHabitToTask(el.dataset.id); render(); },
   "habit-toggle-d": (el) => { toggleHabit(el.dataset.id); syncHabitToTask(el.dataset.id); render(); openHabitDetail(el.dataset.id); },
-  "habit-inc": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { addHabitAmount(h, dayCursor("habits"), habitStep(h)); render(); if ($("#modal").innerHTML) openHabitDetail(h.id); } },
-  "habit-dec": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { addHabitAmount(h, dayCursor("habits"), -habitStep(h)); render(); openHabitDetail(h.id); } },
+  "habit-inc": (el) => {
+    const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
+    const src = habitSource(h);
+    if (src) {
+      if (logToSource(h, habitStep(h))) { save(); render(); toast(`Logged in ${areaOf(src.area).name} ✓`); }
+      return;
+    }
+    addHabitAmount(h, dayCursor("habits"), habitStep(h)); render();
+    if ($("#modal").innerHTML) openHabitDetail(h.id);
+  },
+  "book-log-pages": (el) => {
+    const b = state.reading.books.find(x => x.id === el.dataset.id); if (!b) return;
+    applyPages(b, +el.dataset.n, el.dataset.d);
+    save(); closeModal(); render(); toast(`${el.dataset.n} pages logged in Reading ✓`);
+  },
+  "habit-dec": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h && !habitSource(h)) { addHabitAmount(h, dayCursor("habits"), -habitStep(h)); render(); openHabitDetail(h.id); } },
   "habit-skip": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.skip = !e.skip; if (!e.skip && !e.done && !e.note && !e.amount && !e.workoutId && !e.slip) delete h.log[dayCursor("habits")]; save(); render(); openHabitDetail(h.id); } },
   "habit-source-jump": (el) => {
     const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
