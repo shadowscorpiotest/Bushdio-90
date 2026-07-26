@@ -644,32 +644,7 @@ li.overdue .row-txt small { color: var(--danger); }
 .cover-preview.has-img { border-style: solid; }
 
 /* ---------- memories ---------- */
-.memory-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
-.memory {
-  margin: 0; position: relative; border-radius: 16px; overflow: hidden;
-  border: 1px solid var(--line);
-  background:
-    linear-gradient(160deg,
-      hsl(var(--h, 250) 70% 88%) 0%,
-      hsl(calc(var(--h, 250) + 40) 65% 80%) 100%);
-  min-height: 150px; display: flex; flex-direction: column; justify-content: flex-end;
-}
-:root[data-theme="dark"] .memory {
-  background:
-    linear-gradient(160deg,
-      hsl(var(--h, 250) 45% 30%) 0%,
-      hsl(calc(var(--h, 250) + 40) 40% 22%) 100%);
-}
-.memory-emoji { position: absolute; top: 12px; left: 14px; font-size: 30px; }
-.memory figcaption {
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  backdrop-filter: blur(6px);
-  padding: 10px 12px;
-}
-.memory figcaption b { font-size: 13.5px; display: block; }
-.memory figcaption small { color: var(--ink-3); font-size: 11.5px; }
-.memory figcaption p { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
-
+:root[data-theme="dark"] 
 /* ---------- journal ---------- */
 .journal-input {
   width: 100%; min-height: 130px; resize: vertical;
@@ -1331,14 +1306,9 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .card.daynav-card .day-nav { margin: 0; }
 
 /* memories: photos, detail gallery, on-this-day */
-.memory.has-photo { background: var(--surface-2); }
-.mem-photo { position: absolute; inset: 0; overflow: hidden; }
-.mem-photo img, .mem-photo video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.memory.has-photo figcaption { position: relative; z-index: 1; }
 /* the whole card is the tap target — three 34px buttons crammed over a photo was unusable on a phone */
 .mem-hit { position: absolute; inset: 0; z-index: 2; background: none; border: 0; cursor: pointer; border-radius: 16px; }
 .mem-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: -3px; }
-.memory figcaption { z-index: 1; }
 .mem-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 14px; }
 .mem-shot { position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
 .mem-shot img, .mem-shot video { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -1429,3 +1399,104 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .sync-badge.off::before { background: var(--warn, #b5760f); }
 @keyframes syncPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .sync-badge.syncing::before { animation: none; } }
+
+/* ============================================================
+   MEMORIES — editorial treatment
+   The photo is the subject, not a thumbnail. Titles are set in a serif so a memory reads
+   differently from the rest of the UI, and time is expressed as distance ("3 years ago")
+   with the calendar date demoted to a quiet second line.
+   ============================================================ */
+.mem-page { row-gap: 6px; }
+.mem-h { font-family: Iowan Old Style, "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: clamp(21px, 3.4vw, 27px); font-weight: 600; letter-spacing: -.01em; margin-top: 2px; }
+.mem-head .chip-row { margin-top: 12px; }
+
+/* timeline rules — scrolling should feel like moving back through your life */
+.mem-section { grid-column: span 2; display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.mem-rule { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 13px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.mem-rule span { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.mem-rule svg { width: 15px; height: 15px; color: #eda100; }
+.mem-rule::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.mem-rule small { flex: 0 0 auto; font-size: 12px; letter-spacing: 0; color: var(--ink-3);
+  font-variant-numeric: tabular-nums; }
+
+.mem-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 16px 14px; }
+.mem-grid.treasure { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+
+.mem-card { position: relative; margin: 0; display: flex; flex-direction: column; gap: 10px;
+  transition: transform .3s cubic-bezier(.22,.8,.28,1); }
+.mem-card:hover { transform: translateY(-3px); }
+.mem-hit { position: absolute; inset: 0; z-index: 3; background: none; border: 0; cursor: pointer; border-radius: 18px; }
+.mem-hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+
+.mc-frame { position: relative; border-radius: 18px; overflow: hidden; aspect-ratio: 4 / 5;
+  box-shadow: 0 14px 30px -18px rgba(20, 14, 60, .55); background: var(--surface-2); }
+.mem-card:hover .mc-frame { box-shadow: 0 20px 40px -18px rgba(20, 14, 60, .62); }
+.mem-card.big .mc-frame { aspect-ratio: 3 / 4; }
+
+.mc-photo { position: absolute; inset: 0; display: block; }
+.mc-photo img, .mc-photo video { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* no photo yet: a warm, per-memory gradient rather than a grey box */
+.mc-blank { position: absolute; inset: 0; display: grid; place-items: center;
+  background: linear-gradient(155deg, hsl(var(--h) 62% 72%), hsl(calc(var(--h) + 42) 58% 58%)); }
+:root[data-theme="dark"] .mc-blank { background: linear-gradient(155deg, hsl(var(--h) 42% 34%), hsl(calc(var(--h) + 42) 38% 24%)); }
+.mc-glyph { font-size: 46px; filter: drop-shadow(0 3px 10px rgba(0,0,0,.28)); }
+
+/* the scrim is what lets serif type sit on any photo and stay readable */
+.mc-scrim { position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to top, rgba(12,8,30,.82) 0%, rgba(12,8,30,.42) 32%, rgba(12,8,30,0) 62%); }
+
+.mc-caption { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 14px 13px; color: #fff; }
+.mc-title { font-family: Iowan Old Style, "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 17px; font-weight: 600; line-height: 1.22; letter-spacing: -.005em;
+  text-shadow: 0 1px 12px rgba(0,0,0,.4);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mem-card.big .mc-title { font-size: 20px; }
+.mc-when { margin-top: 4px; display: flex; flex-direction: column; line-height: 1.3; }
+.mc-when b { font-size: 12.5px; font-weight: 650; color: #fff; opacity: .95; }
+.mc-when span { font-size: 11.5px; color: rgba(255,255,255,.72); }
+
+.mc-badges { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; z-index: 2; }
+.mc-star, .mc-count { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 7px;
+  border-radius: 999px; font-size: 11.5px; font-weight: 700; color: #fff;
+  background: rgba(14, 10, 32, .55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.mc-star { color: #ffd45e; }
+.mc-star svg { width: 14px; height: 14px; }
+.mem-card.starred .mc-frame { box-shadow: 0 0 0 2px #ffd45e, 0 16px 34px -18px rgba(20, 14, 60, .6); }
+
+/* how it felt, as a badge on the image */
+.mc-feel { position: absolute; top: 10px; left: 10px; z-index: 2; width: 30px; height: 30px;
+  display: grid; place-items: center; font-size: 15px; border-radius: 50%;
+  background: rgba(255,255,255,.9); box-shadow: 0 3px 10px rgba(0,0,0,.22); }
+
+.mc-below { padding: 0 3px; display: flex; flex-direction: column; gap: 7px; }
+.mc-felt { font-family: Iowan Old Style, "Palatino Linotype", Palatino, Georgia, serif;
+  font-style: italic; font-size: 13.5px; line-height: 1.45; color: var(--ink-2);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mc-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mc-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+.mc-tags i { font-style: normal; font-size: 10.5px; font-weight: 600; color: var(--ink-3);
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+
+/* the detail sheet */
+.mem-sheet-head { align-items: flex-start; }
+.mem-sheet-title { font-family: Iowan Old Style, "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 21px; font-weight: 600; line-height: 1.2; }
+.mem-sheet-when { margin-top: 3px; font-size: 12.5px; color: var(--ink-3); }
+.mem-sheet-when b { color: var(--brand); font-weight: 700; }
+.mem-sheet-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mem-feel-big { font-size: 30px; line-height: 1; }
+.mem-felt-big { font-family: Iowan Old Style, "Palatino Linotype", Palatino, Georgia, serif;
+  font-style: italic; font-size: 17px; line-height: 1.5; color: var(--ink); margin-top: 14px; }
+.mem-note { margin-top: 10px; font-size: 14.5px; line-height: 1.6; color: var(--ink-2); white-space: pre-wrap; }
+
+@media (max-width: 640px) {
+  .mem-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px 11px; }
+  .mem-grid.treasure { grid-template-columns: 1fr; }
+  .mem-card.big .mc-frame { aspect-ratio: 4 / 3; }
+  /* the heading was wrapping to two lines while competing with the Add button */
+  .mem-head .goal-row { flex-direction: column; align-items: stretch; gap: 12px; }
+  .mem-head .goal-row .btn { align-self: flex-start; }
+  .mem-h { font-size: 22px; }
+}
