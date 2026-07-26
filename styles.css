@@ -1323,6 +1323,16 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .card.daynav-card { padding: 6px 10px; }
 .card.daynav-card .day-nav { margin: 0; }
 
+/* a habit that another area fills in for you */
+.fed-note { display: flex; align-items: center; gap: 11px; padding: 11px 12px; margin: 12px 0;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; }
+.fed-note .row-txt { flex: 1; min-width: 0; }
+.fed-note b { font-size: 14px; font-weight: 650; }
+.fed-note small { color: var(--ink-3); font-size: 12.5px; }
+
+/* overdue marker in the Upcoming card */
+.a-when.over { color: var(--danger); font-weight: 700; }
+
 /* combined study total — the two ledgers are one now */
 .study-total { display: block; margin-top: 9px; font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .study-total svg { width: 14px; height: 14px; flex: 0 0 auto; }
