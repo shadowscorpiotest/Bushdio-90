@@ -1446,7 +1446,7 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .mem-card.big .mc-frame { aspect-ratio: 3 / 4; }
 
 .mc-photo { position: absolute; inset: 0; display: block; }
-.mc-photo img, .mc-photo video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mc-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* no photo yet: a warm, per-memory gradient rather than a grey box */
 .mc-blank { position: absolute; inset: 0; display: grid; place-items: center;
   background: linear-gradient(155deg, hsl(var(--h) 62% 72%), hsl(calc(var(--h) + 42) 58% 58%)); }
@@ -1484,8 +1484,6 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .mc-play svg { width: 20px; height: 20px; margin-left: 2px; color: #fff; fill: #fff; stroke-width: 1.2; }
 .mem-card.big .mc-play { width: 56px; height: 56px; }
 .mem-card.big .mc-play svg { width: 24px; height: 24px; }
-/* the fallback cover for clips saved before posters existed — a frame, never a player */
-.mc-photo video { pointer-events: none; }
 
 /* how it felt, as a badge on the image */
 .mc-feel { position: absolute; top: 10px; left: 10px; z-index: 2; width: 30px; height: 30px;

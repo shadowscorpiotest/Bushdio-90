@@ -564,6 +564,11 @@ function clearAllMedia() {
   try { if (_mdb) { _mdb.close(); _mdb = null; } } catch {}
   try { indexedDB.deleteDatabase(MEDIA_DB); } catch {}
 }
+/* The record synced but the file didn't — photos and videos live in this browser's IndexedDB and are
+   not part of the encrypted snapshot yet. Say which of those two situations it is. */
+function mediaMissingText() {
+  return isSignedIn() ? "Added on another device" : "Not on this device";
+}
 /* swap [data-media] hosts for <img>/<video> from IndexedDB, after each render */
 async function hydrateMedia() {
   for (const host of $$("[data-media]")) {
@@ -574,22 +579,22 @@ async function hydrateMedia() {
       let url = _urlCache[id];
       if (!url) {
         const blob = await mediaGet(id);
-        if (!blob) { host.innerHTML = `<span class="media-missing">media unavailable</span>`; continue; }
+        if (!blob) { host.innerHTML = `<span class="media-missing">${mediaMissingText()}</span>`; continue; }
         url = URL.createObjectURL(blob); _urlCache[id] = url;
       }
       host.innerHTML = host.dataset.mediaKind === "video"
-        /* "still" hosts (cover art) show a frame, not a player — a control bar you can't reach is worse than none */
-        ? (host.dataset.mediaStill
-            ? `<video src="${url}" muted playsinline preload="metadata" tabindex="-1"></video>`
-            : `<video src="${url}" controls playsinline preload="metadata"></video>`)
+        ? `<video src="${url}" controls playsinline preload="metadata"></video>`
         : `<img src="${url}" alt="" loading="lazy">`;
-    } catch { host.innerHTML = `<span class="media-missing">media unavailable</span>`; }
+    } catch { host.innerHTML = `<span class="media-missing">${mediaMissingText()}</span>`; }
   }
   healPosters();
 }
-/* Clips saved before posters existed show their first frame, which is usually black. The first time
-   such a cover is drawn we capture a real frame from the stored blob, keep it, and swap it in — so an
-   old memory heals itself the moment you look at it, without touching the clip. */
+/* Posters are versioned so a capture bug can be undone on devices that already ran it. A ref whose
+   posterV is missing or behind is re-captured on sight and its old blob thrown away — which is how
+   the black covers written by the first version of videoPoster repair themselves. */
+const POSTER_V = 2;
+const posterOf = (ref) => (ref && ref.poster && ref.posterV === POSTER_V) ? ref.poster : "";
+
 let _healing = false;
 async function healPosters() {
   if (_healing) return;
@@ -598,17 +603,22 @@ async function healPosters() {
   _healing = true;
   let changed = false;
   for (const host of hosts) {
+    const id = host.dataset.posterHeal;
     host.removeAttribute("data-poster-heal");
-    const id = host.dataset.media;
     try {
       const blob = await mediaGet(id);
       if (!blob) continue;
       const poster = await new Promise(r => videoPoster(blob, r));
-      if (!poster) continue;
+      if (!poster) continue;                              // no picture is better than a black one
       const pid = await mediaPut(poster);
       const refs = mediaRefsFor(id);
       if (!refs.length) { mediaDelete(pid); continue; }   // the memory went away mid-capture
-      refs.forEach(ref => { ref.poster = pid; });
+      const stale = new Set();
+      refs.forEach(ref => {
+        if (ref.poster && ref.poster !== pid) stale.add(ref.poster);
+        ref.poster = pid; ref.posterV = POSTER_V;
+      });
+      stale.forEach(mediaDelete);
       changed = true;
     } catch {}
   }
@@ -644,49 +654,87 @@ function storeMediaFile(file, cb) {
     /* grab a still first so the clip has a real cover instead of a black rectangle */
     videoPoster(file, (poster) => {
       if (!poster) return finish(file);
-      mediaPut(poster).then(pid => finish(file, { poster: pid })).catch(() => finish(file));
+      mediaPut(poster).then(pid => finish(file, { poster: pid, posterV: POSTER_V })).catch(() => finish(file));
     });
   }
 }
-/* Capture a frame from just inside a video so it can stand in as cover art.
-   Frame zero is very often black, so seek a beat in first. Always calls back —
-   with null if the browser can't decode it — so an upload never stalls on this. */
+/* Is this canvas an actual picture, or the flat nothing you get from an undecoded video?
+   Flat AND dark is the signature of a frame that never arrived — a real dark shot still has
+   grain and spread. Sampled sparsely; this runs on every capture attempt. */
+function frameLooksBlank(g, w, h) {
+  let min = 255, max = 0, sum = 0, n = 0;
+  const d = g.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < d.length; i += 4 * 37) {
+    const l = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+    if (l < min) min = l;
+    if (l > max) max = l;
+    sum += l; n++;
+  }
+  return n === 0 || ((max - min) < 6 && sum / n < 24);
+}
+
+/* Capture a frame from a video so it can stand in as cover art. Always calls back — with null when
+   the browser genuinely can't give us a picture — so an upload never stalls on this.
+
+   Three things here exist specifically for iOS, which is where the first version of this failed:
+     · the element must be IN the document to decode at all (and `display:none` counts as absent),
+     · `preload="metadata"` yields dimensions but no frame to draw, so it has to be "auto",
+     · frames often don't arrive until the video has actually played, so we start muted inline
+       playback and pause once data lands.
+   And regardless of platform, a captured frame is CHECKED before it's accepted: a black rectangle
+   is worse than no poster, because it looks like a broken app rather than a missing feature. */
 function videoPoster(file, cb) {
-  let url = "", done = false;
+  let url = "", done = false, times = null, idx = 0;
   const v = document.createElement("video");
+  const c = document.createElement("canvas");
+
   const finish = (blob) => {
     if (done) return; done = true;
     clearTimeout(timer);
-    try { v.pause(); v.removeAttribute("src"); v.load(); } catch {}
+    try { v.pause(); v.removeAttribute("src"); v.load(); v.remove(); } catch {}
     if (url) URL.revokeObjectURL(url);
-    cb(blob);
+    cb(blob || null);
   };
-  /* if the seek never lands, take whatever frame is decoded rather than giving up */
-  const timer = setTimeout(() => { if (!done) grab(); }, 6000);
-  const grab = () => {
-    try {
-      const w = v.videoWidth, h = v.videoHeight;
-      if (!w || !h) return finish(null);
-      const scale = Math.min(1, 900 / Math.max(w, h));
-      const c = document.createElement("canvas");
-      c.width = Math.round(w * scale); c.height = Math.round(h * scale);
-      c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
-      c.toBlob(b => finish(b), "image/jpeg", 0.82);
-    } catch { finish(null); }
+  const timer = setTimeout(() => finish(null), 12000);
+
+  const capture = () => {
+    if (done) return;
+    const w = v.videoWidth, h = v.videoHeight;
+    if (!w || !h) return next();
+    const scale = Math.min(1, 900 / Math.max(w, h));
+    c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+    const g = c.getContext("2d");
+    try { g.drawImage(v, 0, 0, c.width, c.height); } catch { return finish(null); }
+    if (frameLooksBlank(g, c.width, c.height)) return next();   // undecoded, or a genuinely black moment
+    try { c.toBlob(b => finish(b), "image/jpeg", 0.82); } catch { finish(null); }
   };
+  /* try a few points spread through the clip rather than betting everything on one timestamp */
+  const next = () => {
+    if (done) return;
+    if (!times || idx >= times.length) return finish(null);
+    const t = times[idx++];
+    if (Math.abs(v.currentTime - t) < 0.03) capture();
+    else { try { v.currentTime = t; } catch { finish(null); } }
+  };
+
   try {
-    url = URL.createObjectURL(file);
-    v.muted = true; v.playsInline = true; v.preload = "metadata";
+    v.setAttribute("playsinline", ""); v.setAttribute("webkit-playsinline", ""); v.setAttribute("muted", "");
+    v.muted = true; v.playsInline = true; v.preload = "auto";
+    v.style.cssText = "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none";
     v.onerror = () => finish(null);
-    v.onseeked = grab;
+    v.onseeked = capture;
+    v.onloadedmetadata = () => { try { const p = v.play(); if (p && p.catch) p.catch(() => {}); } catch {} };
     v.onloadeddata = () => {
-      /* iOS won't always decode a frame for a video it has never played; muted+inline play is allowed */
-      try { const pr = v.play(); if (pr && pr.catch) pr.catch(() => {}); } catch {}
-      const d = v.duration;
-      if (d && isFinite(d) && d > 0.4) v.currentTime = Math.min(0.6, d / 3);
-      else grab();
+      if (times) return;                       // fires again after each seek; only plan once
+      try { v.pause(); } catch {}
+      const d = isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+      times = d > 1 ? [Math.min(0.7, d / 6), d * 0.35, d * 0.6] : [0];
+      next();
     };
+    url = URL.createObjectURL(file);
+    document.body.appendChild(v);
     v.src = url;
+    v.load();
   } catch { finish(null); }
 }
 /* store an arbitrary file (e.g. a book PDF/EPUB) in IndexedDB */
@@ -3357,15 +3405,18 @@ function memoryCard(m, big) {
   const ph = (m.photos || [])[0];
   const more = (m.photos || []).length - 1;
   const vid = !!ph && ph.kind === "video";
-  /* a video shows its captured poster frame; clips saved before posters existed fall back to a
-     muted, control-less first frame so the cover is a picture either way, never a dead player */
-  const cover = ph ? (vid && ph.poster ? { id: ph.poster, kind: "image" } : ph) : null;
+  /* A video shows its captured poster frame. If there isn't a current one — an old clip, or a file
+     the browser couldn't decode — the cover falls back to the same gradient a photo-less memory gets
+     and quietly asks for a capture. It never falls back to the <video> itself: an unplayed inline
+     video paints black on iOS, which is exactly the "broken app" look this is meant to avoid. */
+  const poster = vid ? posterOf(ph) : "";
+  const cover = ph ? (vid ? (poster ? { id: poster, kind: "image" } : null) : ph) : null;
   return `
   <article class="mem-card ${big ? "big" : ""} ${m.starred ? "starred" : ""}" style="--h:${m.hue}">
     <button class="mem-hit" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}"></button>
     <div class="mc-frame">
-      ${cover ? `<span class="mc-photo" data-media="${cover.id}" data-media-kind="${cover.kind}"${cover.kind === "video" ? ` data-media-still="1" data-poster-heal="1"` : ""}></span>`
-              : `<span class="mc-blank"><span class="mc-glyph">${esc(m.emoji || "📸")}</span></span>`}
+      ${cover ? `<span class="mc-photo" data-media="${cover.id}" data-media-kind="${cover.kind}"></span>`
+              : `<span class="mc-blank"${vid ? ` data-poster-heal="${ph.id}"` : ""}><span class="mc-glyph">${esc(m.emoji || "📸")}</span></span>`}
       <span class="mc-scrim" aria-hidden="true"></span>
       ${vid ? `<span class="mc-play" aria-hidden="true">${I.play}</span>` : ""}
       <span class="mc-badges">
@@ -3467,7 +3518,7 @@ function openMemoryDetail(id) {
 
       <div class="fld"><span>Who was there</span>${recEditor("memory", m.id, m.people || [])}</div>
       ${(m.tags || []).length ? `<span class="j-tags" style="margin-top:10px">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
-      <p class="soft note">${I.camera} Photos and videos stay on this device — they aren't part of sync or the JSON export yet. Videos up to ${VIDEO_MAX_MB}MB.</p>
+      <p class="soft note">${I.camera} Photos and videos stay on <b>the device you added them on</b> — the memory itself syncs, but the file doesn't yet, so on your other devices it reads <i>“Added on another device”</i>. They're also not in the JSON export. Videos up to ${VIDEO_MAX_MB}MB.</p>
     </div>
     <footer class="modal-foot">
       <button type="button" class="btn ghost" data-action="memory-edit" data-id="${m.id}">${I.edit}Edit</button>
