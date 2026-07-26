@@ -75,7 +75,9 @@ svg.ic { width: 20px; height: 20px; flex: 0 0 auto; }
 /* ---------- app layout ---------- */
 .app { display: flex; min-height: 100vh; }
 .shell { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.view { flex: 1; padding: 20px clamp(14px, 3vw, 32px) 96px; max-width: 1060px; width: 100%; margin: 0 auto; }
+.view { flex: 1; max-width: 1060px; width: 100%; margin: 0 auto;
+  padding: 20px max(clamp(14px, 3vw, 32px), env(safe-area-inset-right))
+           calc(96px + env(safe-area-inset-bottom)) max(clamp(14px, 3vw, 32px), env(safe-area-inset-left)); }
 
 /* ---------- sidebar ---------- */
 .sidebar {
@@ -83,7 +85,8 @@ svg.ic { width: 20px; height: 20px; flex: 0 0 auto; }
   flex: 0 0 var(--sidebar-w);
   background: var(--surface);
   border-right: 1px solid var(--line);
-  padding: 20px 14px;
+  padding: calc(20px + env(safe-area-inset-top)) 14px calc(20px + env(safe-area-inset-bottom))
+           max(14px, env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -132,7 +135,9 @@ svg.ic { width: 20px; height: 20px; flex: 0 0 auto; }
 /* ---------- topbar ---------- */
 .topbar {
   display: flex; align-items: center; gap: 12px;
-  padding: 14px clamp(14px, 3vw, 32px);
+  /* installed as a PWA the status bar is translucent, so the page owns that strip — inset for it */
+  padding: calc(14px + env(safe-area-inset-top)) max(clamp(14px, 3vw, 32px), env(safe-area-inset-right))
+           14px max(clamp(14px, 3vw, 32px), env(safe-area-inset-left));
   position: sticky; top: 0; z-index: 20;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   backdrop-filter: blur(12px);
@@ -1067,7 +1072,9 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .drawer-backdrop { place-items: stretch end; padding: 0; }
 .drawer {
   width: min(340px, 88vw); height: 100%; margin-left: auto;
-  background: var(--surface); padding: 18px;
+  background: var(--surface);
+  padding: calc(18px + env(safe-area-inset-top)) max(18px, env(safe-area-inset-right))
+           calc(18px + env(safe-area-inset-bottom)) 18px;
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
 }
@@ -1110,8 +1117,9 @@ li.done .checkbox { animation: checkPop .3s ease; }
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 90;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
-  pointer-events: none;
+  pointer-events: none;   /* plain toasts must never block a tap … */
 }
+.toast.has-undo { pointer-events: auto; }   /* … but one with an Undo button has to be tappable */
 .toast {
   background: var(--ink); color: var(--bg);
   border-radius: 999px; padding: 9px 18px;
@@ -1322,6 +1330,14 @@ li.done .checkbox { animation: checkPop .3s ease; }
 /* standalone date bar on the logging views — slim, no card weight */
 .card.daynav-card { padding: 6px 10px; }
 .card.daynav-card .day-nav { margin: 0; }
+
+/* pick-a-book sheet (a fed reading habit with more than one book on the go) */
+.pick-book { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+  padding: 9px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2);
+  transition: border-color .15s, transform .15s; }
+.pick-book:hover { border-color: var(--brand); transform: translateY(-1px); }
+.pick-book .row-txt { flex: 1; min-width: 0; }
+.book-cover.sm.ph { display: grid; place-items: center; }
 
 /* a habit that another area fills in for you */
 .fed-note { display: flex; align-items: center; gap: 11px; padding: 11px 12px; margin: 12px 0;
