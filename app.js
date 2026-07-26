@@ -131,7 +131,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 4;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 5;                             // bump when you append a step to MIGRATIONS
 let state = null;
 
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
@@ -166,7 +166,7 @@ function defaultState() {
     projects: [],              // {id,name,emoji,status,progress,note}
     finance: { entries: [], importedClasses: [] }, // entries {id,date,type:income|expense,amount,category,note}
     social: { items: [], log: {} }, // items {id,title,emoji,target}; log[weekKey]={itemId:count}
-    memories: [],              // {id,date,title,note,emoji,hue,photos:[],tags:[]}
+    memories: [],              // {id,date,title,note,felt,emoji,hue,photos:[],tags:[],people:[],starred}
     journal: [],               // {id,date,text,mood,tags:[]}
   };
 }
@@ -420,6 +420,15 @@ const MIGRATIONS = [
       if (!Array.isArray(m.tags)) m.tags = [];
     });
     delete s.integrations;
+  },
+
+  /* 4 → 5 · a memory is more than a row: how it felt, who was there, and whether it's treasured */
+  (s) => {
+    (s.memories || []).forEach(m => {
+      if (m.felt == null) m.felt = "";
+      if (!Array.isArray(m.people)) m.people = [];
+      if (m.starred == null) m.starred = false;
+    });
   },
 ];
 
@@ -2517,6 +2526,39 @@ function vSkills() {
 }
 
 /* ---------- reading ---------- */
+/* Memory time is emotional, not clerical: lead with distance ("3 years ago"), keep the exact date
+   as a quiet second line. Deliberately no seasons — "three summers ago" reads beautifully but is
+   wrong half the year and in the southern hemisphere. */
+function memWhen(dateIso) {
+  const days = Math.round((new Date(todayIso() + "T12:00:00") - new Date(dateIso + "T12:00:00")) / DAY_MS);
+  let rel;
+  if (days <= 0) rel = "today";
+  else if (days === 1) rel = "yesterday";
+  else if (days < 7) rel = `${days} days ago`;
+  else if (days < 14) rel = "last week";
+  else if (days < 35) rel = `${Math.round(days / 7)} weeks ago`;
+  else if (days < 365) { const m = Math.max(1, Math.round(days / 30)); rel = m === 1 ? "last month" : `${m} months ago`; }
+  else { const y = Math.floor(days / 365); rel = y === 1 ? "a year ago" : `${y} years ago`; }
+  const exact = days < 35
+    ? niceDate(dateIso, { weekday: "long", month: "long", day: "numeric" })
+    : niceDate(dateIso, { month: "long", year: "numeric" });
+  return { rel, exact, days };
+}
+/* group into a timeline so scrolling feels like moving back through your life */
+function memGroups(list) {
+  const thisYear = todayIso().slice(0, 4), thisMonth = todayIso().slice(0, 7);
+  const buckets = new Map();
+  list.forEach(m => {
+    const y = m.date.slice(0, 4);
+    const key = m.date.slice(0, 7) === thisMonth ? "This month"
+      : y === thisYear ? niceDate(m.date, { month: "long" })
+      : y;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(m);
+  });
+  return [...buckets.entries()];
+}
+
 function readingStats() {
   const books = state.reading.books;
   const done = books.filter(b => b.status === "done");
@@ -2700,12 +2742,26 @@ function recChips(list) {
     ${extra > 0 ? `<span class="rec-more">+${extra}</span>` : ""}
   </div>`;
 }
+/* Books and films call them "recommenders", a memory calls them "who was there" — same list of
+   humans, one resolver. Pass C turns these strings into real people shared with Social. */
+function peopleListFor(kind, id) {
+  if (kind === "memory") { const m = state.memories.find(x => x.id === id); if (!m) return null; m.people = m.people || []; return m.people; }
+  const item = kind === "media" ? state.media.find(x => x.id === id) : state.reading.books.find(x => x.id === id);
+  if (!item) return null;
+  item.recommenders = item.recommenders || [];
+  return item.recommenders;
+}
+function reopenDetail(kind, id) {
+  if (kind === "memory") return openMemoryDetail(id);
+  return (kind === "media" ? openMediaDetail : openBookDetail)(id);
+}
+
 /* editable recommenders block for the detail modal */
 function recEditor(kind, id, list) {
   return `<div class="rec-edit">
     <span class="rec-label">${I.heart}Recommended by</span>
     <div class="rec-chips">
-      ${(list || []).map((n, i) => `<span class="rec-chip lg"><span class="rec-ava" style="--rc:${nameColor(n)}">${esc(recInitials(n))}</span><em>${esc(n)}</em><button type="button" class="rec-x" data-action="rec-del" data-kind="${kind}" data-id="${id}" data-i="${i}" aria-label="Remove ${esc(n)}">${I.x}</button></span>`).join("") || `<small class="soft">No one yet — add who suggested it.</small>`}
+      ${(list || []).map((n, i) => `<span class="rec-chip lg"><span class="rec-ava" style="--rc:${nameColor(n)}">${esc(recInitials(n))}</span><em>${esc(n)}</em><button type="button" class="rec-x" data-action="rec-del" data-kind="${kind}" data-id="${id}" data-i="${i}" aria-label="Remove ${esc(n)}">${I.x}</button></span>`).join("") || `<small class="soft">No one yet.</small>`}
     </div>
     <form class="rec-add" data-submit="rec-add">
       <input type="hidden" name="kind" value="${kind}"><input type="hidden" name="id" value="${id}">
@@ -3180,55 +3236,105 @@ function vSocial() {
 }
 
 /* ---------- memories ---------- */
+/* One memory, editorial treatment: the photo IS the subject, the title sits in serif over a scrim,
+   and time is expressed as distance rather than a timestamp. */
+function memoryCard(m, big) {
+  const w = memWhen(m.date);
+  const ph = (m.photos || [])[0];
+  const more = (m.photos || []).length - 1;
+  return `
+  <article class="mem-card ${big ? "big" : ""} ${m.starred ? "starred" : ""}" style="--h:${m.hue}">
+    <button class="mem-hit" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}"></button>
+    <div class="mc-frame">
+      ${ph ? `<span class="mc-photo" data-media="${ph.id}" data-media-kind="${ph.kind}"></span>`
+           : `<span class="mc-blank"><span class="mc-glyph">${esc(m.emoji || "📸")}</span></span>`}
+      <span class="mc-scrim" aria-hidden="true"></span>
+      <span class="mc-badges">
+        ${m.starred ? `<span class="mc-star" title="Treasured">${I.star}</span>` : ""}
+        ${more > 0 ? `<span class="mc-count">+${more}</span>` : ""}
+      </span>
+      ${ph ? `<span class="mc-feel" title="${esc(m.emoji)}">${esc(m.emoji || "📸")}</span>` : ""}
+      <div class="mc-caption">
+        <h3 class="mc-title">${esc(m.title)}</h3>
+        <p class="mc-when"><b>${esc(w.rel)}</b><span>${esc(w.exact)}</span></p>
+      </div>
+    </div>
+    ${(m.felt || (m.people || []).length || (m.tags || []).length) ? `<div class="mc-below">
+      ${m.felt ? `<p class="mc-felt">“${esc(m.felt)}”</p>` : ""}
+      <div class="mc-meta">
+        ${(m.people || []).length ? recChips(m.people) : ""}
+        ${(m.tags || []).length ? `<span class="mc-tags">${m.tags.slice(0, 3).map(t => `<i>${esc(t)}</i>`).join("")}</span>` : ""}
+      </div>
+    </div>` : ""}
+  </article>`;
+}
+
 function vMemories() {
   const q = (ui.memorySearch || "").trim().toLowerCase();
   const all = [...state.memories].sort((a, b) => b.date < a.date ? -1 : 1);
-  const mem = q ? all.filter(m => [m.title, m.note, ...(m.tags || [])].join(" ").toLowerCase().includes(q)) : all;
-  const t = todayIso().slice(5);
-  const onThisDay = all.filter(m => m.date.slice(5) === t && m.date !== todayIso());
+  const matches = (m) => [m.title, m.note, m.felt, ...(m.tags || []), ...(m.people || [])].join(" ").toLowerCase().includes(q);
+  const list = q ? all.filter(matches) : all;
+  const treasured = q ? [] : all.filter(m => m.starred);
+  const timeline = q ? [["Results", list]] : memGroups(all.filter(m => !m.starred));
+  const md = todayIso().slice(5);
+  const onThisDay = all.filter(m => m.date.slice(5) === md && m.date !== todayIso());
   const tags = [...new Set(all.flatMap(m => m.tags || []))].slice(0, 12);
+
   return `
-  <div class="grid">
-    ${card("span2", cardHead(`Your memories <small class="soft">${all.length}</small>`, addBtn("Add memory", "memory-add")) + `
-      ${all.length ? `<div class="search-bar">
-        <input type="search" placeholder="Search your memories…" value="${esc(ui.memorySearch || "")}" data-change="memory-search" aria-label="Search memories">
+  <div class="grid mem-page">
+    ${card("span2 mem-head", `
+      <div class="goal-row">
+        <div>
+          <p class="soft">${all.length} memor${all.length === 1 ? "y" : "ies"} kept${treasured.length ? ` · ${treasured.length} treasured` : ""}</p>
+          <h3 class="mem-h">Moments worth keeping</h3>
+        </div>
+        ${addBtn("Add memory", "memory-add")}
+      </div>
+      ${all.length ? `<div class="search-bar" style="margin-top:14px">
+        <input type="search" placeholder="Search a name, a feeling, a place…" value="${esc(ui.memorySearch || "")}" data-change="memory-search" aria-label="Search memories">
         ${q ? `<button class="btn ghost tiny" data-action="memory-search-clear">Clear</button>` : ""}
       </div>
-      ${tags.length ? `<div class="chip-row" style="margin-bottom:12px">${tags.map(x => `<button class="tag ${q === x.toLowerCase() ? "on" : ""}" data-action="memory-tag-filter" data-t="${esc(x)}">${esc(x)}</button>`).join("")}</div>` : ""}` : ""}
-      ${mem.length ? `<div class="memory-grid">
-        ${mem.map(m => `
-          <figure class="memory ${(m.photos || []).length ? "has-photo" : ""}" style="--h:${m.hue}">
-            ${(m.photos || []).length
-              ? `<span class="mem-photo" data-media="${m.photos[0].id}" data-media-kind="${m.photos[0].kind}"><span class="media-missing">…</span></span>`
-              : `<span class="memory-emoji">${esc(m.emoji)}</span>`}
-            <figcaption>
-              <b>${esc(m.title)}</b><small>${niceDate(m.date, { month: "short", day: "numeric", year: "numeric" })}${(m.photos || []).length > 1 ? ` · ${m.photos.length} photos` : ""}</small>
-              ${m.note ? `<p>${esc(m.note)}</p>` : ""}
-              ${(m.tags || []).length ? `<span class="j-tags">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
-            </figcaption>
-            <button class="mem-hit" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}"></button>
-          </figure>`).join("")}
-      </div>` : (q ? `<p class="soft small" style="padding:8px 2px">Nothing matches “${esc(q)}”.</p>`
-                   : emptyMsg("camera", "Collect moments, not things.", addBtn("Save your first memory", "memory-add")))}`)}
+      ${tags.length && !q ? `<div class="chip-row">${tags.map(x => `<button class="tag" data-action="memory-tag-filter" data-t="${esc(x)}">${esc(x)}</button>`).join("")}</div>` : ""}` : ""}`)}
 
-    ${onThisDay.length ? card("span2", cardHead("On this day") + `
-      <ul class="mini-agenda">${onThisDay.map(m => `<li data-action="memory-open" data-id="${m.id}">
-        <span class="a-ic" style="--a:#00a2c7">${esc(m.emoji)}</span>
-        <span class="row-txt"><b>${esc(m.title)}</b><small>${niceDate(m.date, { year: "numeric", month: "long", day: "numeric" })}</small></span>
-      </li>`).join("")}</ul>`) : ""}
+    ${onThisDay.length && !q ? card("span2 mem-otd", cardHead("On this day") + `
+      <div class="mem-grid">${onThisDay.map(m => memoryCard(m)).join("")}</div>`) : ""}
+
+    ${treasured.length ? `<section class="mem-section span2">
+      <h2 class="mem-rule"><span>${I.star} Treasured</span></h2>
+      <div class="mem-grid treasure">${treasured.map(m => memoryCard(m, true)).join("")}</div>
+    </section>` : ""}
+
+    ${list.length ? timeline.filter(([, items]) => items.length).map(([label, items]) => `
+      <section class="mem-section span2">
+        <h2 class="mem-rule"><span>${esc(label)}</span><small>${items.length}</small></h2>
+        <div class="mem-grid">${items.map(m => memoryCard(m)).join("")}</div>
+      </section>`).join("")
+      : `<div class="span2">${q
+          ? `<p class="soft small" style="padding:10px 2px">Nothing matches “${esc(q)}”.</p>`
+          : emptyMsg("camera", "Collect moments, not things.", addBtn("Save your first memory", "memory-add"))}</div>`}
   </div>`;
 }
 
-/* a memory, full size — photos, note, tags */
+/* A memory, full size — the photo leads, then how it felt, who was there, and the note. */
 function openMemoryDetail(id) {
   const m = state.memories.find(x => x.id === id);
   if (!m) { closeModal(); return; }
+  const w = memWhen(m.date);
   openModal(`
-    <header class="modal-head"><h3>${esc(m.emoji)} ${esc(m.title)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
-    <div class="modal-body">
-      <p class="soft small">${niceDate(m.date, { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
-      ${m.note ? `<p style="margin-top:8px">${esc(m.note)}</p>` : ""}
-      ${(m.tags || []).length ? `<span class="j-tags" style="margin-top:8px">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
+    <header class="modal-head mem-sheet-head">
+      <div><h3 class="mem-sheet-title">${esc(m.title)}</h3>
+        <p class="mem-sheet-when"><b>${esc(w.rel)}</b> · ${esc(w.exact)}</p></div>
+      <button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button>
+    </header>
+    <div class="modal-body mem-sheet">
+      <div class="mem-sheet-top">
+        <button class="btn tiny ${m.starred ? "good" : "ghost"}" data-action="memory-star" data-id="${m.id}">${I.star}${m.starred ? "Treasured" : "Treasure this"}</button>
+        <span class="mem-feel-big" title="how it felt">${esc(m.emoji || "📸")}</span>
+      </div>
+
+      ${m.felt ? `<p class="mem-felt-big">“${esc(m.felt)}”</p>` : ""}
+      ${m.note ? `<p class="mem-note">${esc(m.note)}</p>` : ""}
+
       <div class="mem-gallery">
         ${(m.photos || []).map(ph => `<span class="mem-shot">
           <span class="media-host" data-media="${ph.id}" data-media-kind="${ph.kind}"><span class="media-missing">…</span></span>
@@ -3239,7 +3345,10 @@ function openMemoryDetail(id) {
           ${I.camera}<span>Add photo<br>or video</span>
         </label>
       </div>
-      <p class="soft note">${I.camera} Photos and videos are stored on this device only — they aren't part of sync or the JSON export yet. Videos up to ${VIDEO_MAX_MB}MB.</p>
+
+      <div class="fld"><span>Who was there</span>${recEditor("memory", m.id, m.people || [])}</div>
+      ${(m.tags || []).length ? `<span class="j-tags" style="margin-top:10px">${m.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
+      <p class="soft note">${I.camera} Photos and videos stay on this device — they aren't part of sync or the JSON export yet. Videos up to ${VIDEO_MAX_MB}MB.</p>
     </div>
     <footer class="modal-foot">
       <button type="button" class="btn ghost" data-action="memory-edit" data-id="${m.id}">${I.edit}Edit</button>
@@ -3742,6 +3851,7 @@ const ACTIONS = {
       fld("Title", txt("title", "", x.title)) +
       fld("Note", `<textarea name="note" maxlength="240">${esc(x.note || "")}</textarea>`) +
       `<div class="fld-row">${fld("Emoji", txt("emoji", "📸", x.emoji || "📸", false))}${fld("Date", `<input type="date" name="date" value="${x.date}" required>`)}</div>` +
+      fld("How did it feel?", txt("felt", "e.g. Like the whole summer was ours", x.felt || "", false)) +
       fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "e.g. family, travel", (x.tags || []).join(", "), false)) +
       `<input type="hidden" name="id" value="${x.id}">`, "memory-edit");
   },
@@ -3884,13 +3994,11 @@ const ACTIONS = {
 
   /* recommenders (shared by books + media) */
   "rec-del": (el) => {
-    const list = el.dataset.kind === "media"
-      ? (state.media.find(x => x.id === el.dataset.id) || {}).recommenders
-      : (state.reading.books.find(x => x.id === el.dataset.id) || {}).recommenders;
+    const list = peopleListFor(el.dataset.kind, el.dataset.id);
     if (!list) return;
     list.splice(+el.dataset.i, 1);
     save();
-    (el.dataset.kind === "media" ? openMediaDetail : openBookDetail)(el.dataset.id);
+    reopenDetail(el.dataset.kind, el.dataset.id);
   },
 
   /* media */
@@ -3986,9 +4094,16 @@ const ACTIONS = {
   "memory-add": () => formModal("New memory",
     fld("Title", txt("title", "e.g. Sunset picnic")) + fld("Note", `<textarea name="note" placeholder="What made it special?" maxlength="240"></textarea>`) +
     `<div class="fld-row">${fld("Emoji", txt("emoji", "🌅", "🌅", false))}${fld("Date", `<input type="date" name="date" value="${todayIso()}" required>`)}</div>` +
+    fld("How did it feel? <small class=\"soft\">— one line, in your words</small>", txt("felt", "e.g. Like the whole summer was ours", "", false)) +
+    fld("Who was there <small class=\"soft\">— comma separated</small>", txt("people", "e.g. Mum, Sara", "", false)) +
     fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "e.g. family, travel", "", false)) +
-    `<p class="soft note">${I.camera} Save it, then open the memory to add photos.</p>`, "memory-add"),
+    `<p class="soft note">${I.camera} Save it, then open the memory to add photos and video.</p>`, "memory-add"),
   "memory-open": (el) => openMemoryDetail(el.dataset.id),
+  "memory-star": (el) => {
+    const m = state.memories.find(x => x.id === el.dataset.id); if (!m) return;
+    m.starred = !m.starred; save(); render(); openMemoryDetail(m.id);
+    toast(m.starred ? "Treasured ⭐" : "Removed from treasured");
+  },
   "memory-search-clear": () => { ui.memorySearch = ""; render(); },
   "memory-tag-filter": (el) => { const t = el.dataset.t.toLowerCase(); ui.memorySearch = ui.memorySearch === t ? "" : t; render(); },
   "memory-photo-del": (el) => {
@@ -4101,7 +4216,7 @@ const SUBMITS = {
   "sup-edit": (f) => { const x = state.nutrition.supplements.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.dose = f.dose || ""; x.every = ["day","week","month"].includes(f.every) ? f.every : x.every; } },
   "project-edit": (f) => { const x = state.projects.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.status = f.status || x.status; x.note = f.note || ""; if (x.status === "Done") x.progress = 100; } },
   "social-edit": (f) => { const x = state.social.items.find(v => v.id === f.id); if (x) { x.title = f.title; x.emoji = f.emoji || x.emoji; x.target = Math.max(1, +f.target || 1); } },
-  "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; x.tags = parseTags(f.tags); } },
+  "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; x.tags = parseTags(f.tags); x.felt = f.felt || ""; } },
   "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
   "class-edit": (f) => { const x = state.workout.classes.find(v => v.id === f.id); if (x) { x.name = f.name; x.total = Math.max(1, +f.total || x.total); x.price = +f.price || 0; x.start = f.start || x.start; } },
   "sup-add": (f) => { state.nutrition.supplements.push({ id: uid(), name: f.name, emoji: f.emoji || "💊", dose: f.dose || "", every: ["day", "week", "month"].includes(f.every) ? f.every : "day" }); },
@@ -4125,10 +4240,8 @@ const SUBMITS = {
   },
   "rec-add": (f) => {
     if (!f.name) return true;
-    const item = f.kind === "media"
-      ? state.media.find(x => x.id === f.id)
-      : state.reading.books.find(x => x.id === f.id);
-    if (item) { item.recommenders = item.recommenders || []; if (item.recommenders.length < 12) item.recommenders.push(f.name); }
+    const list = peopleListFor(f.kind, f.id);
+    if (list && list.length < 12) list.push(f.name);
     return true;
   },
   "media-edit": (f) => {
@@ -4149,7 +4262,7 @@ const SUBMITS = {
     addXp(3, type === "income" ? "Income logged" : "Expense logged");
   },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
-  "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360), photos: [], tags: parseTags(f.tags) }); addXp(10, "Memory saved"); },
+  "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360), photos: [], tags: parseTags(f.tags), felt: f.felt || "", people: parseTags(f.people), starred: false }); addXp(10, "Memory saved"); },
   "todo-add": (f) => {
     if (!f.text) return;
     let habitId = "", supId = "", areaId = "";
@@ -4304,9 +4417,7 @@ function bindEvents() {
       if (!keepOpen) closeModal();
       checkBadges();
       render();
-      if (keepOpen && form.dataset.submit === "rec-add") {
-        (data.kind === "media" ? openMediaDetail : openBookDetail)(data.id);
-      }
+      if (keepOpen && form.dataset.submit === "rec-add") reopenDetail(data.kind, data.id);
     }
   });
   document.addEventListener("change", (e) => {
