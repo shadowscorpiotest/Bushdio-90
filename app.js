@@ -961,7 +961,11 @@ const REFLECTION_PROMPTS = [
 const reflectionOfDay = () => REFLECTION_PROMPTS[Math.floor(Date.now() / DAY_MS) % REFLECTION_PROMPTS.length];
 
 /* ----- rollups ----- */
-const healthToday = () => state.health.log[todayIso()] || {};
+/* Date-aware accessors. The *On(d) forms back the day-navigable views; the *Today() wrappers stay
+   for missions, badges, the dashboard and area progress, which always mean "actually today". */
+const healthOn = (d) => state.health.log[d] || {};
+const healthToday = () => healthOn(todayIso());
+const weekOfDate = (d) => { const m = mondayOf(d); return [...Array(7)].map((_, i) => addDays(m, i)); };
 function workoutsThisWeek() {
   return weekDates().reduce((n, d) => n + ((state.workout.log[d] || []).length ? 1 : 0), 0);
 }
@@ -969,11 +973,14 @@ function studyMinutesToday() {
   const t = todayIso();
   return (state.skills.log[t] || 0) + (state.university.log[t] || 0);
 }
-function nutritionToday() {
-  const checked = state.nutrition.log[todayIso()] || {};
+function nutritionOn(d) {
+  const checked = state.nutrition.log[d] || {};
   const tot = { kcal: 0, protein: 0, carbs: 0, fats: 0, fiber: 0 };
   state.nutrition.meals.forEach(m => { if (checked[m.id]) { tot.kcal += m.kcal; tot.protein += m.protein; tot.carbs += m.carbs; tot.fats += m.fats; tot.fiber += (m.fiber || 0); } });
   return tot;
+}
+function nutritionToday() {
+  return nutritionOn(todayIso());
 }
 /* per-day meal photos live in nutrition.photos[date][mealId] = [{id,kind}] */
 function mealPhotos(t, id) { return ((state.nutrition.photos[t] || {})[id]) || []; }
@@ -993,7 +1000,8 @@ function socialWeek() {
   const target = state.social.items.reduce((n, it) => n + it.target, 0);
   return { log, done, target };
 }
-function journalToday() { return state.journal.find(j => j.date === todayIso()); }
+const journalOn = (d) => state.journal.find(j => j.date === d);
+function journalToday() { return journalOn(todayIso()); }
 
 function areaProgressToday(id) {
   // 0..100 "today / this period" score per area, for dashboard tiles
@@ -1924,24 +1932,26 @@ function openGoalHabits(id) {
 
 /* ---------- health ---------- */
 function vHealth() {
-  const g = state.health.goals, l = healthToday();
-  const week = weekDates();
-  const stepsData = week.map((d, i) => {
-    const v = (state.health.log[d] || {}).steps || 0;
+  const d = dayCursor("health"), isToday = d === todayIso();
+  const g = state.health.goals, l = healthOn(d);
+  const week = weekOfDate(d);
+  const stepsData = week.map((x, i) => {
+    const v = (state.health.log[x] || {}).steps || 0;
     return { label: WD_SHORT[i], value: v, tip: `${WD_SHORT[i]} · ${v.toLocaleString()} steps` };
   });
   const moods = ["😄", "🙂", "😌", "😐", "🥱", "😔", "😤"];
   return `
   <div class="grid">
+    ${card("span2 daynav-card", dayNav("health"))}
     ${card("center", `
-      ${ring(100 * (l.steps || 0) / g.steps, { size: 130, sw: 10, color: "#30a46c", center: (l.steps || 0).toLocaleString(), sub: `/ ${g.steps.toLocaleString()} steps`, label: "steps today" })}
+      ${ring(100 * (l.steps || 0) / g.steps, { size: 130, sw: 10, color: "#30a46c", center: (l.steps || 0).toLocaleString(), sub: `/ ${g.steps.toLocaleString()} steps`, label: isToday ? "steps today" : "steps that day" })}
       <div class="pill-row">
         <button class="btn ghost" data-action="steps-add" data-n="500">+500</button>
         <button class="btn ghost" data-action="steps-add" data-n="2000">+2,000</button>
         <button class="btn ghost" data-action="health-goals">${I.sliders}Goals</button>
       </div>`)}
 
-    ${card("", cardHead("Today's log") + `
+    ${card("", cardHead((isToday ? "Today's" : niceDate(d, { weekday: "long" }) + "'s") + " log") + `
       <ul class="log-list">
         <li><span class="tile-ic" style="--a:#00a2c7">${I.drop}</span><span class="row-txt"><b>Water</b><small>${(l.water || 0).toFixed(2)} / ${g.water} L</small></span>
           <span class="pill-row"><button class="btn tiny" data-action="water-add" data-n="0.25">+0.25</button><button class="btn tiny" data-action="water-add" data-n="0.5">+0.5</button></span></li>
@@ -1952,7 +1962,7 @@ function vHealth() {
       </ul>`)}
 
     ${card("span2", cardHead("Steps this week") + `
-      <div data-chart-type="bar" data-chart='${esc(JSON.stringify(stepsData))}' data-goal="${g.steps}" data-color="#30a46c" data-h="160" data-label="Steps this week"></div>
+      <div data-chart-type="bar" data-chart='${esc(JSON.stringify(stepsData))}' data-goal="${g.steps}" data-color="#30a46c" data-h="160" data-label="Steps that week"></div>
       <p class="chart-note">${I.target} goal line at ${g.steps.toLocaleString()} steps</p>`)}
   </div>`;
 }
@@ -2136,8 +2146,8 @@ function macroBar(label, value, goal, color) {
   </div>`;
 }
 function vNutrition() {
-  const t = todayIso();
-  const g = state.nutrition.goals, tot = nutritionToday();
+  const t = dayCursor("nutrition"), isToday = t === todayIso();
+  const g = state.nutrition.goals, tot = nutritionOn(t);
   const checked = state.nutrition.log[t] || {};
   const kcalPct = g.kcal ? Math.round(100 * tot.kcal / g.kcal) : 0;
   const meals = [...state.nutrition.meals].sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : 1);
@@ -2145,14 +2155,15 @@ function vNutrition() {
   const dueCount = sups.filter(s => supStatus(s).due).length;
   return `
   <div class="grid">
+    ${card("span2 daynav-card", dayNav("nutrition"))}
     ${card("", `
       <div class="goal-row">
-        <div><p class="soft">Calories today</p><h3>${tot.kcal.toLocaleString()} / ${g.kcal.toLocaleString()}</h3><small class="soft">kcal · ${kcalPct}%</small></div>
+        <div><p class="soft">Calories ${isToday ? "today" : "that day"}</p><h3>${tot.kcal.toLocaleString()} / ${g.kcal.toLocaleString()}</h3><small class="soft">kcal · ${kcalPct}%</small></div>
         <span class="big-ic" style="--a:#30a46c">${I.apple}</span>
       </div>
       ${barHtml(kcalPct, "#30a46c")}
       <div class="pill-row" style="margin-top:12px"><button class="btn ghost" data-action="nutrition-goals">${I.sliders}Edit goals</button></div>`)}
-    ${card("", cardHead("Macros today") + `<div class="macro-bars">
+    ${card("", cardHead("Macros " + (isToday ? "today" : "that day")) + `<div class="macro-bars">
       ${macroBar("Protein", tot.protein, g.protein, "#e5484d")}
       ${macroBar("Carbs", tot.carbs, g.carbs, "#f5a623")}
       ${macroBar("Fats", tot.fats, g.fats, "#7c66dc")}
@@ -2227,11 +2238,13 @@ function skillsTrend() {
   return out;
 }
 function vSkills() {
-  const mins = Object.entries(state.skills.log).filter(([d]) => d.startsWith(monthKey())).reduce((a, [, m]) => a + m, 0);
+  const cur = dayCursor("skills"), curMonth = cur.slice(0, 7);
+  const mins = Object.entries(state.skills.log).filter(([d]) => d.startsWith(curMonth)).reduce((a, [, m]) => a + m, 0);
   const hrs = Math.round(mins / 6) / 10;
   const courses = [...state.skills.courses].sort((a, b) => (a.progress === 100 ? 1 : 0) - (b.progress === 100 ? 1 : 0));
   return `
   <div class="grid">
+    ${card("span2 daynav-card", dayNav("skills"))}
     ${card("span2", `
       <div class="goal-row">
         <div><p class="soft">Self-directed learning · this month</p><h3>${hrs} / ${state.skills.monthlyHours} study hours</h3>${barHtml(100 * hrs / state.skills.monthlyHours, "#8e4ec6")}</div>
@@ -2699,14 +2712,16 @@ function openMediaDetail(id) {
 
 /* ---------- university ---------- */
 function vUniversity() {
-  const mins = weekDates().reduce((a, d) => a + (state.university.log[d] || 0), 0);
+  const cur = dayCursor("university");
+  const mins = weekOfDate(cur).reduce((a, d) => a + (state.university.log[d] || 0), 0);
   const hrs = Math.round(mins / 6) / 10;
   const tasks = [...state.university.tasks].sort((a, b) => (a.done - b.done) || (a.due < b.due ? -1 : 1));
   return `
   <div class="grid">
+    ${card("span2 daynav-card", dayNav("university"))}
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">This week</p><h3>${hrs} / ${state.university.weeklyHours} study hours</h3>${barHtml(100 * hrs / state.university.weeklyHours, "#3e63dd")}</div>
+        <div><p class="soft">${cur === todayIso() ? "This week" : "Week of " + niceDate(mondayOf(cur))}</p><h3>${hrs} / ${state.university.weeklyHours} study hours</h3>${barHtml(100 * hrs / state.university.weeklyHours, "#3e63dd")}</div>
         <span class="big-ic" style="--a:#3e63dd">${I.building}</span>
       </div>
       <div class="pill-row" style="margin-top:14px">
@@ -2915,12 +2930,14 @@ function vMemories() {
 
 /* ---------- journal ---------- */
 function vJournal() {
-  const entry = journalToday();
+  const d = dayCursor("journal"), isToday = d === todayIso();
+  const entry = journalOn(d);
   const moods = ["😄", "🙂", "😌", "😐", "😔"];
-  const past = state.journal.filter(j => j.date !== todayIso()).sort((a, b) => b.date < a.date ? -1 : 1).slice(0, 14);
+  const past = state.journal.filter(j => j.date !== d && j.text).sort((a, b) => b.date < a.date ? -1 : 1).slice(0, 14);
   return `
   <div class="grid">
-    ${card("span2", cardHead(`Today · ${niceDate(todayIso(), { month: "long", day: "numeric" })}`) + `
+    ${card("span2 daynav-card", dayNav("journal"))}
+    ${card("span2", cardHead(`${isToday ? "Today" : niceDate(d, { weekday: "long" })} · ${niceDate(d, { month: "long", day: "numeric" })}`) + `
       <textarea class="journal-input" id="journalText" placeholder="What's on your mind? A few honest lines beat a perfect page…">${esc(entry?.text || "")}</textarea>
       <div class="journal-foot">
         <span class="mood-row">${moods.map(m => `<button class="mood ${entry?.mood === m ? "on" : ""}" data-action="journal-mood" data-m="${m}">${m}</button>`).join("")}</span>
@@ -2931,7 +2948,7 @@ function vJournal() {
       </div>`)}
     ${past.length ? card("span2", cardHead("Earlier entries") + `
       <ul class="journal-list">
-        ${past.map(j => `<li><span class="j-date"><b>${niceDate(j.date)}</b>${j.mood ? `<span>${j.mood}</span>` : ""}</span><p>${esc(j.text)}</p>${j.tags?.length ? `<span class="j-tags">${j.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}</li>`).join("")}
+        ${past.map(j => `<li data-action="journal-open" data-d="${j.date}" class="j-open"><span class="j-date"><b>${niceDate(j.date)}</b>${j.mood ? `<span>${j.mood}</span>` : ""}</span><p>${esc(j.text)}</p>${j.tags?.length ? `<span class="j-tags">${j.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}</li>`).join("")}
       </ul>`) : ""}
   </div>`;
 }
@@ -3218,9 +3235,9 @@ const ACTIONS = {
   "gms-del": (el) => { const g = state.goals.find(x => x.id === el.dataset.g); if (g) { g.milestones = g.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openGoalDetail(g.id); } },
 
   /* health */
-  "steps-add": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.steps = (l.steps || 0) + +el.dataset.n; save(); render(); },
-  "water-add": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.water = +((l.water || 0) + +el.dataset.n).toFixed(2); save(); render(); },
-  "mood-set": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.mood = l.mood === el.dataset.m ? "" : el.dataset.m; save(); render(); },
+  "steps-add": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.steps = (l.steps || 0) + +el.dataset.n; save(); render(); },
+  "water-add": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.water = +((l.water || 0) + +el.dataset.n).toFixed(2); save(); render(); },
+  "mood-set": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.mood = l.mood === el.dataset.m ? "" : el.dataset.m; save(); render(); },
   "health-goals": () => formModal("Health goals",
     fld("Daily steps", num("steps", state.health.goals.steps, 1000, 500)) +
     fld("Water (L)", num("water", state.health.goals.water, 0.5, 0.25)) +
@@ -3293,7 +3310,7 @@ const ACTIONS = {
       `<input type="hidden" name="id" value="${m.id}">`, "meal-edit");
   },
   "meal-toggle": (el) => {
-    const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {};
+    const t = dayCursor("nutrition"); const l = state.nutrition.log[t] = state.nutrition.log[t] || {};
     l[el.dataset.id] = !l[el.dataset.id];
     if (l[el.dataset.id]) addXp(5, "Meal logged");
     save(); render();
@@ -3323,7 +3340,7 @@ const ACTIONS = {
 
   /* skills / university */
   "study-log": (el) => {
-    const k = el.dataset.kind, t = todayIso();
+    const k = el.dataset.kind, t = dayCursor(k);
     state[k].log[t] = (state[k].log[t] || 0) + +el.dataset.n;
     addXp(Math.round(+el.dataset.n / 6), "Study time");
     save(); render();
@@ -3523,20 +3540,22 @@ const ACTIONS = {
   "memory-del": (el) => { state.memories = state.memories.filter(m => m.id !== el.dataset.id); save(); render(); },
 
   /* journal */
-  "journal-mood": (el) => { const e = ensureJournal(); e.mood = e.mood === el.dataset.m ? "" : el.dataset.m; save(); render(); },
+  "journal-mood": (el) => { const e = ensureJournalOn(dayCursor("journal")); e.mood = e.mood === el.dataset.m ? "" : el.dataset.m; save(); render(); },
+  "journal-open": (el) => { setCursor("journal", el.dataset.d); render(); window.scrollTo({ top: 0 }); },
   "journal-tag": (el) => {
-    const e = ensureJournal(); e.tags = e.tags || [];
+    const e = ensureJournalOn(dayCursor("journal")); e.tags = e.tags || [];
     const i = e.tags.indexOf(el.dataset.tag);
     if (i >= 0) e.tags.splice(i, 1); else e.tags.push(el.dataset.tag);
     save(); render();
   },
   "journal-save": () => {
+    const d = dayCursor("journal");
     const text = $("#journalText").value.trim();
     if (!text) { toast("Write a few lines first ✍️"); return; }
-    const existed = !!journalToday()?.text;
-    const e = ensureJournal(); e.text = text;
+    const existed = !!journalOn(d)?.text;
+    const e = ensureJournalOn(d); e.text = text;
     if (!existed) addXp(15, "Journal entry");
-    save(); render(); toast("Entry saved");
+    save(); render(); toast(existed ? "Entry updated" : "Entry saved");
   },
 
   /* integrations */
@@ -3574,11 +3593,12 @@ const ACTIONS = {
     `<p class="soft">Refills LifeHub with the demo content so you can explore every feature. This replaces your current content (your profile &amp; keys are kept).</p>`, "data-sample", "Load sample data"),
 };
 
-function ensureJournal() {
-  let e = journalToday();
-  if (!e) { e = { id: uid(), date: todayIso(), text: "", mood: "", tags: [] }; state.journal.push(e); }
+function ensureJournalOn(d) {
+  let e = journalOn(d);
+  if (!e) { e = { id: uid(), date: d, text: "", mood: "", tags: [] }; state.journal.push(e); }
   return e;
 }
+function ensureJournal() { return ensureJournalOn(todayIso()); }
 
 /* form submits */
 const SUBMITS = {
@@ -3693,7 +3713,7 @@ const SUBMITS = {
 
 /* changes (inputs) */
 const CHANGES = {
-  "sleep-set": (el) => { const l = state.health.log[todayIso()] = healthToday(); l.sleep = clamp(+el.value || 0, 0, 24); save(); render(); },
+  "sleep-set": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.sleep = clamp(+el.value || 0, 0, 24); save(); render(); },
   "habit-note": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.note = el.value.slice(0, 600); save(); } },
   "habit-goal-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "goal-habit-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
