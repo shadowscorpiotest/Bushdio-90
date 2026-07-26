@@ -1323,6 +1323,20 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .card.daynav-card { padding: 6px 10px; }
 .card.daynav-card .day-nav { margin: 0; }
 
+/* combined study total — the two ledgers are one now */
+.study-total { display: block; margin-top: 9px; font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.study-total svg { width: 14px; height: 14px; flex: 0 0 auto; }
+
+/* 14-day mood strip (Health) — one mood shared with Journal */
+.mood-strip { display: flex; gap: 4px; overflow-x: auto; padding-bottom: 4px; }
+.mood-day { flex: 1 0 auto; min-width: 38px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 2px; border-radius: 12px; border: 1.5px solid transparent; background: var(--surface-2);
+  transition: border-color .15s, transform .15s; }
+.mood-day:hover { transform: translateY(-2px); border-color: var(--brand); }
+.mood-day.on { border-color: var(--brand); background: var(--brand-soft); }
+.md-face { font-size: 18px; line-height: 1.1; }
+.mood-day small { font-size: 10.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
 /* undo toast — a delete you can take back (deletes now sync to every device instantly) */
 .toast.has-undo { display: inline-flex; align-items: center; gap: 14px; padding-right: 6px; }
 .toast-undo {
