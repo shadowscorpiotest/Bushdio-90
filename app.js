@@ -1197,6 +1197,52 @@ function toast(msg, kind = "") {
   setTimeout(() => { el.classList.remove("show"); setTimeout(() => el.remove(), 300); }, 2600);
 }
 
+/* A toast with an Undo button. `onExpire` runs only if the window closes WITHOUT an undo — that's
+   where attached photos/files finally get destroyed, so an undo can always restore the whole record. */
+const UNDO_MS = 7000;
+function toastUndo(msg, onUndo, onExpire) {
+  const stack = $("#toastStack");
+  if (!stack) { if (onExpire) onExpire(); return; }
+  const el = document.createElement("div");
+  el.className = "toast has-undo";
+  const label = document.createElement("span");
+  label.textContent = msg;
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "toast-undo"; btn.textContent = "Undo";
+  el.append(label, btn);
+  stack.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show"));
+  let settled = false;
+  const close = (undone) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 300);
+    if (undone) onUndo(); else if (onExpire) onExpire();
+  };
+  btn.addEventListener("click", () => close(true));
+  const timer = setTimeout(() => close(false), UNDO_MS);
+}
+
+/* Remove a record from a list and offer Undo that puts it back at the same position.
+   `getArr` is a function so the array is re-resolved at undo time (a cloud pull can replace state). */
+function deleteWithUndo(getArr, id, label, onExpire, onRestore) {
+  const arr = getArr();
+  const i = arr.findIndex(x => x.id === id);
+  if (i < 0) return null;
+  const [gone] = arr.splice(i, 1);
+  save(); render();
+  toastUndo(label, () => {
+    const a = getArr();
+    a.splice(Math.min(i, a.length), 0, gone);
+    if (onRestore) onRestore();      // put back anything stored outside the list
+    save(); render();
+    toast("Restored");
+  }, onExpire);
+  return gone;
+}
+
 function openModal(html) {
   $("#modal").innerHTML = html;
   $("#modalBackdrop").hidden = false;
@@ -2088,6 +2134,7 @@ function vWorkout() {
             <span class="pill-row">
               ${doneAll ? `<button class="btn tiny good" data-action="class-renew" data-id="${c.id}">Renew</button>` : `<button class="btn tiny" data-action="class-attend" data-id="${c.id}">+ Attend</button>`}
               ${used ? `<button class="icon-btn ghost" data-action="class-undo" data-id="${c.id}" aria-label="Undo last">${I.chevL}</button>` : ""}
+              <button class="icon-btn ghost" data-action="class-edit" data-id="${c.id}" aria-label="Edit package">${I.edit}</button>
               <button class="icon-btn ghost" data-action="class-del" data-id="${c.id}" aria-label="Delete package">${I.trash}</button>
             </span>
           </li>`;
@@ -2218,6 +2265,7 @@ function vNutrition() {
             ${st.due
               ? `<button class="btn tiny good" data-action="sup-take" data-id="${s.id}">${I.check}Take</button>`
               : `<button class="btn tiny ghost" data-action="sup-undo" data-id="${s.id}" aria-label="Undo">${I.rotate || ""}Undo</button>`}
+            <button class="icon-btn ghost" data-action="sup-edit" data-id="${s.id}" aria-label="Edit supplement">${I.edit}</button>
             <button class="icon-btn ghost" data-action="sup-del" data-id="${s.id}" aria-label="Delete supplement">${I.trash}</button>
           </li>`;
         }).join("")}
@@ -2803,6 +2851,7 @@ function vProjects() {
             <span class="pill-row">
               <button class="btn tiny" data-action="project-bump" data-id="${p.id}" data-n="10">+10%</button>
               ${p.status !== "Done" ? `<button class="btn tiny good" data-action="project-done" data-id="${p.id}">Done</button>` : ""}
+              <button class="icon-btn ghost" data-action="project-edit" data-id="${p.id}" aria-label="Edit project">${I.edit}</button>
               <button class="icon-btn ghost" data-action="project-del" data-id="${p.id}" aria-label="Delete project">${I.trash}</button>
             </span>
           </li>`).join("")}
@@ -2870,6 +2919,7 @@ function vFinance() {
           <span class="fin-ic ${e.type}">${e.type === "income" ? "↑" : "↓"}</span>
           <span class="row-txt"><b>${esc(e.category || (e.type === "income" ? "Income" : "Expense"))}</b><small>${e.note ? esc(e.note) + " · " : ""}${niceDate(e.date)}</small></span>
           <b class="fin-amt ${e.type === "income" ? "pos" : "neg"}">${e.type === "income" ? "+" : "−"}${money(e.amount)}</b>
+          <button class="icon-btn ghost" data-action="fin-edit" data-id="${e.id}" aria-label="Edit entry">${I.edit}</button>
           <button class="icon-btn ghost" data-action="fin-del" data-id="${e.id}" aria-label="Delete entry">${I.trash}</button>
         </li>`).join("")}
       </ul>` : emptyMsg("wallet", "Log income and expenses to see your money at a glance.", addBtn("Add an expense", "fin-expense"))))}
@@ -2903,6 +2953,7 @@ function vSocial() {
             <span class="row-txt"><b>${esc(itm.title)}</b><small>${n} / ${itm.target} this week</small></span>
             <span class="pill-row">
               <button class="btn tiny" data-action="social-bump" data-id="${itm.id}">+1</button>
+              <button class="icon-btn ghost" data-action="social-edit" data-id="${itm.id}" aria-label="Edit goal">${I.edit}</button>
               <button class="icon-btn ghost" data-action="social-del" data-id="${itm.id}" aria-label="Delete goal">${I.trash}</button>
             </span>
           </li>`;
@@ -2922,6 +2973,7 @@ function vMemories() {
           <figure class="memory" style="--h:${m.hue}">
             <span class="memory-emoji">${esc(m.emoji)}</span>
             <figcaption><b>${esc(m.title)}</b><small>${niceDate(m.date, { month: "short", day: "numeric", year: "numeric" })}</small>${m.note ? `<p>${esc(m.note)}</p>` : ""}</figcaption>
+            <button class="icon-btn ghost memory-edit" data-action="memory-edit" data-id="${m.id}" aria-label="Edit memory">${I.edit}</button>
             <button class="icon-btn ghost memory-del" data-action="memory-del" data-id="${m.id}" aria-label="Delete memory">${I.x}</button>
           </figure>`).join("")}
       </div>` : emptyMsg("camera", "Collect moments, not things.", addBtn("Save your first memory", "memory-add"))))}
@@ -2944,6 +2996,7 @@ function vJournal() {
         <span class="pill-row">
           ${["Grateful", "Happy", "Focused", "Tired"].map(tag => `<button class="tag ${entry?.tags?.includes(tag) ? "on" : ""}" data-action="journal-tag" data-tag="${tag}">${tag}</button>`).join("")}
         </span>
+        ${entry && entry.text ? `<button class="btn ghost" data-action="journal-del" data-d="${d}">${I.trash}Delete</button>` : ""}
         <button class="btn primary" data-action="journal-save">${I.check}Save entry</button>
       </div>`)}
     ${past.length ? card("span2", cardHead("Earlier entries") + `
@@ -3172,7 +3225,7 @@ const ACTIONS = {
   "ag-reflect": openReflectModal,
   "todo-open": (el) => openTaskDetail(el.dataset.id),
   "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); closeModal(); render(); } },
-  "todo-del": (el) => { state.todos = state.todos.filter(x => x.id !== el.dataset.id); save(); closeModal(); render(); },
+  "todo-del": (el) => { closeModal(); deleteWithUndo(() => state.todos, el.dataset.id, "Task deleted"); },
   "task-add": () => formModal("New task",
     fld("Task", txt("text", "e.g. Calisthenics workout")) +
     `<div class="fld-row"><label class="fld"><span>Time (optional)</span><input type="time" name="time"></label>
@@ -3217,8 +3270,8 @@ const ACTIONS = {
     const h = state.habits.find(x => x.id === el.dataset.id);
     formModal("Edit habit", habitFormFields(h) + `<input type="hidden" name="id" value="${h.id}">`, "habit-edit");
   },
-  "habit-del": (el) => { state.habits = state.habits.filter(x => x.id !== el.dataset.id); save(); closeModal(); render(); },
-  "habit-del-d": (el) => { state.habits = state.habits.filter(x => x.id !== el.dataset.id); save(); closeModal(); render(); },
+  "habit-del": (el) => { closeModal(); deleteWithUndo(() => state.habits, el.dataset.id, "Habit deleted — history kept"); },
+  "habit-del-d": (el) => { closeModal(); deleteWithUndo(() => state.habits, el.dataset.id, "Habit deleted — history kept"); },
   "ms-add": (el) => { const id = el.dataset.id; formModal("New milestone", fld("Milestone", txt("text", "e.g. 30-day streak")) + `<input type="hidden" name="hid" value="${id}">`, "ms-add"); },
   "ms-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); const m = h && h.milestones.find(x => x.id === el.dataset.m); if (m) { m.done = !m.done; if (m.done) addXp(15, "Milestone"); save(); render(); openHabitDetail(h.id); } },
   "ms-del": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.milestones = h.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openHabitDetail(h.id); } },
@@ -3229,7 +3282,15 @@ const ACTIONS = {
   "goal-habits": (el) => openGoalHabits(el.dataset.id),
   "goal-open": (el) => openGoalDetail(el.dataset.id),
   "goal-edit": (el) => { const g = state.goals.find(x => x.id === el.dataset.id); formModal("Edit goal", goalFormFields(g) + `<input type="hidden" name="id" value="${g.id}">`, "goal-edit"); },
-  "goal-del": (el) => { const id = el.dataset.id; state.goals = state.goals.filter(x => x.id !== id); state.habits.forEach(h => { h.goalIds = (h.goalIds || []).filter(x => x !== id); }); save(); closeModal(); render(); },
+  "goal-del": (el) => {
+    const id = el.dataset.id;
+    const linked = state.habits.filter(h => (h.goalIds || []).includes(id)).map(h => h.id);
+    state.habits.forEach(h => { h.goalIds = (h.goalIds || []).filter(x => x !== id); });
+    closeModal();
+    deleteWithUndo(() => state.goals, id, "Goal deleted", null, () => {
+      linked.forEach(hid => { const h = state.habits.find(x => x.id === hid); if (h && !h.goalIds.includes(id)) h.goalIds.push(id); });
+    });
+  },
   "gms-add": (el) => { const id = el.dataset.id; formModal("New milestone", fld("Milestone", txt("text", "e.g. Finish week 4")) + `<input type="hidden" name="gid" value="${id}">`, "gms-add"); },
   "gms-toggle": (el) => { const g = state.goals.find(x => x.id === el.dataset.g); const m = g && g.milestones.find(x => x.id === el.dataset.m); if (m) { m.done = !m.done; if (m.done) addXp(15, "Milestone"); save(); render(); openGoalDetail(g.id); } },
   "gms-del": (el) => { const g = state.goals.find(x => x.id === el.dataset.g); if (g) { g.milestones = g.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openGoalDetail(g.id); } },
@@ -3262,7 +3323,7 @@ const ACTIONS = {
     }
     save(); render();
   },
-  "workout-del": (el) => { state.workout.plan = state.workout.plan.filter(p => p.id !== el.dataset.id); save(); render(); },
+  "workout-del": (el) => { deleteWithUndo(() => state.workout.plan, el.dataset.id, "Removed from your plan"); },
   /* class packages */
   "class-add": () => formModal("New class package",
     fld("Class name", txt("name", "e.g. Yoga studio")) +
@@ -3271,7 +3332,7 @@ const ACTIONS = {
   "class-attend": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length < c.total) { c.log = c.log || []; c.log.push(todayIso()); addXp(10, c.name); save(); render(); if ((c.log.length) >= c.total) toast(`Last session of ${c.name} — time to renew 🔁`); } },
   "class-undo": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length) { c.log.pop(); save(); render(); } },
   "class-renew": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c) { c.renewals = (c.renewals || 0) + 1; c.log = []; c.start = todayIso(); save(); render(); toast(`${c.name} renewed`); } },
-  "class-del": (el) => { state.workout.classes = state.workout.classes.filter(c => c.id !== el.dataset.id); save(); render(); },
+  "class-del": (el) => { deleteWithUndo(() => state.workout.classes, el.dataset.id, "Package deleted"); },
   "session-add": () => formModal("Log a session",
     fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option>${c}</option>`).join("")}</select>`) +
     fld("What did you do?", `<textarea name="note" placeholder="Sets, reps, how it felt…" maxlength="600"></textarea>`), "session-add"),
@@ -3316,10 +3377,15 @@ const ACTIONS = {
     save(); render();
   },
   "meal-del": (el) => {
-    const t = todayIso();
-    mealPhotos(t, el.dataset.id).forEach(p => mediaDelete(p.id));
-    state.nutrition.meals = state.nutrition.meals.filter(m => m.id !== el.dataset.id);
-    save(); render();
+    const id = el.dataset.id;
+    deleteWithUndo(() => state.nutrition.meals, id, "Meal deleted", () => {
+      /* photos survive the undo window, then go — across every day, not just today */
+      Object.keys(state.nutrition.photos || {}).forEach(day => {
+        mealPhotos(day, id).forEach(ph => mediaDelete(ph.id));
+        if (state.nutrition.photos[day]) delete state.nutrition.photos[day][id];
+      });
+      save();
+    });
   },
   "meal-photo-del": (el) => {
     const t = todayIso(), arr = (state.nutrition.photos[t] || {})[el.dataset.id];
@@ -3334,9 +3400,67 @@ const ACTIONS = {
   "sup-add": () => formModal("Add supplement",
     `<div class="fld-row">${fld("Name", txt("name", "e.g. Vitamin D3"))}${fld("Emoji", txt("emoji", "💊", "💊", false))}</div>` +
     `<div class="fld-row">${fld("Dose", txt("dose", "e.g. 1000 IU", "", false))}${fld("Every", `<select name="every"><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option></select>`)}</div>`, "sup-add"),
+  /* edit forms for records that used to be create-only */
+  "sup-edit": (el) => {
+    const x = state.nutrition.supplements.find(v => v.id === el.dataset.id); if (!x) return;
+    formModal("Edit supplement",
+      `<div class="fld-row">${fld("Name", txt("name", "", x.name))}${fld("Emoji", txt("emoji", "💊", x.emoji || "💊", false))}</div>` +
+      `<div class="fld-row">${fld("Dose", txt("dose", "e.g. 1000 IU", x.dose || "", false))}${fld("Every", `<select name="every">${[["day","Daily"],["week","Weekly"],["month","Monthly"]].map(([v,l]) => `<option value="${v}" ${x.every === v ? "selected" : ""}>${l}</option>`).join("")}</select>`)}</div>` +
+      `<input type="hidden" name="id" value="${x.id}">`, "sup-edit");
+  },
+  "project-edit": (el) => {
+    const x = state.projects.find(v => v.id === el.dataset.id); if (!x) return;
+    formModal("Edit project",
+      `<div class="fld-row">${fld("Name", txt("name", "", x.name))}${fld("Emoji", txt("emoji", "🚀", x.emoji || "🚀", false))}</div>` +
+      fld("Status", `<select name="status">${["Planning","In progress","Paused","Done"].map(v => `<option ${x.status === v ? "selected" : ""}>${v}</option>`).join("")}</select>`) +
+      fld("Note", `<textarea name="note" maxlength="400" placeholder="What is it, and what's next?">${esc(x.note || "")}</textarea>`) +
+      `<input type="hidden" name="id" value="${x.id}">`, "project-edit");
+  },
+  "social-edit": (el) => {
+    const x = state.social.items.find(v => v.id === el.dataset.id); if (!x) return;
+    formModal("Edit connection goal",
+      fld("Goal", txt("title", "", x.title)) +
+      `<div class="fld-row">${fld("Times per week", num("target", x.target, 1))}${fld("Emoji", txt("emoji", "🤝", x.emoji || "🤝", false))}</div>` +
+      `<input type="hidden" name="id" value="${x.id}">`, "social-edit");
+  },
+  "memory-edit": (el) => {
+    const x = state.memories.find(v => v.id === el.dataset.id); if (!x) return;
+    formModal("Edit memory",
+      fld("Title", txt("title", "", x.title)) +
+      fld("Note", `<textarea name="note" maxlength="240">${esc(x.note || "")}</textarea>`) +
+      `<div class="fld-row">${fld("Emoji", txt("emoji", "📸", x.emoji || "📸", false))}${fld("Date", `<input type="date" name="date" value="${x.date}" required>`)}</div>` +
+      `<input type="hidden" name="id" value="${x.id}">`, "memory-edit");
+  },
+  "fin-edit": (el) => {
+    const x = state.finance.entries.find(v => v.id === el.dataset.id); if (!x) return;
+    const cats = x.type === "income" ? INCOME_CATS : EXPENSE_CATS;
+    formModal(x.type === "income" ? "Edit income" : "Edit expense",
+      `<div class="fld-row">${fld("Amount", `<input type="number" name="amount" min="0" step="any" value="${x.amount}" inputmode="decimal" required>`)}${fld("Date", `<input type="date" name="date" value="${x.date}">`)}</div>` +
+      fld("Category", `<select name="category">${cats.map(c => `<option ${x.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>`) +
+      fld("Note", txt("note", "optional", x.note || "", false)) +
+      `<input type="hidden" name="id" value="${x.id}">`, "fin-edit");
+  },
+  "class-edit": (el) => {
+    const x = state.workout.classes.find(v => v.id === el.dataset.id); if (!x) return;
+    formModal("Edit class package",
+      fld("Class name", txt("name", "", x.name)) +
+      `<div class="fld-row">${fld("Total sessions", `<input type="number" name="total" value="${x.total}" min="1">`)}${fld("Price paid", `<input type="number" name="price" value="${x.price || 0}" min="0" step="any">`)}</div>` +
+      fld("Start date", `<input type="date" name="start" value="${x.start || todayIso()}">`) +
+      `<input type="hidden" name="id" value="${x.id}">`, "class-edit");
+  },
+  "journal-del": (el) => {
+    const d = el.dataset.d || dayCursor("journal");
+    deleteWithUndo(() => state.journal, (journalOn(d) || {}).id, "Entry deleted");
+  },
+
   "sup-take": (el) => { state.nutrition.supTaken[el.dataset.id] = todayIso(); addXp(3, "Supplement taken"); markLinkedTaskDone("sup", el.dataset.id, true); toast("Nice — logged 💊"); save(); render(); },
   "sup-undo": (el) => { delete state.nutrition.supTaken[el.dataset.id]; markLinkedTaskDone("sup", el.dataset.id, false); save(); render(); },
-  "sup-del": (el) => { state.nutrition.supplements = state.nutrition.supplements.filter(s => s.id !== el.dataset.id); delete state.nutrition.supTaken[el.dataset.id]; save(); render(); },
+  "sup-del": (el) => {
+    const id = el.dataset.id, taken = state.nutrition.supTaken[id];
+    delete state.nutrition.supTaken[id];
+    deleteWithUndo(() => state.nutrition.supplements, id, "Supplement deleted", null,
+      () => { if (taken !== undefined) state.nutrition.supTaken[id] = taken; });
+  },
 
   /* skills / university */
   "study-log": (el) => {
@@ -3365,7 +3489,7 @@ const ACTIONS = {
     if (c.progress === 100 && was < 100) addXp(40, `${c.name} completed`);
     save(); render();
   },
-  "course-del": (el) => { state.skills.courses = state.skills.courses.filter(c => c.id !== el.dataset.id); save(); render(); },
+  "course-del": (el) => { deleteWithUndo(() => state.skills.courses, el.dataset.id, "Course deleted"); },
   "uni-task-add": () => formModal("New assignment",
     fld("Task", txt("title", "e.g. Calculus assignment")) +
     `<div class="fld-row">${fld("Course (optional)", txt("course", "e.g. Math 201", "", false))}${fld("Due date", `<input type="date" name="due" value="${addDays(todayIso(), 3)}" required>`)}</div>`, "uni-task-add"),
@@ -3381,7 +3505,7 @@ const ACTIONS = {
     k.done = !k.done; if (k.done) addXp(15, k.title);
     save(); render();
   },
-  "uni-task-del": (el) => { state.university.tasks = state.university.tasks.filter(k => k.id !== el.dataset.id); save(); render(); },
+  "uni-task-del": (el) => { deleteWithUndo(() => state.university.tasks, el.dataset.id, "Assignment deleted"); },
 
   /* reading */
   "reading-tab": (el) => { ui.readingTab = el.dataset.id; render(); },
@@ -3429,7 +3553,13 @@ const ACTIONS = {
       fld("Emoji", txt("emoji", "", b.emoji || "📘", false)) +
       `<input type="hidden" name="id" value="${b.id}">`, "book-edit");
   },
-  "book-del-d": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b && b.file) mediaDelete(b.file.id); state.reading.books = state.reading.books.filter(b => b.id !== el.dataset.id); save(); closeModal(); render(); toast("Book removed"); },
+  "book-del-d": (el) => {
+    const id = el.dataset.id, b = state.reading.books.find(x => x.id === id);
+    const fileRef = b && b.file ? b.file.id : null;
+    closeModal();
+    /* the file is only destroyed once Undo is no longer possible */
+    deleteWithUndo(() => state.reading.books, id, "Book removed", () => { if (fileRef) mediaDelete(fileRef); });
+  },
   "book-format": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b) { b.format = el.dataset.v; save(); render(); openBookDetail(b.id); } },
   "book-file-del": (el) => { const b = state.reading.books.find(x => x.id === el.dataset.id); if (b && b.file) { mediaDelete(b.file.id); b.file = null; save(); render(); openBookDetail(b.id); } },
 
@@ -3492,8 +3622,8 @@ const ACTIONS = {
       fld("Emoji", txt("emoji", "", m.emoji || (isSeries ? "📺" : "🎬"), false)) +
       `<input type="hidden" name="id" value="${m.id}">`, "media-edit");
   },
-  "media-del-d": (el) => { state.media = state.media.filter(m => m.id !== el.dataset.id); save(); closeModal(); render(); toast("Title removed"); },
-  "media-del": (el) => { state.media = state.media.filter(m => m.id !== el.dataset.id); save(); render(); },
+  "media-del-d": (el) => { closeModal(); deleteWithUndo(() => state.media, el.dataset.id, "Title removed"); },
+  "media-del": (el) => { deleteWithUndo(() => state.media, el.dataset.id, "Removed from your list"); },
 
   /* work / projects / social / memories */
   "work-add": () => formModal("New career item",
@@ -3507,15 +3637,15 @@ const ACTIONS = {
       `<input type="hidden" name="id" value="${k.id}">`, "work-edit");
   },
   "work-toggle": (el) => { const k = state.work.items.find(x => x.id === el.dataset.id); k.done = !k.done; if (k.done) addXp(15, k.title); save(); render(); },
-  "work-del": (el) => { state.work.items = state.work.items.filter(k => k.id !== el.dataset.id); save(); render(); },
+  "work-del": (el) => { deleteWithUndo(() => state.work.items, el.dataset.id, "Item deleted"); },
   "project-add": () => formModal("New project", fld("Name", txt("name", "e.g. Portfolio site")) + fld("Emoji", txt("emoji", "🚀", "🚀", false)), "project-add"),
   "project-bump": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.progress = clamp(p.progress + +el.dataset.n, 0, 100); if (p.status === "Planning") p.status = "In progress"; save(); render(); },
   "project-done": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.status = "Done"; p.progress = 100; addXp(60, `${p.name} shipped`); save(); render(); },
-  "project-del": (el) => { state.projects = state.projects.filter(p => p.id !== el.dataset.id); save(); render(); },
+  "project-del": (el) => { deleteWithUndo(() => state.projects, el.dataset.id, "Project deleted"); },
   /* finance */
   "fin-income": () => finEntryForm("income"),
   "fin-expense": () => finEntryForm("expense"),
-  "fin-del": (el) => { state.finance.entries = state.finance.entries.filter(e => e.id !== el.dataset.id); save(); render(); },
+  "fin-del": (el) => { deleteWithUndo(() => state.finance.entries, el.dataset.id, "Entry deleted"); },
   "fin-import-classes": () => {
     const pending = pendingClassSpend();
     pending.forEach(c => {
@@ -3533,11 +3663,11 @@ const ACTIONS = {
     if (log[itm.id] === itm.target) addXp(15, itm.title);
     checkBadges(); save(); render();
   },
-  "social-del": (el) => { state.social.items = state.social.items.filter(x => x.id !== el.dataset.id); save(); render(); },
+  "social-del": (el) => { deleteWithUndo(() => state.social.items, el.dataset.id, "Goal deleted"); },
   "memory-add": () => formModal("New memory",
     fld("Title", txt("title", "e.g. Sunset picnic")) + fld("Note", `<textarea name="note" placeholder="What made it special?" maxlength="240"></textarea>`) +
     `<div class="fld-row">${fld("Emoji", txt("emoji", "🌅", "🌅", false))}${fld("Date", `<input type="date" name="date" value="${todayIso()}" required>`)}</div>`, "memory-add"),
-  "memory-del": (el) => { state.memories = state.memories.filter(m => m.id !== el.dataset.id); save(); render(); },
+  "memory-del": (el) => { deleteWithUndo(() => state.memories, el.dataset.id, "Memory deleted"); },
 
   /* journal */
   "journal-mood": (el) => { const e = ensureJournalOn(dayCursor("journal")); e.mood = e.mood === el.dataset.m ? "" : el.dataset.m; save(); render(); },
@@ -3639,6 +3769,12 @@ const SUBMITS = {
     if (m) { m.slot = f.slot; m.name = f.name; m.time = f.time || ""; m.kcal = +f.kcal; m.protein = +f.protein; m.carbs = +f.carbs; m.fats = +f.fats; m.fiber = +f.fiber || 0; }
   },
   "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }; },
+  "sup-edit": (f) => { const x = state.nutrition.supplements.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.dose = f.dose || ""; x.every = ["day","week","month"].includes(f.every) ? f.every : x.every; } },
+  "project-edit": (f) => { const x = state.projects.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.status = f.status || x.status; x.note = f.note || ""; if (x.status === "Done") x.progress = 100; } },
+  "social-edit": (f) => { const x = state.social.items.find(v => v.id === f.id); if (x) { x.title = f.title; x.emoji = f.emoji || x.emoji; x.target = Math.max(1, +f.target || 1); } },
+  "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; } },
+  "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
+  "class-edit": (f) => { const x = state.workout.classes.find(v => v.id === f.id); if (x) { x.name = f.name; x.total = Math.max(1, +f.total || x.total); x.price = +f.price || 0; x.start = f.start || x.start; } },
   "sup-add": (f) => { state.nutrition.supplements.push({ id: uid(), name: f.name, emoji: f.emoji || "💊", dose: f.dose || "", every: ["day", "week", "month"].includes(f.every) ? f.every : "day" }); },
   "skills-goal": (f) => { state.skills.monthlyHours = +f.hours; },
   "uni-goal": (f) => { state.university.weeklyHours = +f.hours; },
