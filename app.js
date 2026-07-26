@@ -527,6 +527,13 @@ async function mediaGet(id) {
     rq.onsuccess = () => res(rq.result || null); rq.onerror = () => rej(rq.error);
   });
 }
+/* a media ref may own a second blob (a video's poster frame) — drop both */
+function dropMedia(ref) {
+  if (!ref) return;
+  if (typeof ref === "string") return void mediaDelete(ref);
+  mediaDelete(ref.id);
+  if (ref.poster) mediaDelete(ref.poster);
+}
 async function mediaDelete(id) {
   try {
     const db = await mediaDB();
@@ -554,28 +561,75 @@ async function hydrateMedia() {
         url = URL.createObjectURL(blob); _urlCache[id] = url;
       }
       host.innerHTML = host.dataset.mediaKind === "video"
-        ? `<video src="${url}" controls playsinline preload="metadata"></video>`
+        /* "still" hosts (cover art) show a frame, not a player — a control bar you can't reach is worse than none */
+        ? (host.dataset.mediaStill
+            ? `<video src="${url}" muted playsinline preload="metadata" tabindex="-1"></video>`
+            : `<video src="${url}" controls playsinline preload="metadata"></video>`)
         : `<img src="${url}" alt="" loading="lazy">`;
     } catch { host.innerHTML = `<span class="media-missing">media unavailable</span>`; }
   }
 }
 /* read a File into IndexedDB; images are downscaled unless they're already small */
 const MB = (n) => Math.round(n / 1024 / 1024);
+const fileSize = (n) => n >= 1024 * 1024 ? MB(n) + "MB" : Math.max(1, Math.round(n / 1024)) + "KB";
 const VIDEO_MAX_MB = 300;   // a phone clip is often 130-400MB per minute; 60MB rejected almost everything
 function storeMediaFile(file, cb) {
   if (!file) return;
   const kind = file.type.startsWith("video") ? "video" : "image";
   if (kind === "video" && file.size > VIDEO_MAX_MB * 1024 * 1024) {
-    toast(`That clip is ${MB(file.size)}MB — too big to store. Trim it under ${VIDEO_MAX_MB}MB and try again.`);
+    toast(`That clip is ${fileSize(file.size)} — too big to store. Trim it under ${VIDEO_MAX_MB}MB and try again.`);
     return;
   }
-  if (kind === "video") toast(`Saving ${MB(file.size)}MB video…`);
-  const finish = (blob) => mediaPut(blob).then(id => cb({ id, kind })).catch((e) => toast(`Couldn't save that ${kind} — ${e && e.name === "QuotaExceededError" ? "this device is out of storage" : "storage refused it"}`));
+  /* only worth saying for clips big enough that the save takes a visible moment */
+  if (kind === "video" && file.size > 8 * 1024 * 1024) toast(`Saving ${fileSize(file.size)} video…`);
+  const finish = (blob, extra) => mediaPut(blob).then(id => cb(Object.assign({ id, kind }, extra || {}))).catch((e) => toast(`Couldn't save that ${kind} — ${e && e.name === "QuotaExceededError" ? "this device is out of storage" : "storage refused it"}`));
   if (kind === "image") {
     processCover(file, (dataUrl) => fetch(dataUrl).then(r => r.blob()).then(finish), 900);
   } else {
-    finish(file);
+    /* grab a still first so the clip has a real cover instead of a black rectangle */
+    videoPoster(file, (poster) => {
+      if (!poster) return finish(file);
+      mediaPut(poster).then(pid => finish(file, { poster: pid })).catch(() => finish(file));
+    });
   }
+}
+/* Capture a frame from just inside a video so it can stand in as cover art.
+   Frame zero is very often black, so seek a beat in first. Always calls back —
+   with null if the browser can't decode it — so an upload never stalls on this. */
+function videoPoster(file, cb) {
+  let url = "", done = false;
+  const v = document.createElement("video");
+  const finish = (blob) => {
+    if (done) return; done = true;
+    clearTimeout(timer);
+    try { v.removeAttribute("src"); v.load(); } catch {}
+    if (url) URL.revokeObjectURL(url);
+    cb(blob);
+  };
+  const timer = setTimeout(() => finish(null), 10000);
+  const grab = () => {
+    try {
+      const w = v.videoWidth, h = v.videoHeight;
+      if (!w || !h) return finish(null);
+      const scale = Math.min(1, 900 / Math.max(w, h));
+      const c = document.createElement("canvas");
+      c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+      c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+      c.toBlob(b => finish(b), "image/jpeg", 0.82);
+    } catch { finish(null); }
+  };
+  try {
+    url = URL.createObjectURL(file);
+    v.muted = true; v.playsInline = true; v.preload = "metadata";
+    v.onerror = () => finish(null);
+    v.onseeked = grab;
+    v.onloadeddata = () => {
+      const d = v.duration;
+      if (d && isFinite(d) && d > 0.4) v.currentTime = Math.min(0.6, d / 3);
+      else grab();
+    };
+    v.src = url;
+  } catch { finish(null); }
 }
 /* store an arbitrary file (e.g. a book PDF/EPUB) in IndexedDB */
 function storeFile(file, cb) {
@@ -2234,7 +2288,7 @@ const CAT_COLORS = { Calisthenics: "#12a594", Strength: "#f76b15", Cardio: "#e54
 function removeSession(id) {
   const s = state.workout.sessions.find(x => x.id === id);
   if (!s) return;
-  (s.media || []).forEach(m => mediaDelete(m.id));
+  (s.media || []).forEach(dropMedia);
   state.workout.sessions = state.workout.sessions.filter(x => x.id !== id);
   Object.keys(state.workout.log).forEach(d => {
     state.workout.log[d] = (state.workout.log[d] || []).filter(x => x !== id);
@@ -3242,13 +3296,18 @@ function memoryCard(m, big) {
   const w = memWhen(m.date);
   const ph = (m.photos || [])[0];
   const more = (m.photos || []).length - 1;
+  const vid = !!ph && ph.kind === "video";
+  /* a video shows its captured poster frame; clips saved before posters existed fall back to a
+     muted, control-less first frame so the cover is a picture either way, never a dead player */
+  const cover = ph ? (vid && ph.poster ? { id: ph.poster, kind: "image" } : ph) : null;
   return `
   <article class="mem-card ${big ? "big" : ""} ${m.starred ? "starred" : ""}" style="--h:${m.hue}">
     <button class="mem-hit" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}"></button>
     <div class="mc-frame">
-      ${ph ? `<span class="mc-photo" data-media="${ph.id}" data-media-kind="${ph.kind}"></span>`
-           : `<span class="mc-blank"><span class="mc-glyph">${esc(m.emoji || "📸")}</span></span>`}
+      ${cover ? `<span class="mc-photo" data-media="${cover.id}" data-media-kind="${cover.kind}"${cover.kind === "video" ? " data-media-still=\"1\"" : ""}></span>`
+              : `<span class="mc-blank"><span class="mc-glyph">${esc(m.emoji || "📸")}</span></span>`}
       <span class="mc-scrim" aria-hidden="true"></span>
+      ${vid ? `<span class="mc-play" aria-hidden="true">${I.play}</span>` : ""}
       <span class="mc-badges">
         ${m.starred ? `<span class="mc-star" title="Treasured">${I.star}</span>` : ""}
         ${more > 0 ? `<span class="mc-count">+${more}</span>` : ""}
@@ -3760,7 +3819,7 @@ const ACTIONS = {
     fld("What did you do?", `<textarea name="note" placeholder="Sets, reps, how it felt…" maxlength="600"></textarea>`), "session-add"),
   "session-note": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (s) formModal("Session note", fld("Notes", `<textarea name="note" maxlength="600">${esc(s.note || "")}</textarea>`) + `<input type="hidden" name="id" value="${s.id}">`, "session-note"); },
   "session-del": (el) => { removeSession(el.dataset.id); save(); render(); },
-  "session-media-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s); if (s) { s.media = (s.media || []).filter(m => m.id !== el.dataset.m); mediaDelete(el.dataset.m); save(); render(); } },
+  "session-media-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s); if (s) { dropMedia((s.media || []).find(m => m.id === el.dataset.m)); s.media = (s.media || []).filter(m => m.id !== el.dataset.m); save(); render(); } },
   "ex-add": (el) => formModal("Add exercise",
     fld("Exercise", txt("name", "e.g. Bench press")) +
     fld("Measured in", `<select name="kind"><option value="reps">Weight × reps</option><option value="time">Time / hold (seconds)</option><option value="distance">Distance</option></select>`) +
@@ -3803,7 +3862,7 @@ const ACTIONS = {
     deleteWithUndo(() => state.nutrition.meals, id, "Meal deleted", () => {
       /* photos survive the undo window, then go — across every day, not just today */
       Object.keys(state.nutrition.photos || {}).forEach(day => {
-        mealPhotos(day, id).forEach(ph => mediaDelete(ph.id));
+        mealPhotos(day, id).forEach(dropMedia);
         if (state.nutrition.photos[day]) delete state.nutrition.photos[day][id];
       });
       save();
@@ -3812,8 +3871,8 @@ const ACTIONS = {
   "meal-photo-del": (el) => {
     const t = todayIso(), arr = (state.nutrition.photos[t] || {})[el.dataset.id];
     if (!arr) return;
+    dropMedia(arr.find(p => p.id === el.dataset.ref));
     state.nutrition.photos[t][el.dataset.id] = arr.filter(p => p.id !== el.dataset.ref);
-    mediaDelete(el.dataset.ref);
     save(); render();
   },
   "nutrition-goals": () => formModal("Nutrition goals",
@@ -4108,16 +4167,16 @@ const ACTIONS = {
   "memory-tag-filter": (el) => { const t = el.dataset.t.toLowerCase(); ui.memorySearch = ui.memorySearch === t ? "" : t; render(); },
   "memory-photo-del": (el) => {
     const m = state.memories.find(x => x.id === el.dataset.id); if (!m) return;
+    dropMedia((m.photos || []).find(ph => ph.id === el.dataset.ref));
     m.photos = (m.photos || []).filter(ph => ph.id !== el.dataset.ref);
-    mediaDelete(el.dataset.ref);
     save(); render(); openMemoryDetail(m.id);
   },
   "memory-del": (el) => {
     const m = state.memories.find(x => x.id === el.dataset.id);
-    const refs = (m && m.photos || []).map(ph => ph.id);
+    const refs = (m && m.photos || []).slice();
     closeModal();
     deleteWithUndo(() => state.memories, el.dataset.id, "Memory deleted",
-      () => refs.forEach(r => mediaDelete(r)));   // photos outlive the undo window
+      () => refs.forEach(dropMedia));   // photos outlive the undo window
   },
 
   /* journal */
