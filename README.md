@@ -131,6 +131,30 @@ Editor for the snapshot table, the private `media` bucket and their row-level-se
 Optional closed-app push (Edge Function + cron) is documented in
 **[`supabase/README.md`](supabase/README.md)**.
 
+### 🔐 Security posture — and its limits
+
+- **Content Security Policy.** `script-src 'self'`, so an injected `<script>` or `onerror=` cannot
+  run even if an escaping bug slips through. There is no inline JavaScript in the page, which is what
+  makes that strictness possible. `connect-src` names only the origins the app genuinely uses, so an
+  injection has nowhere to send anything.
+- **Untrusted values are allow-listed, not filtered.** Covers and posters go through `safeUrl()`
+  (`data:image/*` or `https:`, and nothing that could close a `url()` or an attribute); colours and
+  hues go through `cssVar()`. Anything unrecognised is dropped rather than sanitised-and-hoped.
+- **Imported files are treated as hostile.** `Import` keeps only keys this version knows, then runs
+  the same migration ladder as cloud data — so an export from a newer LifeHub is refused rather than
+  silently mangled, and unknown keys never reach your state.
+
+**What is *not* covered, stated plainly:**
+
+- `style-src` still needs `'unsafe-inline'` — the UI is built on inline `style=` attributes. The CSP
+  is defence in depth here, not a substitute for escaping.
+- **Clickjacking is not blocked.** `frame-ancestors` only works as a real response header, and GitHub
+  Pages cannot send one. Self-hosting behind a server or CDN? Add
+  `Content-Security-Policy: frame-ancestors 'none'` there.
+- **The encryption key lives on the device.** It has to, for the app to open your data without asking
+  for a password every time — which means any code running in the page could use it. That is exactly
+  why the CSP and the escaping above matter more here than in an ordinary web app.
+
 ### Where things are stored
 
 Structured data lives in `localStorage` under the `lifehub-v1` key. Use **Profile → Export JSON** for backups and **Import** to restore. **Uploaded photos & videos** are stored separately in your browser's **IndexedDB** (`lifehub-media`) so large media doesn't blow the localStorage limit. They aren't part of the JSON export — but with an account they **do sync**, encrypted, to Supabase Storage (see above). Your structured data is mirrored the same way.
