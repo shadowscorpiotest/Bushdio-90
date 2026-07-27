@@ -682,6 +682,14 @@ li.overdue .row-txt small { color: var(--danger); }
 .mini-badge { display: inline-grid; place-items: center; vertical-align: middle; }
 .mini-badge svg { width: 13px; height: 13px; color: #f76b15; }
 .wday { cursor: pointer; background: none; border: 1px solid transparent; }
+/* ---------- tasks: repeat + carried-forward marks ---------- */
+.task-from, .task-rep { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px;
+  font-size: 11.5px; color: var(--ink-3); }
+.task-from svg, .task-rep svg { width: 12px; height: 12px; }
+.task-from { color: #d9730d; }
+.carry-list li { cursor: default; }
+.carry-list .row-txt small { color: var(--ink-3); }
+
 /* ---------- people (Social) ---------- */
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; }
 .person { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 14px 8px 12px;

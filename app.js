@@ -132,7 +132,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 7;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 8;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -155,7 +155,8 @@ function defaultState() {
     badges: {},                // {badgeId: dateEarned}
     visited: {},               // {viewId: true}
     goals: [],                 // {id,title,emoji,milestones:[{id,text,done}]}
-    todos: [],                 // {id,text,done,date}
+    todos: [],                 // {id,text,done,date,time,order,repeat,seriesId,from}
+    tasksRolledOn: "",         // last date rollTasks() ran — synced so one device answering settles it
     habits: [],                // {id,name,emoji,kind,goalId,milestones,log:{date:{done,note,workoutId}}}
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
     workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
@@ -477,6 +478,18 @@ const MIGRATIONS = [
       if (!Array.isArray(p.tags)) p.tags = [];
       if (!Array.isArray(p.touches)) p.touches = [];
     });
+  },
+
+  /* 7 → 8 · tasks stop being single-use. They can repeat, they can be reordered, and an unfinished
+     one from a previous day is no longer invisible forever. */
+  (s) => {
+    (s.todos || []).forEach((td, i) => {
+      if (td.repeat === undefined) td.repeat = null;
+      if (td.seriesId == null) td.seriesId = "";
+      if (td.from == null) td.from = "";
+      if (td.order == null) td.order = i;
+    });
+    if (s.tasksRolledOn == null) s.tasksRolledOn = "";
   },
 ];
 
@@ -2081,7 +2094,7 @@ function todayAgenda() {
   });
   const checked = state.nutrition.log[t] || {};
   state.nutrition.meals.forEach(m => items.push({ kind: "meal", id: m.id, hue: "#30a46c", title: m.slot, sub: m.name, done: !!checked[m.id], action: "ag-meal", emoji: "🍽️" }));
-  state.todos.filter(td => !td.date || td.date === t).forEach(td => items.push({ kind: "task", id: td.id, hue: "#3e63dd", title: td.text, sub: "task", done: td.done, action: "ag-task", emoji: "✅" }));
+  tasksOn(t).forEach(td => items.push({ kind: "task", id: td.id, hue: "#3e63dd", title: td.text, sub: td.repeat ? repeatLabel(td.repeat).toLowerCase() : "task", done: td.done, action: "ag-task", emoji: "✅" }));
   items.push({ kind: "reflect", hue: "#7c66dc", title: "Daily reflection", sub: reflectionOfDay(), done: !!state.reflections[t], action: "ag-reflect", emoji: "✨" });
   state.university.tasks.filter(k => !k.done && k.due <= addDays(t, 5)).forEach(k => items.push({ kind: "deadline", nav: "university", icon: "building", hue: "#3e63dd", title: k.title, when: daysUntil(k.due), sub: "university deadline" }));
   return items;
@@ -2187,19 +2200,140 @@ function syncHabitToTask(habitId) {
   const h = state.habits.find(x => x.id === habitId); if (!h) return;
   markLinkedTaskDone("habit", habitId, habitMet(h, todayIso()));
 }
-function taskRow(td) {
+/* ---------- tasks: repeats, carry-forward, order ---------- */
+/* A repeating task reuses the habit cadence shape rather than inventing a second one, so
+   "every day" and "Mon/Wed/Fri" mean exactly what they already mean elsewhere in the app. */
+function taskDueOn(rep, d) {
+  if (!rep) return false;
+  if (rep.mode === "days") return (rep.days || []).includes(WEEKDAY_MON0(d));
+  return true;                                   // daily
+}
+const taskSort = (a, b) => (a.order - b.order) || (a.time || "99:99").localeCompare(b.time || "99:99");
+const tasksOn = (d) => state.todos.filter(td => (td.date || d) === d).sort(taskSort);
+const nextTaskOrder = () => state.todos.reduce((m, td) => Math.max(m, td.order || 0), 0) + 1;
+/* unfinished and dated before today — the ones that used to disappear */
+const strandedTasks = () => state.todos.filter(td => !td.done && td.date && td.date < todayIso())
+  .sort((a, b) => a.date < b.date ? -1 : 1);
+
+const KEEP_DONE_DAYS = 90;
+/* A daily repeat is ~365 rows a year inside a blob that is re-encrypted and re-uploaded on every
+   change, so spawned instances are not kept forever. One-off tasks you typed yourself always are —
+   deleting something a person wrote is not a housekeeping decision. */
+function pruneTasks() {
+  const cutoff = addDays(todayIso(), -KEEP_DONE_DAYS);
+  const before = state.todos.length;
+  state.todos = state.todos.filter(td => !(td.done && td.seriesId && td.date && td.date < cutoff));
+  return before - state.todos.length;
+}
+
+/* Runs at boot and whenever the app comes back to a new day. Spawns today's repeats, prunes, and
+   hands any stranded tasks to the once-a-day prompt. */
+function rollTasks() {
+  const t = todayIso();
+  if (state.tasksRolledOn === t) return 0;
+  let made = 0;
+  /* one instance per series per day, no matter how many times this runs */
+  const seen = new Set(state.todos.filter(td => td.date === t && td.seriesId).map(td => td.seriesId));
+  const seriesSeeds = new Map();
+  state.todos.forEach(td => {
+    if (!td.repeat || !td.seriesId) return;
+    const prev = seriesSeeds.get(td.seriesId);
+    if (!prev || (td.date || "") > (prev.date || "")) seriesSeeds.set(td.seriesId, td);
+  });
+  seriesSeeds.forEach((seed, sid) => {
+    if (seen.has(sid) || !taskDueOn(seed.repeat, t)) return;
+    state.todos.push({
+      id: uid(), text: seed.text, done: false, date: t, time: seed.time || "",
+      habitId: seed.habitId || "", supId: seed.supId || "", areaId: seed.areaId || "",
+      order: seed.order || nextTaskOrder(), repeat: seed.repeat, seriesId: sid, from: "",
+    });
+    made++;
+  });
+  pruneTasks();
+  return made;
+}
+
+/* The prompt the user chose over silent auto-carry: shown at most once a day, and only when there is
+   actually something stranded. Answering it (either way) marks the day as rolled. */
+function maybeCarryForward() {
+  const t = todayIso();
+  if (state.tasksRolledOn === t) return false;
+  const stranded = strandedTasks();
+  if (!stranded.length) { state.tasksRolledOn = t; save(); return false; }
+  openModal(`
+    <header class="modal-head"><h3>${stranded.length} unfinished from before</h3>
+      <button type="button" class="icon-btn" data-action="carry-dismiss" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="soft">These were never finished. Bring them into today, or let them go.</p>
+      <ul class="check-list carry-list">
+        ${stranded.map(td => `<li data-carry="${td.id}">
+          <span class="row-emoji">✅</span>
+          <span class="row-txt"><b>${esc(td.text)}</b><small>${esc(niceDate(td.date, { weekday: "long", month: "short", day: "numeric" }))}</small></span>
+          <span class="pill-row">
+            <button class="btn tiny" data-action="carry-one" data-id="${td.id}">${I.check}Today</button>
+            <button class="icon-btn ghost" data-action="carry-drop" data-id="${td.id}" aria-label="Drop ${esc(td.text)}">${I.trash}</button>
+          </span>
+        </li>`).join("")}
+      </ul>
+    </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="carry-dismiss">Not now</button>
+      <button type="button" class="btn primary" data-action="carry-all">${I.check}Bring all forward</button>
+    </footer>`);
+  return true;
+}
+function carryTask(td) { if (td) { td.from = td.date; td.date = todayIso(); td.done = false; } }
+/* The repeat belongs to the SERIES, not to the copy you happen to have open. Setting it on one row
+   only would leave older copies still carrying it — and since rollTasks seeds from the latest row
+   in a series, switching a repeat off would look like it worked and then keep spawning tomorrow.
+   Each row gets its own object so two todos never share one mutable repeat. */
+function setSeriesRepeat(td, rep) {
+  const rows = td.seriesId ? state.todos.filter(x => x.seriesId === td.seriesId) : [td];
+  rows.forEach(x => { x.repeat = rep ? JSON.parse(JSON.stringify(rep)) : null; });
+}
+/* after handling one, keep the sheet open if there are more; close and settle the day if not */
+function maybeCarryForwardAgain() {
+  if (strandedTasks().length) { maybeCarryForward(); return true; }
+  state.tasksRolledOn = todayIso(); closeModal(); save(); render();
+  return false;
+}
+/* swap with the neighbour in the CURRENT visible order, so the arrows do what they look like */
+function moveTask(id, dir) {
+  const list = tasksOn(todayIso()).filter(td => !td.done);
+  const i = list.findIndex(td => td.id === id), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const a = list[i].order, b = list[j].order;
+  list[i].order = b; list[j].order = a;
+  if (a === b) { list.forEach((td, k) => { td.order = k; }); list[i].order = j; list[j].order = i; }
+  save(); render();
+}
+
+function taskRow(td, i, total) {
   const h = td.habitId ? state.habits.find(x => x.id === td.habitId) : null;
   const sup = td.supId ? state.nutrition.supplements.find(x => x.id === td.supId) : null;
   const ar = td.areaId ? areaOf(td.areaId) : null;
   const link = h ? `<small>${I.target} ${esc(h.name)}</small>` : sup ? `<small>💊 ${esc(sup.name)}</small>`
     : ar ? `<small class="task-area" style="--a:${ar.hue}">${esc(ar.name)}</small>` : "";
+  const marks = [
+    td.from ? `<small class="task-from">${I.chevL}from ${esc(niceDate(td.from, { weekday: "short" }))}</small>` : "",
+    td.repeat ? `<small class="task-rep" title="${esc(repeatLabel(td.repeat))}">${I.spark}${esc(repeatShort(td.repeat))}</small>` : "",
+  ].join("");
+  /* i/total are passed only from the ordered "to do" list — the done drawer has nothing to reorder */
+  const canMove = typeof i === "number" && total > 1;
   return `<li class="todo ${td.done ? "done" : ""}">
     <span class="todo-time">${td.time || ""}</span>
     <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
-    <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${link}</span>
+    <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${link}${marks}</span>
+    ${canMove ? `<span class="reorder">
+      <button class="icon-btn ghost" data-action="task-up" data-id="${td.id}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.chevL}</button>
+      <button class="icon-btn ghost" data-action="task-down" data-id="${td.id}" aria-label="Move down" ${i === total - 1 ? "disabled" : ""}>${I.chevR}</button>
+    </span>` : ""}
     <button class="icon-btn ghost" data-action="todo-open" data-id="${td.id}" aria-label="Edit task">${I.chevR}</button>
   </li>`;
 }
+const repeatShort = (r) => !r ? "" : r.mode === "days" ? (r.days || []).map(i => WD_SHORT[i]).join("") : "daily";
+const repeatLabel = (r) => !r ? "Does not repeat" : r.mode === "days"
+  ? "Repeats on " + (r.days || []).map(i => WD_SHORT[i]).join(", ") : "Repeats every day";
 function openTaskDetail(id) {
   const td = state.todos.find(x => x.id === id); if (!td) { closeModal(); return; }
   openModal(`<header class="modal-head"><h3>Task</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
@@ -2215,6 +2349,18 @@ function openTaskDetail(id) {
             <optgroup label="Areas">${AREAS.filter(a => a.id !== "habits").map(a => `<option value="a:${a.id}" ${td.areaId === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</optgroup>
           </select></label>
       </div>
+      <div class="fld"><span>Repeat</span>
+        <select data-change="task-repeat" data-id="${td.id}">
+          <option value="" ${!td.repeat ? "selected" : ""}>Never — a one-off</option>
+          <option value="daily" ${td.repeat && td.repeat.mode === "daily" ? "selected" : ""}>Every day</option>
+          <option value="days" ${td.repeat && td.repeat.mode === "days" ? "selected" : ""}>Specific weekdays</option>
+        </select>
+      </div>
+      ${td.repeat && td.repeat.mode === "days" ? `<label class="fld"><span>On these days</span>
+        ${WD_SHORT.map((w, i) => `<label class="chip-check" style="display:inline-flex;margin:0 6px 6px 0"><input type="checkbox" data-change="task-repeat-day" data-id="${td.id}" data-d="${i}" ${(td.repeat.days || []).includes(i) ? "checked" : ""}><span>${w}</span></label>`).join("")}
+      </label>` : ""}
+      ${td.repeat ? `<p class="soft note">${I.spark} A fresh copy appears on each day it's due. Changing this affects <b>future copies</b> — days you've already ticked keep their record. Completed copies older than ${KEEP_DONE_DAYS} days are cleared automatically; one-off tasks never are.</p>` : ""}
+      ${td.from ? `<p class="soft note">${I.chevL} Carried forward from ${esc(niceDate(td.from, { weekday: "long", month: "short", day: "numeric" }))}.</p>` : ""}
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
     </div>`);
 }
@@ -2255,9 +2401,10 @@ function vDashboard() {
   const missionsDone = MISSIONS.filter(m => m.done()).length;
   const wk = socialWeek();
   const studiedH = Math.round(studyRange(weekDates()) / 6) / 10;
-  const todos = state.todos.filter(td => !td.date || td.date === t);
-  const undone = todos.filter(td => !td.done).sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+  const todos = tasksOn(t);
+  const undone = todos.filter(td => !td.done);
   const done = todos.filter(td => td.done);
+  const stranded = strandedTasks();
   const dueHabits = state.habits.filter(h => isScheduled(h, t) && !isSkipped(h, t));
   /* everything with a date, not just University — this card is the one place you look for "what's coming" */
   const deadlines = [
@@ -2301,9 +2448,10 @@ function vDashboard() {
         <li class="${k.due < t ? "overdue" : ""}">
           <button class="checkbox" data-action="ag-uni" data-id="${k.id}" aria-label="Mark ${esc(k.title)} done">${I.check}</button>
           <span class="row-txt" data-nav="university"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.course || "University")}</span> · due ${daysUntil(k.due)}</small></span>
-        </li>`).join("")}${undone.length ? undone.map(taskRow).join("") : (uniDue.length ? "" : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`)}</ul>
+        </li>`).join("")}${undone.length ? undone.map((td, i) => taskRow(td, i, undone.length)).join("") : (uniDue.length ? "" : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`)}</ul>
       ${taskAddForm()}
-      <p class="soft note">${I.spark} Name a task after a habit, supplement or area (e.g. "Take Vitamin D3", "Pay yoga tuition") — it auto-links, and checking it logs there too.</p>
+      ${stranded.length ? `<button class="btn ghost slim" data-action="carry-open" style="margin-top:10px">${I.chevL}${stranded.length} unfinished from before</button>` : ""}
+      <p class="soft note">${I.spark} Name a task after a habit, supplement or area (e.g. "Take Vitamin D3", "Pay yoga tuition") — it auto-links, and checking it logs there too. Set a task to <b>repeat</b> from its detail sheet.</p>
       ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
 
     ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
@@ -4400,6 +4548,30 @@ const ACTIONS = {
   "ag-task": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); render(); } },
   "ag-reflect": openReflectModal,
   "todo-open": (el) => openTaskDetail(el.dataset.id),
+
+  /* carry-forward: unfinished tasks from previous days, offered once a day */
+  "carry-open": () => { state.tasksRolledOn = ""; maybeCarryForward(); },
+  "carry-one": (el) => {
+    carryTask(state.todos.find(x => x.id === el.dataset.id));
+    save(); render();
+    if (!maybeCarryForwardAgain()) toast("Brought forward ✅");
+  },
+  "carry-drop": (el) => {
+    state.todos = state.todos.filter(x => x.id !== el.dataset.id);
+    save(); render();
+    if (!maybeCarryForwardAgain()) toast("Dropped");
+  },
+  "carry-all": () => {
+    const n = strandedTasks().length;
+    strandedTasks().forEach(carryTask);
+    state.tasksRolledOn = todayIso();
+    closeModal(); save(); render();
+    toast(`${n} task${n === 1 ? "" : "s"} brought forward ✅`);
+  },
+  "carry-dismiss": () => { state.tasksRolledOn = todayIso(); closeModal(); save(); render(); },
+
+  "task-up": (el) => moveTask(el.dataset.id, -1),
+  "task-down": (el) => moveTask(el.dataset.id, 1),
   "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); closeModal(); render(); } },
   "todo-del": (el) => { closeModal(); deleteWithUndo(() => state.todos, el.dataset.id, "Task deleted"); },
   "task-add": () => formModal("New task",
@@ -5095,7 +5267,8 @@ const SUBMITS = {
     if (f.habitId === "none") { /* explicitly unlinked */ }
     else if (f.habitId) { habitId = f.habitId; }
     else { const link = suggestLinkForText(f.text); if (link.type === "sup") supId = link.id; else if (link.type === "area") areaId = link.id; else habitId = link.id; }
-    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "", habitId, supId, areaId });
+    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "",
+      habitId, supId, areaId, order: nextTaskOrder(), repeat: null, seriesId: "", from: "" });
   },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { clearAllMedia(); localStorage.removeItem(STORE_KEY); state = defaultState(); save(); setTimeout(() => maybeOnboard(), 60); },
@@ -5130,6 +5303,24 @@ const CHANGES = {
   },
   "task-text": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.text = el.value.slice(0, 120); save(); } },
   "task-time": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.time = el.value || ""; save(); } },
+  "task-repeat": (el) => {
+    const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
+    if (!el.value) setSeriesRepeat(td, null);
+    else {
+      if (!td.seriesId) td.seriesId = uid();      // a series id is what ties future copies together
+      setSeriesRepeat(td, el.value === "days"
+        ? { mode: "days", days: (td.repeat && td.repeat.days || []).length ? td.repeat.days : [WEEKDAY_MON0(todayIso())] }
+        : { mode: "daily" });
+    }
+    save(); render(); openTaskDetail(td.id);
+  },
+  "task-repeat-day": (el) => {
+    const td = state.todos.find(x => x.id === el.dataset.id);
+    if (!td || !td.repeat || td.repeat.mode !== "days") return;
+    const d = +el.dataset.d, days = td.repeat.days || [];
+    setSeriesRepeat(td, { mode: "days", days: el.checked ? [...new Set([...days, d])].sort() : days.filter(x => x !== d) });
+    save(); render(); openTaskDetail(td.id);
+  },
   "task-link": (el) => {
     const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
     const v = el.value || "";
@@ -5284,6 +5475,8 @@ bindEvents();
 bindTip();
 render();
 showLoadIssue();
+/* spawn today's repeating tasks, prune old copies, then offer anything left unfinished from before */
+if (!loadIssue) { if (rollTasks()) { save(); render(); } setTimeout(() => maybeCarryForward(), 900); }
 maybeOnboard();
 
 /* cloud sync: restore any saved session, then pull the latest snapshot (HTTPS origins only) */
@@ -5309,5 +5502,10 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
 /* reminders: start the local nudge loop, and re-check whenever the app comes back to the foreground.
    Coming back into view is the moment that matters — it's when the browser is guaranteed to run us. */
 startReminders();
-document.addEventListener("visibilitychange", () => { if (!document.hidden) tickReminders(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  tickReminders();
+  /* the app is often left open overnight — coming back is when "today" actually changes */
+  if (!loadIssue && state.tasksRolledOn !== todayIso()) { if (rollTasks()) save(); render(); maybeCarryForward(); }
+});
 window.addEventListener("focus", () => tickReminders());
