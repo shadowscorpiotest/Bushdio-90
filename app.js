@@ -9,6 +9,36 @@ const $  = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ---- sanitisers for values that land INSIDE an attribute, where esc() alone isn't the whole story ----
+   Everything here is rendered via innerHTML from template literals, so a value that escapes its quoted
+   context becomes an event handler. That matters more than usual in this app: the key that decrypts
+   your cloud data lives on the device, so one injected handler is not a defaced page — it's the whole
+   privacy promise. These are allow-lists, not filters: anything unrecognised is dropped. */
+
+/* A cover/poster reference. Only a data: image or an https: URL, and only characters that cannot
+   terminate a CSS url() or an HTML attribute. Reached by JSON import and by book/film autofill, which
+   stores a remote URL verbatim — neither is trustworthy input. */
+function safeUrl(v) {
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+  if (/["'()\\<>\s]/.test(s)) return "";                       // can't break out if it can't contain a breaker
+  if (/^data:image\/(png|jpe?g|gif|webp|avif);base64,[A-Za-z0-9+/=]+$/.test(s)) return s;
+  if (/^https:\/\/[A-Za-z0-9._~:/?#[\]@!$&*+,;=%-]+$/.test(s)) return s;
+  return "";
+}
+/* A colour or hue dropped into a custom property or a style declaration. Accepts #hex, a bare number
+   (hue degrees), a CSS keyword, var(--x), and the hsl()/rgb() forms the app generates itself — but
+   only with digits, %, commas and spaces inside, so the parens can't carry a url() or a second
+   declaration. Anything else becomes the fallback. */
+function cssVar(v, fallback = "") {
+  const s = String(v ?? "").trim();
+  if (/^#[0-9a-fA-F]{3,8}$/.test(s)) return s;
+  if (/^-?\d+(\.\d+)?$/.test(s)) return s;
+  if (/^(var\(--[a-z0-9-]+\)|[a-z]+)$/i.test(s)) return s;
+  if (/^(hsla?|rgba?)\([\d.,%\s/]+\)$/i.test(s)) return s;
+  return fallback;
+}
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 const parseTags = (v) => String(v || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 8);
 const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(+n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -716,6 +746,18 @@ function mediaRefsFor(id) {
   Object.values((state.nutrition || {}).photos || {}).forEach(day => Object.values(day || {}).forEach(scan));
   return out;
 }
+/* Decode a data: URL straight to a Blob. This used to go through `fetch(dataUrl)`, which works but
+   is a network API doing a string conversion — and the moment the app got a Content-Security-Policy,
+   `connect-src` refused it and saving a photo broke. Decoding it directly is faster, has no failure
+   mode, and doesn't require punching a hole in the policy. */
+function dataUrlToBlob(dataUrl) {
+  const [head, b64] = String(dataUrl).split(",");
+  const mime = (head.match(/^data:([^;]+)/) || [])[1] || "application/octet-stream";
+  const bin = atob(b64 || "");
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
 /* read a File into IndexedDB; images are downscaled unless they're already small */
 const MB = (n) => Math.round(n / 1024 / 1024);
 const fileSize = (n) => n >= 1024 * 1024 ? MB(n) + "MB" : Math.max(1, Math.round(n / 1024)) + "KB";
@@ -731,7 +773,7 @@ function storeMediaFile(file, cb) {
   if (kind === "video" && file.size > 8 * 1024 * 1024) toast(`Saving ${fileSize(file.size)} video…`);
   const finish = (blob, extra) => mediaPut(blob).then(id => cb(Object.assign({ id, kind }, extra || {}))).catch((e) => toast(`Couldn't save that ${kind} — ${e && e.name === "QuotaExceededError" ? "this device is out of storage" : "storage refused it"}`));
   if (kind === "image") {
-    processCover(file, (dataUrl) => fetch(dataUrl).then(r => r.blob()).then(finish), 900);
+    processCover(file, (dataUrl) => finish(dataUrlToBlob(dataUrl)), 900);
   } else {
     /* grab a still first so the clip has a real cover instead of a black rectangle */
     videoPoster(file, (poster) => {
@@ -1381,7 +1423,7 @@ function openBookPicker(n, d) {
     <div class="modal-body"><p class="soft" style="margin-bottom:10px">Add ${n} page${n > 1 ? "s" : ""} to…</p>
       <ul class="link-list">${currentBooks().map(b => `
         <li><button class="pick-book" data-action="book-log-pages" data-id="${b.id}" data-n="${n}" data-d="${d || todayIso()}">
-          <span class="book-cover sm ${b.cover ? "" : "ph"}" ${b.cover ? `style="background-image:url('${b.cover}')"` : ""}>${b.cover ? "" : esc(b.emoji || "📘")}</span>
+          <span class="book-cover sm ${b.cover ? "" : "ph"}" ${b.cover ? `style="background-image:url('${safeUrl(b.cover)}')"` : ""}>${b.cover ? "" : esc(b.emoji || "📘")}</span>
           <span class="row-txt"><b>${esc(b.title)}</b><small>page ${b.page || 0}${b.pages ? " of " + b.pages : ""}</small></span>
         </button></li>`).join("")}</ul></div>`);
 }
@@ -1779,7 +1821,7 @@ function viewMeta(id) {
 }
 
 function navItemHtml(item) {
-  const hue = item.hue ? `style="--a:${item.hue}"` : "";
+  const hue = item.hue ? `style="--a:${cssVar(item.hue)}"` : "";
   return `<button class="nav-item ${currentView === item.id ? "active" : ""}" data-nav="${item.id}" ${hue}>
     <span class="nav-ic">${I[item.icon]}</span><span>${esc(item.name)}</span>
   </button>`;
@@ -1907,7 +1949,7 @@ function openDrawer() {
     <div class="drawer-grid">
       <button class="drawer-item" data-nav="dashboard" style="--a:#6a5ae0"><span class="tile-ic">${I.home}</span><span>Dashboard</span></button>
       ${AREAS.map(a => `
-      <button class="drawer-item" data-nav="${a.id}" style="--a:${a.hue}">
+      <button class="drawer-item" data-nav="${a.id}" style="--a:${cssVar(a.hue)}">
         <span class="tile-ic">${I[a.icon]}</span><span>${esc(a.name)}</span>
       </button>`).join("")}
       <button class="drawer-item" data-nav="integrations" style="--a:#64748b"><span class="tile-ic">${I.zap}</span><span>Integrations</span></button>
@@ -1931,7 +1973,7 @@ function ring(pct, opts = {}) {
 }
 
 const barHtml = (pct, color) =>
-  `<span class="bar"><span style="width:${clamp(pct, 0, 100)}%${color ? `;background:${color}` : ""}"></span></span>`;
+  `<span class="bar"><span style="width:${clamp(pct, 0, 100)}%${color ? `;background:${cssVar(color)}` : ""}"></span></span>`;
 
 /* ---- charts (drawn post-mount into [data-chart-type] hosts) ---- */
 const CHART = {
@@ -2134,13 +2176,13 @@ function todayAgenda() {
 }
 function agendaRow(it) {
   if (it.nav) {
-    return `<div class="agenda-item" style="--a:${it.hue}" data-nav="${it.nav}">
-      <span class="a-ic" style="--a:${it.hue}">${I[it.icon]}</span>
+    return `<div class="agenda-item" style="--a:${cssVar(it.hue)}" data-nav="${it.nav}">
+      <span class="a-ic" style="--a:${cssVar(it.hue)}">${I[it.icon]}</span>
       <span class="a-txt"><b>${esc(it.title)}</b><small>${esc(it.sub)}</small></span>
       <span class="a-when">${esc(it.when || "")}</span>
     </div>`;
   }
-  return `<div class="agenda-item ${it.done ? "done" : ""}" style="--a:${it.hue}">
+  return `<div class="agenda-item ${it.done ? "done" : ""}" style="--a:${cssVar(it.hue)}">
     <button class="a-check ${it.done ? "on" : ""}" data-action="${it.action}" data-id="${it.id || ""}" aria-label="${it.action === "ag-reflect" ? "Write reflection" : "Complete " + esc(it.title)}">${I.check}</button>
     <span class="a-txt"><b>${it.emoji ? esc(it.emoji) + " " : ""}${esc(it.title)}</b><small>${esc(it.sub)}</small></span>
   </div>`;
@@ -2353,7 +2395,7 @@ function taskRow(td, i, total) {
   const sup = td.supId ? state.nutrition.supplements.find(x => x.id === td.supId) : null;
   const ar = td.areaId ? areaOf(td.areaId) : null;
   const link = h ? `<small>${I.target} ${esc(h.name)}</small>` : sup ? `<small>💊 ${esc(sup.name)}</small>`
-    : ar ? `<small class="task-area" style="--a:${ar.hue}">${esc(ar.name)}</small>` : "";
+    : ar ? `<small class="task-area" style="--a:${cssVar(ar.hue)}">${esc(ar.name)}</small>` : "";
   const marks = [
     td.from ? `<small class="task-from">${I.chevL}from ${esc(niceDate(td.from, { weekday: "short" }))}</small>` : "",
     td.repeat ? `<small class="task-rep" title="${esc(repeatLabel(td.repeat))}">${I.spark}${esc(repeatShort(td.repeat))}</small>` : "",
@@ -2495,7 +2537,7 @@ function vDashboard() {
       ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
 
     ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
-      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="${h.kind === "workout" ? "habit-workout-jump" : "ag-habit"}" data-id="${h.id}" style="--a:${h.color || "#6a5ae0"}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>` : `<p class="soft small">No habits scheduled today.</p>`))}
+      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="${h.kind === "workout" ? "habit-workout-jump" : "ag-habit"}" data-id="${h.id}" style="--a:${cssVar(h.color, "#6a5ae0")}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>` : `<p class="soft small">No habits scheduled today.</p>`))}
 
     ${currentlyReadingCard()}
     ${supplementsDueCard()}
@@ -2504,7 +2546,7 @@ function vDashboard() {
       <ul class="mission-list">
         ${MISSIONS.map(m => {
           const a = areaOf(m.area), md = m.done();
-          return `<li class="mission ${md ? "done" : ""}" data-nav="${m.area}" style="--a:${a.hue}">
+          return `<li class="mission ${md ? "done" : ""}" data-nav="${m.area}" style="--a:${cssVar(a.hue)}">
             <span class="tile-ic">${I[a.icon]}</span>
             <span class="mission-txt"><b>${esc(m.title())}</b><small>${esc(m.sub())}</small></span>
             <span class="mission-check">${md ? I.check : `<i class="xp-tag">+${m.xp}</i>`}</span>
@@ -2521,7 +2563,7 @@ function vDashboard() {
       </div>`)}
 
     ${deadlines.length ? card("", cardHead("Upcoming") + `
-      <ul class="mini-agenda">${deadlines.map(k => { const a = areaOf(k.area); return `<li data-nav="${k.nav}"><span class="a-ic" style="--a:${a.hue}">${I[a.icon]}</span><span class="row-txt"><b>${esc(k.title)}</b><small>${esc(a.name.toLowerCase())}</small></span><span class="a-when ${k.due < t ? "over" : ""}">${daysUntil(k.due)}</span></li>`; }).join("")}</ul>`) : ""}
+      <ul class="mini-agenda">${deadlines.map(k => { const a = areaOf(k.area); return `<li data-nav="${k.nav}"><span class="a-ic" style="--a:${cssVar(a.hue)}">${I[a.icon]}</span><span class="row-txt"><b>${esc(k.title)}</b><small>${esc(a.name.toLowerCase())}</small></span><span class="a-when ${k.due < t ? "over" : ""}">${daysUntil(k.due)}</span></li>`; }).join("")}</ul>`) : ""}
 
     ${card("", cardHead("Reflection") + `
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
@@ -2530,7 +2572,7 @@ function vDashboard() {
     ${card("span2", cardHead("Life areas") + `
       <div class="area-grid">
         ${AREAS.map(a => `
-          <button class="area-tile" data-nav="${a.id}" style="--a:${a.hue}">
+          <button class="area-tile" data-nav="${a.id}" style="--a:${cssVar(a.hue)}">
             <span class="tile-ic">${I[a.icon]}</span>
             <span class="tile-name">${esc(a.name)}</span>
             ${barHtml(areaProgressToday(a.id), "var(--a)")}
@@ -2601,7 +2643,7 @@ function habitRow(h, d, i, total) {
   const quantBar = h.type === "quantity" ? barHtml(100 * ((e.amount) || 0) / (h.target || 1), col) : "";
   const incBtn = h.type === "quantity" ? `<button class="btn tiny ghost" data-action="habit-inc" data-id="${h.id}">+${habitStep(h)}</button>` : "";
   const canMove = typeof i === "number" && total > 1;
-  return `<li class="habit-li ${met ? "done" : ""}" style="--hc:${col}">
+  return `<li class="habit-li ${met ? "done" : ""}" style="--hc:${cssVar(col, "#6a5ae0")}">
     ${control}
     <button class="row-emoji as-btn" data-action="habit-open" data-id="${h.id}" aria-label="Open ${esc(h.name)}">${esc(h.emoji)}</button>
     <span class="row-txt open" data-action="habit-open" data-id="${h.id}">
@@ -2689,7 +2731,7 @@ function weekdayPicker(selected) {
 function habitFormFields(h) {
   h = h || {}; const c = h.cadence || { mode: "daily" };
   return fld("Name", txt("name", "e.g. Drink water", h.name || "")) +
-    `<div class="fld-row">${fld("Emoji", txt("emoji", "💧", h.emoji || "💧", false))}<label class="fld"><span>Color</span><input type="color" name="color" value="${h.color || "#6a5ae0"}"></label></div>` +
+    `<div class="fld-row">${fld("Emoji", txt("emoji", "💧", h.emoji || "💧", false))}<label class="fld"><span>Color</span><input type="color" name="color" value="${cssVar(h.color, "#6a5ae0")}"></label></div>` +
     fld("Type", `<select name="type">
       <option value="build" ${(!h.type || h.type === "build") ? "selected" : ""}>Build — just do it (checkbox)</option>
       <option value="quantity" ${h.type === "quantity" ? "selected" : ""}>Amount — reach a target (e.g. 2L, 20 pages)</option>
@@ -2763,7 +2805,7 @@ function openHabitDetail(id) {
         if (!src) return `<p class="soft note">${I.link} Not linked to an area — you tick this one by hand. Add a source in <b>Edit</b> to have it fill itself in.</p>`;
         const a = areaOf(src.area);
         return `<div class="fed-note">
-          <span class="tile-ic" style="--a:${a.hue}">${I[a.icon]}</span>
+          <span class="tile-ic" style="--a:${cssVar(a.hue)}">${I[a.icon]}</span>
           <span class="row-txt"><b>Filled in by ${esc(a.name)}</b><small>${h.kind === "workout"
             ? (workoutDone(d) ? `${(state.workout.log[d] || []).length} session${(state.workout.log[d] || []).length > 1 ? "s" : ""} logged that day` : "No session logged that day")
             : `${habitAmount(h, d)}${h.unit ? " " + esc(h.unit) : ""} on that day`}</small></span>
@@ -2808,7 +2850,7 @@ function openGoalDetail(id) {
         <button class="btn tiny ghost" data-action="gms-add" data-id="${g.id}">${I.plus}Add milestone</button>
       </div>
       <div class="fld"><span>Daily actions — habits building this goal</span>
-        ${linked.length ? `<ul class="goal-habits">${linked.map(h => `<li data-action="habit-open" data-id="${h.id}"><span class="hdot" style="background:${h.color || "#6a5ae0"}"></span><b>${esc(h.emoji)} ${esc(h.name)}</b><small class="soft">${habitStreak(h)}🔥 · ${habitCompletion(h, 30)}%</small></li>`).join("")}</ul>` : `<p class="soft small">No habits linked yet.</p>`}
+        ${linked.length ? `<ul class="goal-habits">${linked.map(h => `<li data-action="habit-open" data-id="${h.id}"><span class="hdot" style="background:${cssVar(h.color, "#6a5ae0")}"></span><b>${esc(h.emoji)} ${esc(h.name)}</b><small class="soft">${habitStreak(h)}🔥 · ${habitCompletion(h, 30)}%</small></li>`).join("")}</ul>` : `<p class="soft small">No habits linked yet.</p>`}
         <button class="btn tiny ghost" data-action="goal-habits" data-id="${g.id}">${I.plus}Link habits</button>
       </div>
       <div class="pill-row"><button class="btn ghost" data-action="goal-edit" data-id="${g.id}">${I.edit}Edit</button><button class="btn danger" data-action="goal-del" data-id="${g.id}">${I.trash}Delete</button></div>
@@ -2988,7 +3030,7 @@ function exerciseCard(s, ex) {
   </div>`;
 }
 function sessionCard(s) {
-  const c = CAT_COLORS[s.category] || "#f76b15";
+  const c = cssVar(Object.prototype.hasOwnProperty.call(CAT_COLORS, s.category) ? CAT_COLORS[s.category] : "", "#f76b15");
   return `<li class="session">
     <div class="session-head">
       <span class="chip-cat" style="--a:${c}">${esc(s.category || "Session")}</span>
@@ -3427,14 +3469,14 @@ async function runSearch(kind) {
   box.innerHTML = _searchResults.map((r, i) => {
     const sub = r.kind === "media" ? [r.typeLabel, r.year].filter(Boolean).join(" · ") : [r.author, r.year].filter(Boolean).join(" · ");
     return `<button type="button" class="search-res" data-action="${kind}-pick" data-i="${i}">
-      <span class="sr-cover" ${r.cover ? `style="background-image:url('${r.cover}')"` : ""}>${r.cover ? "" : (r.kind === "media" ? "🎬" : "📘")}</span>
+      <span class="sr-cover" ${r.cover ? `style="background-image:url('${safeUrl(r.cover)}')"` : ""}>${r.cover ? "" : (r.kind === "media" ? "🎬" : "📘")}</span>
       <span class="sr-txt"><b>${esc(r.title)}</b><small>${esc(sub)}</small></span>
     </button>`;
   }).join("");
 }
 function bookCover(b, cls = "") {
   return b.cover
-    ? `<span class="book-cover ${cls}" style="background-image:url('${b.cover}')" role="img" aria-label="${esc(b.title)} cover"></span>`
+    ? `<span class="book-cover ${cls}" style="background-image:url('${safeUrl(b.cover)}')" role="img" aria-label="${esc(b.title)} cover"></span>`
     : `<span class="book-cover ${cls}" aria-hidden="true">${esc(b.emoji || "📘")}</span>`;
 }
 function starRow(b, action = "book-rate") {
@@ -3460,7 +3502,7 @@ function recChips(list) {
   const shown = list.slice(0, 4);
   const extra = list.length - shown.length;
   return `<div class="rec-row" aria-label="Recommended by ${esc(list.join(", "))}">
-    ${shown.map(n => `<span class="rec-chip" style="--rc:${nameColor(n)}" title="${esc(n)}">${esc(recInitials(n))}</span>`).join("")}
+    ${shown.map(n => `<span class="rec-chip" style="--rc:${cssVar(nameColor(n))}" title="${esc(n)}">${esc(recInitials(n))}</span>`).join("")}
     ${extra > 0 ? `<span class="rec-more">+${extra}</span>` : ""}
   </div>`;
 }
@@ -3489,7 +3531,7 @@ function recEditor(kind, id, list) {
   return `<div class="rec-edit">
     <span class="rec-label">${I.heart}Recommended by</span>
     <div class="rec-chips">
-      ${(list || []).map((n, i) => `<span class="rec-chip lg"><span class="rec-ava" style="--rc:${nameColor(n)}">${esc(recInitials(n))}</span><em>${esc(n)}</em><button type="button" class="rec-x" data-action="rec-del" data-kind="${kind}" data-id="${id}" data-i="${i}" aria-label="Remove ${esc(n)}">${I.x}</button></span>`).join("") || `<small class="soft">No one yet.</small>`}
+      ${(list || []).map((n, i) => `<span class="rec-chip lg"><span class="rec-ava" style="--rc:${cssVar(nameColor(n))}">${esc(recInitials(n))}</span><em>${esc(n)}</em><button type="button" class="rec-x" data-action="rec-del" data-kind="${kind}" data-id="${id}" data-i="${i}" aria-label="Remove ${esc(n)}">${I.x}</button></span>`).join("") || `<small class="soft">No one yet.</small>`}
     </div>
     <form class="rec-add" data-submit="rec-add">
       <input type="hidden" name="kind" value="${kind}"><input type="hidden" name="id" value="${id}">
@@ -3506,7 +3548,7 @@ function starsStatic(rating) {
 /* the poster gallery card, reused by Reading and Movies */
 function posterCard(o) {
   const cover = o.cover
-    ? `<span class="gc-cover" style="background-image:url('${o.cover}')" role="img" aria-label="${esc(o.title)} cover"></span>`
+    ? `<span class="gc-cover" style="background-image:url('${safeUrl(o.cover)}')" role="img" aria-label="${esc(o.title)} cover"></span>`
     : `<span class="gc-cover ph" aria-hidden="true">${esc(o.emoji || "📘")}</span>`;
   return `<button class="gallery-card" data-action="${o.action}" data-id="${o.id}" aria-label="Open ${esc(o.title)}">
     <span class="gc-poster">
@@ -3572,7 +3614,7 @@ function openBookDetail(id) {
     <header class="modal-head"><h3>Book details</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body book-detail">
       <div class="bd-top">
-        ${b.cover ? `<span class="bd-cover" style="background-image:url('${b.cover}')" role="img" aria-label="${esc(b.title)} cover"></span>` : `<span class="bd-cover ph">${esc(b.emoji || "📘")}</span>`}
+        ${b.cover ? `<span class="bd-cover" style="background-image:url('${safeUrl(b.cover)}')" role="img" aria-label="${esc(b.title)} cover"></span>` : `<span class="bd-cover ph">${esc(b.emoji || "📘")}</span>`}
         <div class="bd-meta">
           <h3 class="bd-title">${esc(b.title)}</h3>
           <p class="soft">${esc(b.author || "")}</p>
@@ -3723,7 +3765,7 @@ function openMediaDetail(id) {
     <header class="modal-head"><h3>${isSeries ? "Series" : "Movie"} details</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body book-detail">
       <div class="bd-top">
-        ${m.cover ? `<span class="bd-cover" style="background-image:url('${m.cover}')" role="img" aria-label="${esc(m.title)} cover"></span>` : `<span class="bd-cover ph">${esc(m.emoji || (isSeries ? "📺" : "🎬"))}</span>`}
+        ${m.cover ? `<span class="bd-cover" style="background-image:url('${safeUrl(m.cover)}')" role="img" aria-label="${esc(m.title)} cover"></span>` : `<span class="bd-cover ph">${esc(m.emoji || (isSeries ? "📺" : "🎬"))}</span>`}
         <div class="bd-meta">
           <h3 class="bd-title">${esc(m.title)}</h3>
           <p class="soft">${esc(mediaSub(m))}</p>
@@ -3942,7 +3984,7 @@ function finEntryForm(type, presetAmount, presetNote, presetCat) {
 function personTile(p) {
   const n = daysSinceTouch(p);
   const cold = n !== null && n >= OUT_OF_TOUCH_DAYS;
-  return `<button class="person" data-action="person-open" data-id="${p.id}" style="--rc:${nameColor(p.name)}">
+  return `<button class="person" data-action="person-open" data-id="${p.id}" style="--rc:${cssVar(nameColor(p.name))}">
     <span class="person-ava">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
     <b class="person-name">${esc(p.name)}</b>
     <small class="person-sub ${cold ? "cold" : ""}">${esc(p.relation || touchLabel(p))}</small>
@@ -3971,7 +4013,7 @@ function vSocial() {
     ${cold.length ? card("span2", cardHead("Been a while") + `
       <ul class="check-list">
         ${cold.slice(0, 6).map(({ p, n }) => `<li>
-          <span class="rec-ava" style="--rc:${nameColor(p.name)}">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
+          <span class="rec-ava" style="--rc:${cssVar(nameColor(p.name))}">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
           <span class="row-txt"><b>${esc(p.name)}</b><small>${esc(touchLabel(p))}${p.relation ? " · " + esc(p.relation) : ""}</small></span>
           <span class="pill-row">
             <button class="btn tiny" data-action="person-touch" data-id="${p.id}">${I.check}Caught up</button>
@@ -4029,7 +4071,7 @@ function openPersonDetail(id) {
   openModal(`
     <header class="modal-head">
       <div class="person-head">
-        <span class="person-ava lg" style="--rc:${nameColor(p.name)}">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
+        <span class="person-ava lg" style="--rc:${cssVar(nameColor(p.name))}">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
         <div><h3>${esc(p.name)}</h3>
           ${p.relation ? `<p class="soft">${esc(p.relation)}</p>` : ""}</div>
       </div>
@@ -4078,7 +4120,7 @@ function memoryCard(m, big) {
   const poster = vid ? posterOf(ph) : "";
   const cover = ph ? (vid ? (poster ? { id: poster, kind: "image" } : null) : ph) : null;
   return `
-  <article class="mem-card ${big ? "big" : ""} ${m.starred ? "starred" : ""}" style="--h:${m.hue}">
+  <article class="mem-card ${big ? "big" : ""} ${m.starred ? "starred" : ""}" style="--h:${cssVar(m.hue)}">
     <button class="mem-hit" data-action="memory-open" data-id="${m.id}" aria-label="Open ${esc(m.title)}"></button>
     <div class="mc-frame">
       ${cover ? `<span class="mc-photo" data-media="${cover.id}" data-media-kind="${cover.kind}"></span>`
@@ -4236,7 +4278,7 @@ function vProgress() {
       <ul class="area-progress">
         ${AREAS.slice(0, 8).map(a => {
           const p = areaProgressToday(a.id);
-          return `<li data-nav="${a.id}"><span class="dot" style="background:${a.hue}"></span>${esc(a.name)}${barHtml(p, a.hue)}<b>${p}%</b></li>`;
+          return `<li data-nav="${a.id}"><span class="dot" style="background:${cssVar(a.hue)}"></span>${esc(a.name)}${barHtml(p, a.hue)}<b>${p}%</b></li>`;
         }).join("")}
       </ul>`)}
     ${card("span2", cardHead("XP earned · last 14 days") + `
@@ -5399,8 +5441,24 @@ const ACTIONS = {
     inp.onchange = () => {
       const f = inp.files[0]; if (!f) return;
       f.text().then(txtC => {
-        try { state = Object.assign(defaultState(), JSON.parse(txtC)); save(); applyTheme(); render(); toast("Data imported ✓"); }
-        catch { toast("That file doesn't look like a LifeHub export"); }
+        try {
+          const incoming = JSON.parse(txtC);
+          if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) throw new Error("shape");
+          /* An import file is untrusted input — it may not have come from you. Keep only the keys this
+             version knows, then put it through the same migration ladder as cloud data so an export
+             from a NEWER LifeHub is refused rather than silently mangled. */
+          const allowed = Object.keys(defaultState());
+          const trimmed = {};
+          allowed.forEach(k => { if (k in incoming) trimmed[k] = incoming[k]; });
+          if (incoming.schema != null) trimmed.schema = incoming.schema;
+          state = migrate(Object.assign(defaultState(), trimmed));
+          save(); applyTheme(); render();
+          toast("Data imported ✓");
+        } catch (e) {
+          toast(e && e.code === "schema-too-new"
+            ? "That export is from a newer LifeHub — update this one first"
+            : "That file doesn't look like a LifeHub export");
+        }
       });
     };
     inp.click();

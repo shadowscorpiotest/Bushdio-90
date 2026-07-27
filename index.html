@@ -3,6 +3,31 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- Content Security Policy. This app renders through innerHTML, so an escaping slip anywhere in
+     app.js would otherwise become script execution — and the key that decrypts your cloud data is on
+     this device, so that is not a cosmetic problem. There is no inline JavaScript in this file, which
+     is what makes `script-src 'self'` possible: an injected <script> or onerror= simply won't run.
+     `style-src` still needs 'unsafe-inline' because the UI leans on inline style="" attributes, so
+     this is defence in depth, not a substitute for escaping. connect-src lists every origin the app
+     genuinely talks to; anything else is blocked, which also limits where an injection could
+     exfiltrate to. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data: blob: https:;
+  media-src 'self' blob:;
+  connect-src 'self' https://kkorqjoltzkgrtngmaiy.supabase.co https://www.googleapis.com https://openlibrary.org https://covers.openlibrary.org https://api.themoviedb.org https://image.tmdb.org;
+  worker-src 'self';
+  manifest-src 'self';
+  object-src 'none';
+  base-uri 'none';
+  form-action 'none'">
+<!-- Deliberately NOT set here: frame-ancestors. It is ignored when delivered via <meta> — the browser
+     logs a warning and applies nothing — so listing it would be decoration, not protection. Blocking
+     framing needs a real response header, which GitHub Pages cannot send. Anyone self-hosting behind
+     a server or CDN should add `Content-Security-Policy: frame-ancestors 'none'` there. -->
 <title>LifeHub — Your Life OS</title>
 <meta name="description" content="All your life. All in one place. Habits, health, learning, projects and more — with XP, streaks and badges.">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
