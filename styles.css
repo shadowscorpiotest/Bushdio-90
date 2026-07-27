@@ -682,6 +682,13 @@ li.overdue .row-txt small { color: var(--danger); }
 .mini-badge { display: inline-grid; place-items: center; vertical-align: middle; }
 .mini-badge svg { width: 13px; height: 13px; color: #f76b15; }
 .wday { cursor: pointer; background: none; border: 1px solid transparent; }
+/* ---------- workout: what a session amounted to ---------- */
+.sess-totals { font-size: 11.5px; font-weight: 650; color: var(--ink-2); padding: 3px 9px;
+  border-radius: 999px; background: var(--surface-2); white-space: nowrap; }
+.sess-sum { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px;
+  font-size: 12.5px; color: var(--ink-3); }
+.sess-sum svg { width: 14px; height: 14px; flex: none; }
+
 /* ---------- tasks: repeat + carried-forward marks ---------- */
 .task-from, .task-rep { display: inline-flex; align-items: center; gap: 3px; margin-right: 8px;
   font-size: 11.5px; color: var(--ink-3); }

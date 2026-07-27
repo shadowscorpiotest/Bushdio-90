@@ -2915,6 +2915,51 @@ function setLabel(ex, set) {
   return `${set.weight || 0}kg × ${set.reps || 0}`;
 }
 function exerciseNames() { const s = new Set(); state.workout.sessions.forEach(x => (x.exercises || []).forEach(e => s.add(e.name))); return [...s]; }
+/* Names you've already used, offered back to you. Same fix as the people list in Pass C, and for the
+   same reason: "Bench press" and "bench Press" would otherwise split one exercise's PR history in two. */
+function exerciseDatalist() {
+  const names = exerciseNames();
+  return names.length ? `<datalist id="ex-names">${names.map(n => `<option value="${esc(n)}"></option>`).join("")}</datalist>` : "";
+}
+/* What a session actually amounted to. Volume only means something for weight work, so time and
+   distance are totalled in their own units rather than mashed into one meaningless number. */
+function sessionTotals(s) {
+  let sets = 0, reps = 0, volume = 0, seconds = 0, distance = 0, unit = "km";
+  (s.exercises || []).forEach(ex => (ex.sets || []).forEach(set => {
+    sets++;
+    if (ex.kind === "time") seconds += +set.seconds || 0;
+    else if (ex.kind === "distance") { distance += +set.distance || 0; if (set.unit) unit = set.unit; }
+    else { reps += +set.reps || 0; volume += (+set.weight || 0) * (+set.reps || 0); }
+  }));
+  return { sets, reps, volume: Math.round(volume), seconds, distance: Math.round(distance * 100) / 100, unit,
+    exercises: (s.exercises || []).length };
+}
+function totalsLabel(t) {
+  const bits = [];
+  if (t.exercises) bits.push(`${t.exercises} exercise${t.exercises === 1 ? "" : "s"}`);
+  if (t.sets) bits.push(`${t.sets} set${t.sets === 1 ? "" : "s"}`);
+  if (t.reps) bits.push(`${t.reps} reps`);
+  if (t.volume) bits.push(`${t.volume.toLocaleString()} kg volume`);
+  if (t.seconds) bits.push(t.seconds >= 120 ? `${Math.round(t.seconds / 60)} min held` : `${t.seconds}s held`);
+  if (t.distance) bits.push(`${t.distance} ${t.unit}`);
+  return bits.join(" · ");
+}
+/* the most recent earlier session of the same category that actually had exercises in it */
+function lastSessionLike(s) {
+  return state.workout.sessions
+    .filter(x => x.id !== s.id && (x.exercises || []).length && (x.category || "") === (s.category || "") && x.date <= s.date)
+    .sort((a, b) => a.date < b.date ? 1 : -1)[0] || null;
+}
+/* the same totals across every session in a set of days */
+function totalsFor(sessions) {
+  return sessions.reduce((a, s) => {
+    const t = sessionTotals(s);
+    a.sets += t.sets; a.reps += t.reps; a.volume += t.volume; a.seconds += t.seconds;
+    a.distance += t.distance; a.exercises += t.exercises;
+    if (t.unit) a.unit = t.unit;
+    return a;
+  }, { sets: 0, reps: 0, volume: 0, seconds: 0, distance: 0, exercises: 0, unit: "km" });
+}
 function exerciseKind(name) { for (const s of state.workout.sessions) for (const e of (s.exercises || [])) if (e.name === name) return e.kind; return "reps"; }
 function prPrimary(name, kind) {
   let best = 0;
@@ -2944,12 +2989,17 @@ function sessionCard(s) {
       <span class="chip-cat" style="--a:${c}">${esc(s.category || "Session")}</span>
       ${s.planName ? `<b>${esc(s.planName)}</b>` : ""}
       <span class="spacer"></span>
+      ${(() => { const t = sessionTotals(s); return t.sets ? `<span class="sess-totals" title="${esc(totalsLabel(t))}">${t.sets} set${t.sets === 1 ? "" : "s"}${t.volume ? ` · ${t.volume.toLocaleString()}kg` : ""}</span>` : ""; })()}
       <button class="icon-btn ghost" data-action="session-note" data-id="${s.id}" aria-label="Edit note">${I.pen}</button>
       <button class="icon-btn ghost" data-action="session-del" data-id="${s.id}" aria-label="Delete session">${I.trash}</button>
     </div>
     ${s.note ? `<p class="session-note">${esc(s.note)}</p>` : ""}
     ${(s.exercises && s.exercises.length) ? `<div class="ex-list">${s.exercises.map(ex => exerciseCard(s, ex)).join("")}</div>` : ""}
-    <button class="btn tiny ghost" data-action="ex-add" data-id="${s.id}">${I.plus}Add exercise</button>
+    ${(() => { const t = sessionTotals(s); return t.sets ? `<p class="sess-sum">${I.chart} ${esc(totalsLabel(t))}</p>` : ""; })()}
+    <div class="pill-row">
+      <button class="btn tiny ghost" data-action="ex-add" data-id="${s.id}">${I.plus}Add exercise</button>
+      ${!(s.exercises || []).length && lastSessionLike(s) ? `<button class="btn tiny ghost" data-action="session-repeat" data-id="${s.id}">${I.chevL}Same as last time</button>` : ""}
+    </div>
     ${(s.media && s.media.length) ? `<div class="media-grid">
       ${s.media.map(m => `<div class="media-item">
         <span class="media-host" data-media="${m.id}" data-media-kind="${m.kind}"><span class="media-missing">loading…</span></span>
@@ -2967,7 +3017,8 @@ function vWorkout() {
   <div class="grid">
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">This week</p><h3>${wk} / ${state.workout.weeklyGoal} workouts</h3>${barHtml(100 * wk / state.workout.weeklyGoal, "#f76b15")}</div>
+        <div><p class="soft">This week</p><h3>${wk} / ${state.workout.weeklyGoal} workouts</h3>${barHtml(100 * wk / state.workout.weeklyGoal, "#f76b15")}
+          ${(() => { const t = totalsFor(state.workout.sessions.filter(s => weekDates().includes(s.date))); return t.sets ? `<small class="soft">${esc(totalsLabel(t))}</small>` : ""; })()}</div>
         <span class="big-ic" style="--a:#f76b15">${I.trophy}</span>
       </div>
       <div class="week-strip small">
@@ -4641,6 +4692,16 @@ const ACTIONS = {
   },
   "habit-up": (el) => moveHabit(el.dataset.id, -1),
   "habit-down": (el) => moveHabit(el.dataset.id, 1),
+
+  /* copy the exercise LIST from last time — names and kinds, never the sets. The point is to skip
+     the typing, not to pretend you lifted something you haven't yet. */
+  "session-repeat": (el) => {
+    const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (!s) return;
+    const prev = lastSessionLike(s); if (!prev) return;
+    s.exercises = (prev.exercises || []).map(ex => ({ id: uid(), name: ex.name, kind: ex.kind, sets: [] }));
+    save(); render();
+    toast(`${s.exercises.length} exercise${s.exercises.length === 1 ? "" : "s"} copied — sets are yours to log`);
+  },
   "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); closeModal(); render(); } },
   "todo-del": (el) => { closeModal(); deleteWithUndo(() => state.todos, el.dataset.id, "Task deleted"); },
   "task-add": () => formModal("New task",
@@ -4779,7 +4840,7 @@ const ACTIONS = {
   "session-del": (el) => { removeSession(el.dataset.id); save(); render(); },
   "session-media-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s); if (s) { dropMedia((s.media || []).find(m => m.id === el.dataset.m)); s.media = (s.media || []).filter(m => m.id !== el.dataset.m); save(); render(); } },
   "ex-add": (el) => formModal("Add exercise",
-    fld("Exercise", txt("name", "e.g. Bench press")) +
+    fld("Exercise", `<input type="text" name="name" placeholder="e.g. Bench press" list="ex-names" autocomplete="off" required maxlength="60">`) + exerciseDatalist() +
     fld("Measured in", `<select name="kind"><option value="reps">Weight × reps</option><option value="time">Time / hold (seconds)</option><option value="distance">Distance</option></select>`) +
     `<input type="hidden" name="sid" value="${el.dataset.id}">`, "ex-add"),
   "set-add": (el) => {
@@ -5240,7 +5301,15 @@ const SUBMITS = {
   "class-add": (f) => { state.workout.classes.push({ id: uid(), name: f.name, total: Math.max(1, +f.total || 8), price: +f.price || 0, start: f.start || todayIso(), log: [], renewals: 0 }); },
   "session-add": (f) => { const d = dayCursor("workout"); const sess = { id: uid(), date: d, category: f.category || "Strength", planId: null, planName: "", note: f.note || "", exercises: [], media: [] }; state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
   "session-note": (f) => { const s = state.workout.sessions.find(x => x.id === f.id); if (s) s.note = f.note; },
-  "ex-add": (f) => { const s = state.workout.sessions.find(x => x.id === f.sid); if (s) { s.exercises = s.exercises || []; s.exercises.push({ id: uid(), name: f.name, kind: f.kind || "reps", sets: [] }); } },
+  "ex-add": (f) => {
+    const s = state.workout.sessions.find(x => x.id === f.sid); if (!s || !f.name) return;
+    /* reuse the spelling already on record, so one exercise can't split its PR history across
+       "Bench press" and "bench Press" */
+    const known = exerciseNames().find(n => normName(n) === normName(f.name));
+    const name = known || f.name.trim();
+    s.exercises = s.exercises || [];
+    s.exercises.push({ id: uid(), name, kind: known ? exerciseKind(known) : (f.kind || "reps"), sets: [] });
+  },
   "set-add": (f) => {
     const s = state.workout.sessions.find(x => x.id === f.sid), ex = s && (s.exercises || []).find(e => e.id === f.eid);
     if (!ex) return;
