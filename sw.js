@@ -5,7 +5,7 @@
    for one launch, which made the app look broken after a fix. A short timeout falls back to the
    cached copy, so a slow or dead connection still opens instantly and offline still works.
    Icons are cache-first: they're the heavy part and they almost never change. */
-const VERSION = "v3";
+const VERSION = "v4";
 const CACHE = "lifehub-" + VERSION;
 const NET_TIMEOUT = 4000;
 
@@ -63,9 +63,43 @@ function cacheFirst(req) {
   });
 }
 
+/* A push from the server. The payload carries only what the lock screen shows — a title, a line and
+   which section to open — because that is all the server is ever given.
+   `userVisibleOnly` was promised at subscribe time, so every push MUST show something: if the
+   payload is missing or unreadable we still show a generic card rather than silently swallowing it,
+   which is what gets a site's push permission revoked by the browser. */
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : "" }; }
+  const title = d.title || "🌿 LifeHub";
+  e.waitUntil(self.registration.showNotification(title, {
+    body: d.body || "Something's due.",
+    tag: d.tag || ("push-" + (d.at || Date.now())),
+    icon: "./icon-192.png",
+    badge: "./icon-192.png",
+    data: { nav: d.nav || "" },
+  }));
+});
+
+/* Browsers rotate a subscription without asking. If we don't re-register, reminders quietly stop
+   working and nothing anywhere says so. */
+self.addEventListener("pushsubscriptionchange", (e) => {
+  e.waitUntil((async () => {
+    try {
+      const old = e.oldSubscription || await self.registration.pushManager.getSubscription();
+      const key = (e.newSubscription && e.newSubscription.options && e.newSubscription.options.applicationServerKey)
+        || (old && old.options && old.options.applicationServerKey);
+      if (!key) return;
+      const sub = e.newSubscription || await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      /* the page holds the credentials, so hand it over rather than duplicating auth in here */
+      const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      list.forEach(c => c.postMessage({ type: "push-resub", sub: sub.toJSON ? sub.toJSON() : sub, old: old && old.endpoint }));
+    } catch {}
+  })());
+});
+
 /* Tapping a reminder should land you on the thing it was about: focus an open window and tell it
-   where to go, or open one. (Notifications themselves are shown by the page for now — stage 2 adds
-   a "push" listener here once there's a server to push from.) */
+   where to go, or open one. */
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const view = ((e.notification.data || {}).nav) || "";

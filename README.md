@@ -77,7 +77,17 @@ Sync runs on the **live site** over HTTPS (not the in-chat preview, whose sandbo
 
 Turn them on in **Profile → Reminders** and LifeHub nudges you about the things that are actually due: a **supplement** you haven't taken, a **deadline landing today**, a **timed task** whose time has passed, your **habits still open** in the evening (one summary, not one buzz per habit), and a **streak at risk**. Any single habit can carry **its own time** — set it on the habit's Edit form. You choose the nudge hour, a quiet-from time, and which of those five kinds you want at all.
 
-> **What this can and can't do.** These arrive while LifeHub is **open or still running in the background** — so you get them when you pick your phone up, not silently at 8am with the app closed. Always-on reminders need a push server; that's the next step. On **iPhone**, notifications only work once LifeHub is added to your Home Screen. Nothing is ever sent without your permission, nothing is repeated, and at most three arrive in any minute.
+These arrive while LifeHub is **open or still running in the background** — you get them when you pick your phone up. Nothing is sent without your permission, nothing is repeated, and at most three arrive in any minute.
+
+### 🔔 …and with the app fully closed
+
+Optional, off by default, and it needs a one-time server setup — see **[`supabase/README.md`](supabase/README.md)**. Once it's on, a small scheduled function pushes your reminders at their times even with LifeHub shut.
+
+> **What this shares — the one exception in the whole app.** Everything else is encrypted in your browser before upload, so the server holds ciphertext it can't read. To wake your phone on time, the server has to store **the times, the weekdays and the short titles** shown on your lock screen. That's all. Your habit logs, journal, health, finances, memories and photos stay unreadable to it. The app says this on the screen where you switch it on, and turning it off deletes both the schedule and the device registration.
+
+> **What it can't do.** A schedule isn't a state check — the server can't tell whether you've already taken your vitamins, so these fire **on time** rather than only when something's genuinely outstanding. The smarter "3 habits still open" nudges stay app-open.
+
+On **iPhone**, web push only works for a PWA **added to the Home Screen** and opened from that icon — an Apple restriction, not a LifeHub one.
 
 ## 🔗 Log it once, it counts everywhere
 
@@ -116,29 +126,10 @@ Every delete — a habit, book, meal, memory, journal entry, expense, project �
 
 ### Setting up your own Supabase project
 
-If you're running your own copy, the SQL Editor needs the snapshot table, and **Storage** needs a private `media` bucket with policies scoped to each user's own folder:
-
-```sql
--- the encrypted snapshot (structured data)
-create table if not exists public.snapshots (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  ciphertext text not null, iv text not null, salt text not null,
-  version bigint not null default 1, updated_at timestamptz not null default now()
-);
-alter table public.snapshots enable row level security;
-create policy "own row" on public.snapshots
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);
-
--- encrypted photos & videos, one folder per account
-insert into storage.buckets (id, name, public) values ('media', 'media', false)
-on conflict (id) do nothing;
-
-create policy "own media" on storage.objects for all to authenticated
-  using      (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text)
-  with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);
-```
-
-The bucket is **private** — files are only reachable with your own access token, and they're ciphertext even then.
+Everything the server needs lives in **[`supabase/`](supabase/)**: run `supabase/schema.sql` in the SQL
+Editor for the snapshot table, the private `media` bucket and their row-level-security policies.
+Optional closed-app push (Edge Function + cron) is documented in
+**[`supabase/README.md`](supabase/README.md)**.
 
 ### Where things are stored
 
