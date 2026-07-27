@@ -176,7 +176,7 @@ function defaultState() {
     memories: [],              // {id,date,title,note,felt,emoji,hue,photos:[],tags:[],people:[],starred}
     journal: [],               // {id,date,text,mood,tags:[]}
     /* local reminders (stage 1 — no push server; see the reminders module for the honest scope) */
-    reminders: { enabled: false, after: "18:00", quietFrom: "22:00",
+    reminders: { enabled: false, push: false, after: "18:00", quietFrom: "22:00",
       kinds: { habits: true, supplements: true, streak: true, deadlines: true, tasks: true } },
   };
 }
@@ -447,6 +447,7 @@ const MIGRATIONS = [
     const r = s.reminders && typeof s.reminders === "object" ? s.reminders : {};
     s.reminders = {
       enabled: !!r.enabled,
+      push: !!r.push,
       after: r.after || "18:00",
       quietFrom: r.quietFrom || "22:00",
       kinds: Object.assign({ habits: true, supplements: true, streak: true, deadlines: true, tasks: true }, r.kinds || {}),
@@ -834,6 +835,10 @@ function storeFile(file, cb) {
    work inside the CSP-locked artifact — same caveat as book/movie search). */
 const SUPABASE_URL  = "https://kkorqjoltzkgrtngmaiy.supabase.co";
 const SUPABASE_ANON = "sb_publishable_phHHeh4YTbPyxxfHpVIXSA_q6RyfNce";
+/* Web-push public key (safe to ship — it's the public half). Generate a pair and paste the public
+   one here; see supabase/README.md. Empty means closed-app push simply isn't offered, so a
+   deployment that was never configured for it can't send anything. */
+const VAPID_PUBLIC = "";
 const SESSION_KEY  = "lifehub-session";   // {access_token,refresh_token,expires_at,email,user_id,salt,keyRaw}
 const SYNCMETA_KEY = "lifehub-sync";      // {userId,version,updatedAt}
 
@@ -4251,14 +4256,16 @@ function vIntegrations() {
     { emoji: "📚", name: "Book database", desc: "Search & autofill titles, covers, authors and page counts", on: true, hint: "No key needed", nav: "reading" },
     { emoji: "🎬", name: "Movie database (TMDb)", desc: "Search & autofill posters, cast, director and runtime", on: !!state.profile.tmdbKey, hint: state.profile.tmdbKey ? "Key added" : "Add a free key in Profile", nav: state.profile.tmdbKey ? "media" : "profile" },
     { emoji: "📲", name: "Install & offline", desc: "Add to your Home Screen — works with no connection", on: true, hint: "Built in" },
-    { emoji: "🔔", name: "Reminders", desc: "Nudges while the app is open or in the background — not yet with it fully closed",
+    { emoji: "🔔", name: "Reminders", desc: "Nudges while the app is open or in the background",
       on: (state.reminders || {}).enabled && notifyPermission() === "granted",
       hint: notifyPermission() === "denied" ? "Blocked in browser settings" : ((state.reminders || {}).enabled && notifyPermission() === "granted" ? "On" : "Turn on in Profile"), nav: "profile" },
+    { emoji: "📣", name: "Reminders with the app closed", desc: "Scheduled web push — the one feature whose times and titles the server can read",
+      on: pushOn(), hint: !VAPID_PUBLIC ? "Needs server setup" : (pushOn() ? "On" : "Turn on in Profile"), nav: "profile" },
   ];
   const planned = [
     ["📅", "Calendar", "Two-way sync for deadlines and time-blocking"],
     ["❤️", "Apple Health / Google Fit", "Pull steps and sleep instead of typing them"],
-    ["🔔", "Reminders with the app closed", "Silent at 8am — needs a push server"],
+
     ["📝", "Notion", "Mirror notes and tasks"],
   ];
   return `
@@ -4401,6 +4408,134 @@ async function enableReminders() {
   toast("Reminders on 🔔");
 }
 
+/* ================= push: reminders with the app fully closed ========================================
+   Everything else in LifeHub is encrypted before it leaves the device. This is the one exception, and
+   it is deliberate, opt-in and narrow: a server cannot wake your phone at 8am without knowing that it
+   should, and it cannot say anything useful without knowing what to say. So the REMINDER SCHEDULE —
+   times, weekdays and the short titles you see on the lock screen — is stored readable. Habit logs,
+   journal, health, finances, memories and photos remain ciphertext the server has no key for.
+
+   The second honest limit: a schedule is not a state check. The server cannot know whether you have
+   already taken your vitamins, so closed-app pushes fire ON TIME rather than only when something is
+   genuinely outstanding. The conditional nudges ("3 habits still open") stay app-open. Both facts are
+   stated on the card, not buried here. */
+const pushSupported = () => !!VAPID_PUBLIC && "serviceWorker" in navigator && "PushManager" in window && typeof Notification !== "undefined";
+const pushOn = () => !!(state.reminders && state.reminders.push);
+
+function urlB64ToU8(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+/* What this device will be pinged about. Derived from settings you already made — a habit's own
+   reminder time, and the evening nudge hour — so there is no second place to configure. */
+function pushSchedule() {
+  const r = state.reminders || {}, rows = [];
+  const tz = -new Date().getTimezoneOffset();          // minutes east of UTC
+  /* liveHabits() and not state.habits: a habit you retired that kept buzzing at 7am would be worse
+     than having no archive at all */
+  liveHabits().filter(h => h.remindAt).forEach(h => {
+    const c = h.cadence || { mode: "daily" };
+    rows.push({ at: h.remindAt, days: c.mode === "days" ? (c.days || []) : [0, 1, 2, 3, 4, 5, 6],
+      title: `${h.emoji} ${h.name}`, body: h.why || "Time for this one", nav: "habits", tz_offset: tz });
+  });
+  if ((r.kinds || {}).habits && r.after) {
+    rows.push({ at: r.after, days: [0, 1, 2, 3, 4, 5, 6], title: "🌿 LifeHub",
+      body: "Anything still open today?", nav: "dashboard", tz_offset: tz });
+  }
+  return rows;
+}
+
+async function pushSubscribe() {
+  if (!pushSupported()) { toast("Closed-app reminders aren't set up for this build"); return false; }
+  if (!isSignedIn()) { toast("Sign in first — the server needs to know which device is yours"); return false; }
+  let perm = Notification.permission;
+  if (perm === "default") { try { perm = await Notification.requestPermission(); } catch { perm = "denied"; } }
+  if (perm !== "granted") { toast("Notifications are blocked — allow them for this site first"); return false; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(VAPID_PUBLIC) });
+    await savePushSub(sub);
+    state.reminders.push = true;
+    save();
+    await syncPushSchedule();
+    render();
+    toast("Closed-app reminders on 🔔");
+    return true;
+  } catch (e) {
+    toast("Couldn't register for push — " + ((e && e.message) || "the browser refused"));
+    return false;
+  }
+}
+async function savePushSub(sub) {
+  const j = sub.toJSON ? sub.toJSON() : sub;
+  const keys = j.keys || {};
+  const r = await restFetch("push_subs", {
+    method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({ user_id: cloud.session.user_id, endpoint: j.endpoint, p256dh: keys.p256dh, auth: keys.auth }),
+  });
+  if (!r.ok) throw new Error("couldn't store this device (" + r.status + ")");
+}
+/* Replace this account's schedule wholesale — simpler than diffing, and it means turning a habit's
+   reminder off actually removes it from the server rather than leaving an orphan buzzing at 7am. */
+async function syncPushSchedule() {
+  if (!isSignedIn() || !pushOn()) return;
+  const rows = pushSchedule().map(x => Object.assign({ user_id: cloud.session.user_id }, x));
+  try {
+    await restFetch(`push_schedule?user_id=eq.${cloud.session.user_id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    if (rows.length) await restFetch("push_schedule", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(rows) });
+  } catch {}
+}
+async function pushUnsubscribe() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      /* delete the row FIRST: a subscription we can no longer identify is a device that keeps buzzing */
+      if (isSignedIn()) await restFetch(`push_subs?endpoint=eq.${encodeURIComponent(sub.endpoint)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }).catch(() => {});
+      await sub.unsubscribe();
+    }
+    if (isSignedIn()) await restFetch(`push_schedule?user_id=eq.${cloud.session.user_id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }).catch(() => {});
+  } catch {}
+  state.reminders.push = false;
+  save(); render();
+  toast("Closed-app reminders off — this device and its schedule were removed from the server");
+}
+
+/* The one place in LifeHub where data leaves the device readable. It gets its own box, its own
+   switch, and a plain list of exactly what goes up — because "we encrypt everything" stops being
+   true here, and the person using it should be the one deciding whether that trade is worth it. */
+function pushCard(ios, standalone) {
+  if (!VAPID_PUBLIC) return `<div class="push-box">
+    <b>${I.zap}Even when the app is closed</b>
+    <p class="soft note">Not switched on for this build yet — it needs a push key and a small scheduled function on the server. Setup steps are in <code>supabase/README.md</code>.</p>
+  </div>`;
+  if (!isSignedIn()) return `<div class="push-box">
+    <b>${I.zap}Even when the app is closed</b>
+    <p class="soft note">Needs an account, so the server knows which device to wake. <button class="linkish" data-nav="profile">Create one free</button> — it stays free.</p>
+  </div>`;
+  const rows = pushSchedule();
+  return `<div class="push-box ${pushOn() ? "on" : ""}">
+    <b>${I.zap}Even when the app is closed${pushOn() ? `<span class="int-state on">${I.check}On</span>` : ""}</b>
+    <p class="soft">Reminders that arrive with LifeHub fully shut — a real alarm, not a nudge you find later.</p>
+    <p class="soft note"><b>What this shares.</b> Everything else you keep here is encrypted so the server can't read it. This is the exception: to buzz you on time, the server stores <b>the times, the weekdays and the short titles</b> shown on your lock screen — nothing else. Your logs, journal, health, finances and photos stay unreadable to it.</p>
+    <p class="soft note"><b>What it can't do.</b> A schedule isn't a state check: the server can't tell whether you've already taken your vitamins, so these fire <b>on time</b> rather than only when something's outstanding. The smarter "3 habits still open" nudges stay app-open.</p>
+    ${rows.length ? `<div class="fld"><span>What would be sent</span>
+      <ul class="check-list tight">${rows.map(x => `<li>
+        <span class="row-emoji">🔔</span>
+        <span class="row-txt"><b>${esc(x.title)}</b><small>${esc(x.at)} · ${x.days.length === 7 ? "every day" : x.days.map(i => WD_SHORT[i]).join(", ")}</small></span>
+      </li>`).join("")}</ul></div>`
+      : `<p class="soft note">${I.clock} Nothing to send yet — give a habit its own time above, or keep the evening nudge on.</p>`}
+    <div class="pill-row">
+      ${pushOn()
+        ? `<button class="btn ghost" data-action="push-off">Turn off &amp; delete from server</button>`
+        : `<button class="btn primary" data-action="push-on">${I.bell}Turn on</button>`}
+    </div>
+    ${ios && !standalone ? `<p class="soft note"><b>On iPhone</b> this only works once LifeHub is on your Home Screen (Share → Add to Home Screen), then opened from there.</p>` : ""}
+  </div>`;
+}
+
 function remindersCard() {
   const r = state.reminders, perm = notifyPermission();
   const timed = liveHabits().filter(h => h.remindAt);
@@ -4440,6 +4575,7 @@ function remindersCard() {
       <button class="btn ghost" data-action="rem-test">${I.bell}Send a test</button>
       <button class="btn ghost" data-action="rem-off">Turn off</button>
     </div>
+    ${pushCard(ios, standalone)}
     ${remindersHonesty(ios, standalone)}`);
 }
 /* Said plainly, in the app, where it matters — not buried in a README. */
@@ -4583,7 +4719,9 @@ const ACTIONS = {
 
   /* reminders */
   "rem-enable": () => enableReminders(),
-  "rem-off": () => { state.reminders.enabled = false; save(); render(); startReminders(); toast("Reminders off"); },
+  "rem-off": () => { state.reminders.enabled = false; if (pushOn()) pushUnsubscribe(); save(); render(); startReminders(); toast("Reminders off"); },
+  "push-on": () => pushSubscribe(),
+  "push-off": () => pushUnsubscribe(),
   "rem-test": async () => {
     const ok = await sendNudge({ key: "test:" + Date.now(), title: "🌿 LifeHub", body: "This is what a nudge looks like.", nav: "dashboard" });
     toast(ok ? "Sent — check your notifications" : "Couldn't show it. Your browser or system may have notifications muted.");
@@ -5289,7 +5427,7 @@ const SUBMITS = {
   "auth-signup": (f) => { doAuth("signup", f.email, f.password); return true; },
 
   "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() }); },
-  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.remindAt = f.remindAt || ""; } },
+  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.remindAt = f.remindAt || ""; syncPushSchedule(); } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
   "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", progress: [], habitIds: [], milestones: [] }); },
   "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; syncGoalMilestones(g); } },
@@ -5540,9 +5678,9 @@ const CHANGES = {
   "tmdb-key": (el) => { state.profile.tmdbKey = el.value.trim(); save(); },
 
   /* reminders */
-  "rem-after": (el) => { state.reminders.after = el.value || "18:00"; save(); startReminders(); },
+  "rem-after": (el) => { state.reminders.after = el.value || "18:00"; save(); startReminders(); syncPushSchedule(); },
   "rem-quiet": (el) => { state.reminders.quietFrom = el.value || "22:00"; save(); startReminders(); },
-  "rem-kind":  (el) => { state.reminders.kinds[el.dataset.id] = el.checked; save(); startReminders(); },
+  "rem-kind":  (el) => { state.reminders.kinds[el.dataset.id] = el.checked; save(); startReminders(); syncPushSchedule(); },
   "book-cover-new": (el) => {
     processCover(el.files[0], (dataUrl) => {
       const field = $("#coverField"), preview = $("#coverPreview");
@@ -5634,6 +5772,11 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
   navigator.serviceWorker.addEventListener("message", (e) => {
     const d = e.data || {};
     if (d.type === "nav" && d.view && VIEWS[d.view]) { go(d.view); window.scrollTo({ top: 0 }); }
+    /* the browser rotated our push subscription — re-register it before reminders quietly die */
+    if (d.type === "push-resub" && d.sub && isSignedIn()) {
+      if (d.old) restFetch(`push_subs?endpoint=eq.${encodeURIComponent(d.old)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }).catch(() => {});
+      savePushSub(d.sub).catch(() => {});
+    }
   });
 }
 
