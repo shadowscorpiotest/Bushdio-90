@@ -132,7 +132,10 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 6;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 7;                             // bump when you append a step to MIGRATIONS
+/* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
+   type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
+const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 let state = null;
 
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
@@ -166,7 +169,9 @@ function defaultState() {
     work: { items: [] },       // {id,title,done}
     projects: [],              // {id,name,emoji,status,progress,note}
     finance: { entries: [], importedClasses: [] }, // entries {id,date,type:income|expense,amount,category,note}
-    social: { items: [], log: {} }, // items {id,title,emoji,target}; log[weekKey]={itemId:count}
+    /* people {id,name,emoji,relation,birthday,note,tags:[],touches:[dateIso]} — the same humans the
+       rest of the app already names as "recommended by" and "who was there" */
+    social: { items: [], log: {}, people: [] }, // items {id,title,emoji,target}; log[weekKey]={itemId:count}
     memories: [],              // {id,date,title,note,felt,emoji,hue,photos:[],tags:[],people:[],starred}
     journal: [],               // {id,date,text,mood,tags:[]}
     /* local reminders (stage 1 — no push server; see the reminders module for the honest scope) */
@@ -446,6 +451,32 @@ const MIGRATIONS = [
       kinds: Object.assign({ habits: true, supplements: true, streak: true, deadlines: true, tasks: true }, r.kinds || {}),
     };
     (s.habits || []).forEach(h => { if (h.remindAt == null) h.remindAt = ""; });
+  },
+
+  /* 6 → 7 · Social gets real people. The app already knew these humans — as the names on
+     "recommended by" and "who was there" — it just had no record of them. Promote every name
+     already in use into a person, so the list arrives populated rather than empty. */
+  (s) => {
+    s.social = s.social || { items: [], log: {} };
+    if (!Array.isArray(s.social.people)) s.social.people = [];
+    const seen = new Map(s.social.people.map(p => [normName(p.name), p]));
+    const meet = (name) => {
+      const k = normName(name);
+      if (!k || seen.has(k)) return;
+      const p = { id: uid(), name: String(name).trim(), emoji: "", relation: "", birthday: "", note: "", tags: [], touches: [] };
+      seen.set(k, p); s.social.people.push(p);
+    };
+    (s.reading && s.reading.books || []).forEach(b => (b.recommenders || []).forEach(meet));
+    (s.media || []).forEach(m => (m.recommenders || []).forEach(meet));
+    (s.memories || []).forEach(m => (m.people || []).forEach(meet));
+    s.social.people.forEach(p => {
+      if (p.emoji == null) p.emoji = "";
+      if (p.relation == null) p.relation = "";
+      if (p.birthday == null) p.birthday = "";
+      if (p.note == null) p.note = "";
+      if (!Array.isArray(p.tags)) p.tags = [];
+      if (!Array.isArray(p.touches)) p.touches = [];
+    });
   },
 ];
 
@@ -1505,6 +1536,67 @@ function supStatus(sup) {
   const elapsed = Math.floor((Date.parse(todayIso()) - Date.parse(last)) / DAY_MS);
   return { due: elapsed >= period, nextInDays: Math.max(0, period - elapsed), last };
 }
+/* ---------- people ---------- */
+const peopleAll = () => (state.social.people = state.social.people || []);
+const personByName = (name) => peopleAll().find(p => normName(p.name) === normName(name)) || null;
+const personById = (id) => peopleAll().find(p => p.id === id) || null;
+/* Typing a name anywhere in the app is how you meet someone — Social should already know them. */
+function ensurePerson(name) {
+  const clean = String(name || "").trim();
+  if (!clean) return null;
+  const found = personByName(clean);
+  if (found) return found;
+  const p = { id: uid(), name: clean, emoji: "", relation: "", birthday: "", note: "", tags: [], touches: [] };
+  peopleAll().push(p);
+  return p;
+}
+/* The name IS the join key, so renaming someone has to rewrite every place they're named — otherwise
+   the rename would quietly orphan their memories and recommendations. */
+function renamePersonEverywhere(from, to) {
+  const swap = (list) => (list || []).forEach((n, i) => { if (normName(n) === normName(from)) list[i] = to; });
+  state.memories.forEach(m => swap(m.people));
+  state.reading.books.forEach(b => swap(b.recommenders));
+  state.media.forEach(m => swap(m.recommenders));
+}
+const lastTouch = (p) => (p.touches || []).slice().sort().pop() || "";
+function daysSinceTouch(p) {
+  const d = lastTouch(p);
+  return d ? Math.floor((Date.parse(todayIso()) - Date.parse(d)) / DAY_MS) : null;
+}
+function touchLabel(p) {
+  const n = daysSinceTouch(p);
+  if (n === null) return "no catch-up logged";
+  if (n <= 0) return "spoke today";
+  if (n === 1) return "spoke yesterday";
+  if (n < 7) return `${n} days ago`;
+  if (n < 31) return `${Math.round(n / 7)} week${n < 11 ? "" : "s"} ago`;
+  return `${Math.round(n / 30)} month${n < 46 ? "" : "s"} ago`;
+}
+/* Everywhere else in the app this person shows up. This is the whole point of Pass C: one human,
+   not three unrelated strings. */
+function personAppearances(p) {
+  const hit = (list) => (list || []).some(n => normName(n) === normName(p.name));
+  return {
+    memories: state.memories.filter(m => hit(m.people)),
+    books: state.reading.books.filter(b => hit(b.recommenders)),
+    media: state.media.filter(m => hit(m.recommenders)),
+  };
+}
+/* next occurrence of a birthday (MM-DD stored as a full date), or null */
+function nextBirthday(p) {
+  if (!p.birthday || p.birthday.length < 10) return null;
+  const t = todayIso(), md = p.birthday.slice(5);
+  const thisYear = t.slice(0, 4) + "-" + md;
+  return thisYear >= t ? thisYear : (+t.slice(0, 4) + 1) + "-" + md;
+}
+const OUT_OF_TOUCH_DAYS = 30;
+function outOfTouch() {
+  return peopleAll()
+    .map(p => ({ p, n: daysSinceTouch(p) }))
+    .filter(x => x.n !== null && x.n >= OUT_OF_TOUCH_DAYS)
+    .sort((a, b) => b.n - a.n);
+}
+
 function socialWeek() {
   const log = state.social.log[weekKey()] || {};
   const done = state.social.items.reduce((n, it) => n + Math.min(log[it.id] || 0, it.target), 0);
@@ -2175,6 +2267,9 @@ function vDashboard() {
       .map(k => ({ title: k.title, due: k.due, nav: "work", area: "work" })),
     ...state.goals.filter(g => g.deadline && g.deadline <= addDays(t, 5) && !goalReached(g))
       .map(g => ({ title: g.title, due: g.deadline, nav: "habits", area: "habits" })),
+    /* a birthday is a deadline you actually care about missing */
+    ...peopleAll().map(p => ({ p, d: nextBirthday(p) })).filter(x => x.d && x.d <= addDays(t, 5))
+      .map(({ p, d }) => ({ title: `${p.name}'s birthday`, due: d, nav: "social", area: "social" })),
   ].sort((a, b) => a.due < b.due ? -1 : 1);
   /* coursework due today or overdue is a thing you must do today — it belongs in Today's Focus */
   const uniDue = state.university.tasks.filter(k => !k.done && k.due && k.due <= t)
@@ -3128,6 +3223,12 @@ function reopenDetail(kind, id) {
   return (kind === "media" ? openMediaDetail : openBookDetail)(id);
 }
 
+/* native autocomplete over everyone Social already knows — the cheapest way to stop the same human
+   being typed three slightly different ways */
+function peopleDatalist() {
+  const list = peopleAll();
+  return list.length ? `<datalist id="people-list">${list.map(p => `<option value="${esc(p.name)}"></option>`).join("")}</datalist>` : "";
+}
 /* editable recommenders block for the detail modal */
 function recEditor(kind, id, list) {
   return `<div class="rec-edit">
@@ -3137,9 +3238,11 @@ function recEditor(kind, id, list) {
     </div>
     <form class="rec-add" data-submit="rec-add">
       <input type="hidden" name="kind" value="${kind}"><input type="hidden" name="id" value="${id}">
-      <input type="text" name="name" placeholder="Add a name…" maxlength="24" aria-label="Recommender name">
+      <input type="text" name="name" placeholder="Add a name…" maxlength="24" aria-label="Person's name"
+             list="people-list" autocomplete="off">
       <button class="btn tiny" type="submit">${I.plus}Add</button>
     </form>
+    ${peopleDatalist()}
   </div>`;
 }
 function starsStatic(rating) {
@@ -3580,8 +3683,23 @@ function finEntryForm(type, presetAmount, presetNote, presetCat) {
 }
 
 /* ---------- social ---------- */
+/* one person as a tappable tile */
+function personTile(p) {
+  const n = daysSinceTouch(p);
+  const cold = n !== null && n >= OUT_OF_TOUCH_DAYS;
+  return `<button class="person" data-action="person-open" data-id="${p.id}" style="--rc:${nameColor(p.name)}">
+    <span class="person-ava">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
+    <b class="person-name">${esc(p.name)}</b>
+    <small class="person-sub ${cold ? "cold" : ""}">${esc(p.relation || touchLabel(p))}</small>
+  </button>`;
+}
+
 function vSocial() {
   const w = socialWeek();
+  const people = peopleAll().slice().sort((a, b) => a.name.localeCompare(b.name));
+  const cold = outOfTouch();
+  const bdays = people.map(p => ({ p, d: nextBirthday(p) })).filter(x => x.d && x.d <= addDays(todayIso(), 45))
+    .sort((a, b) => a.d < b.d ? -1 : 1);
   return `
   <div class="grid">
     ${card("span2", `
@@ -3589,6 +3707,33 @@ function vSocial() {
         <div><p class="soft">This week</p><h3>${w.done} / ${w.target} connections</h3>${barHtml(100 * w.done / (w.target || 1), "#e93d82")}</div>
         <span class="big-ic" style="--a:#e93d82">${I.users}</span>
       </div>`)}
+
+    ${card("span2", cardHead(`Your people <small class="soft">${people.length || ""}</small>`, addBtn("Add someone", "person-add")) + (people.length ? `
+      <div class="people-grid">${people.map(personTile).join("")}</div>
+      <p class="soft note">${I.heart} Everyone you name as “recommended by” on a book or film, or “who was there” on a memory, shows up here automatically — same person, one place.</p>`
+      : emptyMsg("users", "The people who matter, in one place.", addBtn("Add someone", "person-add"))))}
+
+    ${cold.length ? card("span2", cardHead("Been a while") + `
+      <ul class="check-list">
+        ${cold.slice(0, 6).map(({ p, n }) => `<li>
+          <span class="rec-ava" style="--rc:${nameColor(p.name)}">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
+          <span class="row-txt"><b>${esc(p.name)}</b><small>${esc(touchLabel(p))}${p.relation ? " · " + esc(p.relation) : ""}</small></span>
+          <span class="pill-row">
+            <button class="btn tiny" data-action="person-touch" data-id="${p.id}">${I.check}Caught up</button>
+            <button class="icon-btn ghost" data-action="person-open" data-id="${p.id}" aria-label="Open ${esc(p.name)}">${I.chevR}</button>
+          </span>
+        </li>`).join("")}
+      </ul>
+      <p class="soft note">${I.clock} People you haven't logged a catch-up with in ${OUT_OF_TOUCH_DAYS}+ days. Only people you've actually logged once appear here — it won't nag you about someone you just met.</p>`) : ""}
+
+    ${bdays.length ? card("span2", cardHead("Birthdays coming up") + `
+      <ul class="check-list">
+        ${bdays.map(({ p, d }) => `<li>
+          <span class="row-emoji">🎂</span>
+          <span class="row-txt"><b>${esc(p.name)}</b><small>${esc(niceDate(d, { month: "long", day: "numeric" }))}</small></span>
+          <span class="a-when">${esc(daysUntil(d))}</span>
+        </li>`).join("")}
+      </ul>`) : ""}
     ${card("span2", cardHead("Connection goals", addBtn("Add goal", "social-add")) + (state.social.items.length ? `
       <ul class="check-list">
         ${state.social.items.map(itm => {
@@ -3605,6 +3750,62 @@ function vSocial() {
         }).join("")}
       </ul>` : emptyMsg("users", "Relationships are the best investment.", addBtn("Add a goal", "social-add"))))}
   </div>`;
+}
+
+function openPersonDetail(id) {
+  const p = personById(id);
+  if (!p) { closeModal(); return; }
+  const app = personAppearances(p);
+  const bd = nextBirthday(p);
+  const n = (p.touches || []).length;
+  const line = (icon, items, kind, label) => items.length ? `
+    <div class="fld"><span>${label}</span>
+      <ul class="check-list tight">${items.map(x => `<li data-action="person-goto" data-kind="${kind}" data-id="${x.id}">
+        <span class="row-emoji">${icon}</span><span class="row-txt"><b>${esc(x.title)}</b>${x.sub ? `<small>${esc(x.sub)}</small>` : ""}</span>
+        <span class="a-when">${I.chevR}</span>
+      </li>`).join("")}</ul>
+    </div>` : "";
+  /* the header carries who they are; the line below carries the history — saying "no catch-up logged"
+     in both places is noise, and joining empty fields gives you "— · " */
+  const bits = [n ? "Last spoke " + touchLabel(p) : "No catch-ups logged yet"];
+  if (n > 1) bits.push(`${n} logged`);
+  if (bd) bits.push(`birthday ${niceDate(bd, { month: "long", day: "numeric" })} (${daysUntil(bd)})`);
+
+  openModal(`
+    <header class="modal-head">
+      <div class="person-head">
+        <span class="person-ava lg" style="--rc:${nameColor(p.name)}">${p.emoji ? esc(p.emoji) : esc(recInitials(p.name))}</span>
+        <div><h3>${esc(p.name)}</h3>
+          ${p.relation ? `<p class="soft">${esc(p.relation)}</p>` : ""}</div>
+      </div>
+      <button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button>
+    </header>
+    <div class="modal-body">
+      <div class="pill-row">
+        <button class="btn primary" data-action="person-touch" data-id="${p.id}">${I.check}Caught up today</button>
+      </div>
+      <p class="soft note">${I.clock} ${esc(bits.join(" · "))}</p>
+      ${p.note ? `<p class="mem-note">${esc(p.note)}</p>` : ""}
+      ${(p.tags || []).length ? `<span class="j-tags">${p.tags.map(x => `<i>${esc(x)}</i>`).join("")}</span>` : ""}
+
+      ${line("📸", app.memories.map(m => ({ id: m.id, title: m.title, sub: memWhen(m.date).rel })), "memory", "Memories you shared")}
+      ${line("📚", app.books.map(b => ({ id: b.id, title: b.title, sub: b.author || "" })), "book", "Books they recommended")}
+      ${line("🎬", app.media.map(m => ({ id: m.id, title: m.title, sub: m.type || "" })), "media", "Films &amp; series they recommended")}
+      ${(!app.memories.length && !app.books.length && !app.media.length)
+        ? `<p class="soft note">${I.heart} Name them on a memory or as who recommended a book, and it'll show up here.</p>` : ""}
+    </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="person-edit" data-id="${p.id}">${I.edit}Edit</button>
+      <button type="button" class="btn danger" data-action="person-del" data-id="${p.id}">${I.trash}Delete</button>
+    </footer>`);
+}
+
+function personFormFields(p) {
+  p = p || {};
+  return fld("Name", txt("name", "e.g. Mara", p.name || "")) +
+    `<div class="fld-row">${fld("Emoji <small class=\"soft\">— optional</small>", txt("emoji", "🙂", p.emoji || "", false))}${fld("How you know them", txt("relation", "sister / colleague…", p.relation || "", false))}</div>` +
+    `<div class="fld-row"><label class="fld"><span>Birthday</span><input type="date" name="birthday" value="${esc(p.birthday || "")}"></label>${fld("Tags", txt("tags", "family, uni", (p.tags || []).join(", "), false))}</div>` +
+    fld("Note", `<textarea name="note" rows="2" maxlength="500" placeholder="Anything worth remembering…">${esc(p.note || "")}</textarea>`);
 }
 
 /* ---------- memories ---------- */
@@ -4658,6 +4859,36 @@ const ACTIONS = {
   },
   "social-add": () => formModal("New connection goal",
     fld("Goal", txt("title", "e.g. Call grandma")) + `<div class="fld-row">${fld("Times per week", num("target", 1, 1))}${fld("Emoji", txt("emoji", "📞", "📞", false))}</div>`, "social-add"),
+  /* people */
+  "person-add": () => formModal("Add someone", personFormFields(), "person-add", "Add"),
+  "person-open": (el) => openPersonDetail(el.dataset.id),
+  "person-edit": (el) => {
+    const p = personById(el.dataset.id); if (!p) return;
+    formModal("Edit person", personFormFields(p) + `<input type="hidden" name="id" value="${p.id}">`, "person-edit");
+  },
+  "person-touch": (el) => {
+    const p = personById(el.dataset.id); if (!p) return;
+    const t = todayIso();
+    p.touches = p.touches || [];
+    if (p.touches.includes(t)) { toast(`Already logged a catch-up with ${p.name} today`); return; }
+    p.touches.push(t);
+    addXp(10, "Caught up with " + p.name);
+    save(); render();
+    if (!document.querySelector("#modalBackdrop").hidden) openPersonDetail(p.id);
+    toast(`Caught up with ${p.name} 💛`);
+  },
+  "person-del": (el) => {
+    const p = personById(el.dataset.id); if (!p) return;
+    closeModal();
+    /* their name stays on the memories and books — deleting a contact card shouldn't rewrite history */
+    deleteWithUndo(() => state.social.people, el.dataset.id, `${p.name} removed`);
+  },
+  "person-goto": (el) => {
+    const kind = el.dataset.kind;
+    go(kind === "memory" ? "memories" : kind === "media" ? "media" : "reading");
+    reopenDetail(kind, el.dataset.id);
+  },
+
   "social-bump": (el) => {
     const wk = weekKey(); const log = state.social.log[wk] = state.social.log[wk] || {};
     const itm = state.social.items.find(x => x.id === el.dataset.id);
@@ -4816,8 +5047,28 @@ const SUBMITS = {
   "rec-add": (f) => {
     if (!f.name) return true;
     const list = peopleListFor(f.kind, f.id);
-    if (list && list.length < 12) list.push(f.name);
+    if (!list || list.length >= 12) return true;
+    /* reuse the spelling Social already knows, so "mara" and "Mara" stay one person */
+    const person = ensurePerson(f.name);
+    const name = person ? person.name : f.name.trim();
+    if (!list.some(n => normName(n) === normName(name))) list.push(name);
     return true;
+  },
+  "person-add": (f) => {
+    if (!f.name || !f.name.trim()) return;
+    const p = ensurePerson(f.name);
+    if (!p) return;
+    p.emoji = f.emoji || ""; p.relation = f.relation || ""; p.birthday = f.birthday || "";
+    p.note = f.note || ""; p.tags = parseTags(f.tags);
+  },
+  "person-edit": (f) => {
+    const p = personById(f.id); if (!p) return;
+    const was = p.name;
+    const name = (f.name || "").trim();
+    if (name && normName(name) !== normName(was)) renamePersonEverywhere(was, name);
+    if (name) p.name = name;
+    p.emoji = f.emoji || ""; p.relation = f.relation || ""; p.birthday = f.birthday || "";
+    p.note = f.note || ""; p.tags = parseTags(f.tags);
   },
   "media-edit": (f) => {
     const m = state.media.find(x => x.id === f.id);
