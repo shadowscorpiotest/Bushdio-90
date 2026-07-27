@@ -162,7 +162,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 9;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 10;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -171,7 +171,7 @@ let state = null;
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
    which tab is open are per-device, per-moment; keeping them in `state` meant switching a tab wrote
    to disk and uploaded the whole encrypted database. */
-const ui = { cursor: {}, readingTab: "current", mediaTab: "watchlist" };
+const ui = { cursor: {}, readingTab: "current", mediaTab: "watchlist", showMore: false };
 
 /* set when startup couldn't read saved data — blocks cloud pushes so we never overwrite good data */
 let loadIssue = null;
@@ -184,8 +184,11 @@ function defaultState() {
     claimed: {},               // {date: {missionId:true}}
     badges: {},                // {badgeId: dateEarned}
     visited: {},               // {viewId: true}
-    goals: [],                 // {id,title,emoji,milestones:[{id,text,done}]}
-    todos: [],                 // {id,text,done,date,time,order,repeat,seriesId,from}
+    goals: [],                 // {id,title,emoji,milestones:[{id,text,done}],priority,status}
+    /* an optional streak-style challenge — the welcome line hides entirely when this is unset */
+    challenge: null,           // {name, start, days} or null
+    todos: [],                 // {id,text,done,date,time,order,repeat,seriesId,from,
+                               //  priority,estMin,linkGoalId,projectId,focus,hard}
     tasksRolledOn: "",         // last date rollTasks() ran — synced so one device answering settles it
     habits: [],                // {id,name,emoji,kind,goalId,milestones,log:{date:{done,note,workoutId}}}
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
@@ -531,6 +534,25 @@ const MIGRATIONS = [
       if (h.archivedOn == null) h.archivedOn = "";
       if (h.order == null) h.order = i;
     });
+  },
+
+  /* 9 → 10 · the dashboard becomes a decision page. Goals gain the fields it ranks them by, and a
+     task can say how big it is, what it serves, and whether it's one of today's three — or the one
+     hard thing. All additive: an existing task is simply an unprioritised, unpinned task. */
+  (s) => {
+    (s.goals || []).forEach(g => {
+      if (g.priority == null) g.priority = "med";
+      if (g.status == null) g.status = "active";
+    });
+    (s.todos || []).forEach(td => {
+      if (td.priority == null) td.priority = "med";
+      if (td.estMin == null) td.estMin = 0;
+      if (td.linkGoalId == null) td.linkGoalId = "";
+      if (td.projectId == null) td.projectId = "";
+      if (td.focus == null) td.focus = false;
+      if (td.hard == null) td.hard = false;
+    });
+    if (s.challenge === undefined) s.challenge = null;
   },
 ];
 
@@ -2151,6 +2173,69 @@ const addBtn = (label, action, cls = "primary") =>
 
 /* ================= views ================= */
 
+/* ---------- the dashboard's decision layer ----------
+   Every helper here answers one question: what deserves this person's attention today? Nothing in
+   this block reads history or produces analytics — that belongs on the areas' own pages. */
+
+const PRIORITY = { high: { label: "High", rank: 0, hue: "#e5484d" },
+                   med:  { label: "Medium", rank: 1, hue: "#f76b15" },
+                   low:  { label: "Low", rank: 2, hue: "#3e63dd" } };
+const prio = (v) => PRIORITY[v] || PRIORITY.med;
+const prioRank = (v) => prio(v).rank;
+const daysLeft = (iso) => Math.round((Date.parse(iso + "T12:00:00") - Date.parse(todayIso() + "T12:00:00")) / 86400000);
+
+/* Goals worth showing: still open, not yet reached. Highest priority first, then whatever is due
+   soonest — a goal with a deadline outranks one without, because it can actually be late. */
+function activeGoals() {
+  return (state.goals || [])
+    .filter(g => g.status !== "done" && g.status !== "paused" && !goalReached(g))
+    .sort((a, b) => prioRank(a.priority) - prioRank(b.priority)
+      || (a.deadline ? Date.parse(a.deadline) : Infinity) - (b.deadline ? Date.parse(b.deadline) : Infinity));
+}
+/* Plain-language status. "On track" is deliberately not claimed — the app cannot know that — so this
+   reports only what it can see: reached, overdue, due soon, or simply in progress. */
+function goalStatus(g) {
+  if (goalReached(g)) return { txt: "Reached", cls: "ok" };
+  if (!g.deadline) return { txt: "In progress", cls: "" };
+  const d = daysLeft(g.deadline);
+  if (d < 0) return { txt: Math.abs(d) + "d overdue", cls: "err" };
+  if (d <= 7) return { txt: d + "d left", cls: "warn" };
+  return { txt: "In progress", cls: "" };
+}
+
+const FOCUS_MAX = 3;
+/* Exactly three, as specified. Pinned tasks come first; if fewer than three are pinned the rest fill
+   by priority then time, so the section is never half-empty — and the row says which were auto-filled
+   rather than pretending the person chose them. */
+function focusTasks() {
+  const open = tasksOn(todayIso()).filter(td => !td.done && !td.hard);
+  const pinned = open.filter(td => td.focus);
+  const rest = open.filter(td => !td.focus)
+    .sort((a, b) => prioRank(a.priority) - prioRank(b.priority)
+      || (a.time || "99:99").localeCompare(b.time || "99:99") || (a.order || 0) - (b.order || 0));
+  return { picked: pinned.slice(0, FOCUS_MAX),
+           filled: pinned.length >= FOCUS_MAX ? [] : rest.slice(0, FOCUS_MAX - pinned.length) };
+}
+const hardTask = () => tasksOn(todayIso()).find(td => td.hard) || null;
+
+/* what a task is in service of — a goal, or a project, or nothing */
+function taskServes(td) {
+  if (td.linkGoalId) { const g = (state.goals || []).find(x => x.id === td.linkGoalId); if (g) return { emoji: g.emoji || "\u{1F3AF}", name: g.title, nav: "habits" }; }
+  if (td.projectId) { const pr = (state.projects || []).find(x => x.id === td.projectId); if (pr) return { emoji: pr.emoji || "\u{1F680}", name: pr.name, nav: "projects" }; }
+  return null;
+}
+const estLabel = (m) => !m ? "" : m >= 60 ? (Math.round(m / 60 * 10) / 10) + "h" : m + "m";
+
+/* Day N of a challenge, if one is running. Returns null the rest of the time, so the welcome line
+   simply does not mention it. */
+function challengeDay() {
+  const c = state.challenge;
+  if (!c || !c.start) return null;
+  const n = Math.floor((Date.parse(todayIso() + "T12:00:00") - Date.parse(c.start + "T12:00:00")) / 86400000) + 1;
+  if (n < 1 || (c.days && n > c.days)) return null;
+  return { n, of: c.days || 0, name: c.name || "Challenge" };
+}
+
 function greeting() {
   const h = new Date().getHours();
   if (h < 5)  return "Night owl mode";
@@ -2321,6 +2406,10 @@ function rollTasks() {
       id: uid(), text: seed.text, done: false, date: t, time: seed.time || "",
       habitId: seed.habitId || "", supId: seed.supId || "", areaId: seed.areaId || "",
       order: seed.order || nextTaskOrder(), repeat: seed.repeat, seriesId: sid, from: "",
+      /* what the task IS carries forward; what you decided about TODAY does not — a new copy is not
+         automatically your focus, and never inherits "the hard thing" */
+      priority: seed.priority || "med", estMin: seed.estMin || 0,
+      linkGoalId: seed.linkGoalId || "", projectId: seed.projectId || "", focus: false, hard: false,
     });
     made++;
   });
@@ -2390,22 +2479,30 @@ function moveHabit(id, dir) {
   if (swapOrder(liveHabits().filter(h => isScheduled(h, d) && !isSkipped(h, d)), id, dir)) { save(); render(); }
 }
 
-function taskRow(td, i, total) {
+function taskRow(td, i, total, opts) {
+  const o = opts || {};
   const h = td.habitId ? state.habits.find(x => x.id === td.habitId) : null;
   const sup = td.supId ? state.nutrition.supplements.find(x => x.id === td.supId) : null;
   const ar = td.areaId ? areaOf(td.areaId) : null;
   const link = h ? `<small>${I.target} ${esc(h.name)}</small>` : sup ? `<small>💊 ${esc(sup.name)}</small>`
     : ar ? `<small class="task-area" style="--a:${cssVar(ar.hue)}">${esc(ar.name)}</small>` : "";
+  const pr = td.priority ? prio(td.priority) : null;
+  const serves = taskServes(td);
   const marks = [
     td.from ? `<small class="task-from">${I.chevL}from ${esc(niceDate(td.from, { weekday: "short" }))}</small>` : "",
     td.repeat ? `<small class="task-rep" title="${esc(repeatLabel(td.repeat))}">${I.spark}${esc(repeatShort(td.repeat))}</small>` : "",
+    pr && td.priority !== "med" ? `<small class="task-prio" style="--a:${cssVar(pr.hue)}">${pr.label}</small>` : "",
+    td.estMin ? `<small class="task-est">${esc(estLabel(td.estMin))}</small>` : "",
+    serves ? `<small class="task-serves">${serves.emoji} ${esc(serves.name)}</small>` : "",
+    o.auto ? `<small class="task-auto">auto-picked</small>` : "",
   ].join("");
   /* i/total are passed only from the ordered "to do" list — the done drawer has nothing to reorder */
   const canMove = typeof i === "number" && total > 1;
   return `<li class="todo ${td.done ? "done" : ""}">
     <span class="todo-time">${td.time || ""}</span>
     <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
-    <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${link}${marks}</span>
+    <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${link || marks ? `<span class="task-marks">${link}${marks}</span>` : ""}</span>
+    ${o.pin && !td.done ? `<button class="icon-btn ghost pin ${td.focus ? "on" : ""}" data-action="task-pin" data-id="${td.id}" aria-pressed="${td.focus ? "true" : "false"}" aria-label="${td.focus ? "Unpin from today's focus" : "Pin to today's focus"}">${I.target}</button>` : ""}
     ${canMove ? `<span class="reorder">
       <button class="icon-btn ghost" data-action="task-up" data-id="${td.id}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.chevL}</button>
       <button class="icon-btn ghost" data-action="task-down" data-id="${td.id}" aria-label="Move down" ${i === total - 1 ? "disabled" : ""}>${I.chevR}</button>
@@ -2431,6 +2528,23 @@ function openTaskDetail(id) {
             <optgroup label="Areas">${AREAS.filter(a => a.id !== "habits").map(a => `<option value="a:${a.id}" ${td.areaId === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</optgroup>
           </select></label>
       </div>
+      <div class="fld-row">
+        <label class="fld"><span>Priority</span>
+          <select data-change="task-prio" data-id="${td.id}">
+            ${Object.keys(PRIORITY).map(k => `<option value="${k}" ${(td.priority || "med") === k ? "selected" : ""}>${PRIORITY[k].label}</option>`).join("")}
+          </select></label>
+        <label class="fld"><span>How long? (minutes)</span><input type="number" min="0" max="1440" step="5" data-change="task-est" data-id="${td.id}" value="${td.estMin || ""}" placeholder="e.g. 45"></label>
+      </div>
+      <label class="fld"><span>In service of</span>
+        <select data-change="task-serves" data-id="${td.id}">
+          <option value="">— nothing in particular —</option>
+          <optgroup label="Goals">${activeGoals().map(g => `<option value="g:${g.id}" ${td.linkGoalId === g.id ? "selected" : ""}>${esc(g.emoji || "\u{1F3AF}")} ${esc(g.title)}</option>`).join("")}</optgroup>
+          <optgroup label="Projects">${(state.projects || []).filter(p => p.status !== "done").map(p => `<option value="p:${p.id}" ${td.projectId === p.id ? "selected" : ""}>${esc(p.emoji || "\u{1F680}")} ${esc(p.name)}</option>`).join("")}</optgroup>
+        </select></label>
+      <label class="chip-check" style="display:inline-flex;margin:2px 0 10px">
+        <input type="checkbox" data-change="task-hard" data-id="${td.id}" ${td.hard ? "checked" : ""}>
+        <span>This is today's hard thing</span></label>
+      <p class="soft note">${I.spark} Only one task can be the hard thing — marking this one releases whichever held it before. It gets its own card on the dashboard so three easy wins can't bury it.</p>
       <div class="fld"><span>Repeat</span>
         <select data-change="task-repeat" data-id="${td.id}">
           <option value="" ${!td.repeat ? "selected" : ""}>Never — a one-off</option>
@@ -2478,11 +2592,109 @@ function supplementsDueCard() {
     : `<p class="soft small">${I.check} All supplements taken — nice.</p>`;
   return card("", cardHead(`Supplements due${due.length ? ` · ${due.length}` : ""}`, `<button class="btn ghost tiny" data-nav="nutrition">Nutrition</button>`) + body);
 }
+/* ---------- the four above-the-fold cards ----------
+   Order is fixed and deliberate: who you are today, what you are building, what you'll do about it,
+   and the one thing you'd rather avoid. Nothing here reports history. */
+
+const MOTIVATION = [
+  "Small, boring, repeated. That's the whole trick.",
+  "You don't have to feel like it. You just have to start it.",
+  "One honest hour beats a perfect plan.",
+  "The goal isn't the streak. The streak is the evidence.",
+  "Do the hard one while you still have the morning.",
+  "Progress is quiet. Keep going anyway.",
+  "Today only has to be slightly better than yesterday.",
+];
+const motivationOfDay = () => MOTIVATION[Math.floor(Date.now() / DAY_MS) % MOTIVATION.length];
+
+function welcomeCard(remaining) {
+  const ch = challengeDay();
+  return card("welcome span2", `
+    <p class="wel-hi">${greeting()}, ${esc(state.profile.name || "friend")}</p>
+    <h2 class="wel-big">${remaining ? `${remaining} thing${remaining > 1 ? "s" : ""} left today` : "Today is clear \u{1F33F}"}</h2>
+    <p class="wel-meta">
+      <span>${esc(niceDate(todayIso(), { weekday: "long", month: "long", day: "numeric" }))}</span>
+      ${ch ? `<span class="wel-ch">${esc(ch.name)} · day ${ch.n}${ch.of ? ` of ${ch.of}` : ""}</span>` : ""}
+    </p>
+    <p class="wel-line">${esc(motivationOfDay())}</p>`);
+}
+
+/* The largest block on the page, on purpose: if you only read one thing here, read what you are
+   actually building. Four at most — a wall of goals is the same as none. */
+function goalsCard() {
+  const goals = activeGoals();
+  const head = cardHead("What you're building", `<button class="btn ghost tiny" data-nav="habits">All goals</button>`);
+  if (!goals.length) return card("goals-card span2", head +
+    emptyMsg("target", "No open goal yet — without one this page is just a to-do list.",
+      `<button class="btn primary" data-nav="habits">${I.plus}Set a goal</button>`));
+  const rows = goals.slice(0, 4).map(g => {
+    const gp = goalProgress(g), pr = prio(g.priority), st = goalStatus(g);
+    const dl = g.deadline ? daysLeft(g.deadline) : null;
+    return `<li class="gf-item" data-action="goal-open" data-id="${g.id}">
+      <span class="gf-emoji" aria-hidden="true">${esc(g.emoji || "\u{1F3AF}")}</span>
+      <span class="gf-body">
+        <span class="gf-top"><b>${esc(g.title)}</b><span class="gf-prio" style="--a:${cssVar(pr.hue)}">${pr.label}</span></span>
+        ${barHtml(gp.pct, pr.hue)}
+        <span class="gf-meta">
+          <b class="gf-pct">${gp.pct}%</b>
+          <span>${g.type === "outcome" ? `${gp.cur}${g.unit ? " " + esc(g.unit) : ""} → ${g.target}${g.unit ? " " + esc(g.unit) : ""}` : `${gp.done}/${gp.tot} milestones`}</span>
+          ${g.deadline ? `<span class="gf-dl">${esc(niceDate(g.deadline, { month: "short", day: "numeric" }))}${dl != null ? ` · ${dl < 0 ? `${-dl}d over` : `${dl}d left`}` : ""}</span>` : ""}
+          <span class="gf-status ${st.cls}">${esc(st.txt)}</span>
+        </span>
+      </span>
+      <span class="gf-go" aria-hidden="true">${I.chevR}</span>
+    </li>`;
+  }).join("");
+  return card("goals-card span2", head + `<ul class="goal-focus">${rows}</ul>` +
+    (goals.length > 4 ? `<p class="soft small">${goals.length - 4} more open in Goals.</p>` : ""));
+}
+
+/* Three, as specified — but the tasks beyond three are disclosed rather than hidden. A dashboard
+   that quietly drops task four is the same silent-loss bug this app already fixed once. */
+function focusCard(uniDue, undone, done, stranded) {
+  const t = todayIso();
+  const { picked, filled } = focusTasks();
+  const shown = [...picked, ...filled];
+  const more = undone.filter(td => !td.hard && !shown.some(x => x.id === td.id));
+  const rows = shown.map((td, i) => taskRow(td, i, shown.length, { pin: true, auto: !td.focus }));
+  const uni = uniDue.map(k => `
+    <li class="todo ${k.due < t ? "overdue" : ""}">
+      <span class="todo-time"></span>
+      <button class="checkbox" data-action="ag-uni" data-id="${k.id}" aria-label="Mark ${esc(k.title)} done">${I.check}</button>
+      <span class="row-txt" data-nav="university"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.course || "University")}</span> · due ${daysUntil(k.due)}</small></span>
+    </li>`);
+  const body = (uni.length + rows.length)
+    ? `<ul class="todo-list">${uni.join("")}${rows.join("")}</ul>`
+    : `<p class="soft small" style="padding:6px 2px">Nothing chosen yet — add the first thing below \u{1F33F}</p>`;
+  return card("focus-card span2", cardHead(`Today's focus <small class="soft">${shown.length}/${FOCUS_MAX} chosen</small>`) + body +
+    (filled.length ? `<p class="soft small">${I.spark} ${filled.length === shown.length ? "These were" : `${filled.length} of these were`} picked for you by priority — tap ${I.target} on any task to choose your own.</p>` : "") +
+    taskAddForm() +
+    `<p class="soft note">${I.spark} Name a task after a habit, supplement or area ("Take Vitamin D3", "Pay yoga tuition") and it auto-links. Priority, duration, the goal it serves and <b>repeat</b> all live in the task's detail sheet.</p>` +
+    (more.length ? `<details class="done-wrap"${ui.showMore ? " open" : ""}><summary data-action="focus-more">${more.length} more task${more.length > 1 ? "s" : ""} today</summary><ul class="todo-list">${more.map(td => taskRow(td, null, null, { pin: true })).join("")}</ul></details>` : "") +
+    (stranded.length ? `<button class="btn ghost slim" data-action="carry-open" style="margin-top:10px">${I.chevL}${stranded.length} unfinished from before</button>` : "") +
+    (done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(td => taskRow(td)).join("")}</ul></details>` : ""));
+}
+
+/* One task, marked by hand as the one you're avoiding. Kept separate from the focus three so it
+   cannot be buried under three easy wins. */
+function hardTaskCard() {
+  const td = hardTask();
+  const head = cardHead("Today's hard thing");
+  if (!td) return card("hard-card span2", head + `<p class="soft small">Nothing marked yet. Open a task and mark it <b>the hard one</b> — the thing you'd rather push to tomorrow.</p>`);
+  const serves = taskServes(td);
+  return card("hard-card span2" + (td.done ? " is-done" : ""), head + `
+    <div class="hard-body">
+      <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle ${esc(td.text)}">${I.check}</button>
+      <div class="hard-txt">
+        <b>${esc(td.text)}</b>
+        <small>${[td.time ? esc(td.time) : "", estLabel(td.estMin), serves ? `${serves.emoji} ${esc(serves.name)}` : ""].filter(Boolean).join(" · ") || "no time set"}</small>
+      </div>
+    </div>
+    <button class="btn primary" data-action="todo-open" data-id="${td.id}">${td.done ? I.check + "Done — open it" : "Open task"}</button>`);
+}
+
 function vDashboard() {
-  const li = levelInfo(), t = todayIso();
-  const missionsDone = MISSIONS.filter(m => m.done()).length;
-  const wk = socialWeek();
-  const studiedH = Math.round(studyRange(weekDates()) / 6) / 10;
+  const t = todayIso();
   const todos = tasksOn(t);
   const undone = todos.filter(td => !td.done);
   const done = todos.filter(td => td.done);
@@ -2506,35 +2718,10 @@ function vDashboard() {
   const remaining = undone.length + uniDue.length + dueHabits.filter(h => !habitMet(h, t)).length;
   return `
   <div class="grid dash">
-    ${card("today-hero span2", `
-      <div class="hero-row">
-        <div>
-          <p class="hero-hi">${greeting()}, ${esc(state.profile.name || "friend")} <span aria-hidden="true">☀️</span></p>
-          <h2 class="hero-big">${remaining ? `${remaining} thing${remaining > 1 ? "s" : ""} left today` : "All done for today 🎉"}</h2>
-          <div class="hero-level">
-            <span class="lv-pill">Level ${li.lvl}</span>
-            <span class="bar"><span style="width:${li.pct}%"></span></span>
-            <small>${li.into.toLocaleString()} / ${li.need.toLocaleString()} XP</small>
-          </div>
-        </div>
-        <div class="hero-ring">${ring(li.pct, { size: 96, sw: 9, color: "#fff", center: "Lv " + li.lvl, label: "level progress" })}</div>
-      </div>
-      <div class="stat-row">
-        <div class="stat"><b data-count="${perfectStreak()}">0</b><span>${I.flame} day streak</span></div>
-        <div class="stat"><b data-count="${weeklyProgress()}" data-count-suffix="%">0</b><span>${I.activity} today</span></div>
-        <div class="stat"><b data-count="${Object.keys(state.badges).length}">0</b><span>${I.medal} badges</span></div>
-      </div>`)}
-
-    ${card("span2", cardHead(`Today's focus <small class="soft">${undone.length} to do</small>`) + `
-      <ul class="todo-list">${uniDue.map(k => `
-        <li class="${k.due < t ? "overdue" : ""}">
-          <button class="checkbox" data-action="ag-uni" data-id="${k.id}" aria-label="Mark ${esc(k.title)} done">${I.check}</button>
-          <span class="row-txt" data-nav="university"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.course || "University")}</span> · due ${daysUntil(k.due)}</small></span>
-        </li>`).join("")}${undone.length ? undone.map((td, i) => taskRow(td, i, undone.length)).join("") : (uniDue.length ? "" : `<p class="soft small" style="padding:6px 2px">Nothing to do — add a task below or enjoy the day 🌿</p>`)}</ul>
-      ${taskAddForm()}
-      ${stranded.length ? `<button class="btn ghost slim" data-action="carry-open" style="margin-top:10px">${I.chevL}${stranded.length} unfinished from before</button>` : ""}
-      <p class="soft note">${I.spark} Name a task after a habit, supplement or area (e.g. "Take Vitamin D3", "Pay yoga tuition") — it auto-links, and checking it logs there too. Set a task to <b>repeat</b> from its detail sheet.</p>
-      ${done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(taskRow).join("")}</ul></details>` : ""}`)}
+    ${welcomeCard(remaining)}
+    ${goalsCard()}
+    ${focusCard(uniDue, undone, done, stranded)}
+    ${hardTaskCard()}
 
     ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
       <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="${h.kind === "workout" ? "habit-workout-jump" : "ag-habit"}" data-id="${h.id}" style="--a:${cssVar(h.color, "#6a5ae0")}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>` : `<p class="soft small">No habits scheduled today.</p>`))}
@@ -2542,25 +2729,7 @@ function vDashboard() {
     ${currentlyReadingCard()}
     ${supplementsDueCard()}
 
-    ${card("", cardHead(`Today's missions <small class="soft">${missionsDone}/${MISSIONS.length}</small>`) + `
-      <ul class="mission-list">
-        ${MISSIONS.map(m => {
-          const a = areaOf(m.area), md = m.done();
-          return `<li class="mission ${md ? "done" : ""}" data-nav="${m.area}" style="--a:${cssVar(a.hue)}">
-            <span class="tile-ic">${I[a.icon]}</span>
-            <span class="mission-txt"><b>${esc(m.title())}</b><small>${esc(m.sub())}</small></span>
-            <span class="mission-check">${md ? I.check : `<i class="xp-tag">+${m.xp}</i>`}</span>
-          </li>`;
-        }).join("")}
-      </ul>`)}
 
-    ${card("", cardHead("This week") + `
-      <div class="mini-stats">
-        <div class="mini-stat" data-nav="workout"><span class="tile-ic" style="--a:#f76b15">${I.dumbbell}</span><div><b>${workoutsThisWeek()}/${state.workout.weeklyGoal}</b><small>workouts</small></div></div>
-        <div class="mini-stat" data-nav="university"><span class="tile-ic" style="--a:#3e63dd">${I.clock}</span><div><b>${studiedH}h</b><small>studied</small></div></div>
-        <div class="mini-stat" data-nav="social"><span class="tile-ic" style="--a:#e93d82">${I.users}</span><div><b>${wk.done}/${wk.target}</b><small>social goals</small></div></div>
-        <div class="mini-stat" data-nav="reading"><span class="tile-ic" style="--a:#0091ff">${I.book}</span><div><b>${state.reading.books.filter(b => b.status === "done").length}/${state.reading.yearlyGoal}</b><small>books this year</small></div></div>
-      </div>`)}
 
     ${deadlines.length ? card("", cardHead("Upcoming") + `
       <ul class="mini-agenda">${deadlines.map(k => { const a = areaOf(k.area); return `<li data-nav="${k.nav}"><span class="a-ic" style="--a:${cssVar(a.hue)}">${I[a.icon]}</span><span class="row-txt"><b>${esc(k.title)}</b><small>${esc(a.name.toLowerCase())}</small></span><span class="a-when ${k.due < t ? "over" : ""}">${daysUntil(k.due)}</span></li>`; }).join("")}</ul>`) : ""}
@@ -2569,15 +2738,6 @@ function vDashboard() {
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
       <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
 
-    ${card("span2", cardHead("Life areas") + `
-      <div class="area-grid">
-        ${AREAS.map(a => `
-          <button class="area-tile" data-nav="${a.id}" style="--a:${cssVar(a.hue)}">
-            <span class="tile-ic">${I[a.icon]}</span>
-            <span class="tile-name">${esc(a.name)}</span>
-            ${barHtml(areaProgressToday(a.id), "var(--a)")}
-          </button>`).join("")}
-      </div>`)}
   </div>`;
 }
 
@@ -2867,7 +3027,15 @@ function goalFormFields(g) {
     </select>`) +
     `<div class="fld-row">${fld("Start", num("start", g.start || 0, 0, "any"))}${fld("Target", num("target", g.target || 0, 0, "any"))}${fld("Unit", txt("unit", "kg", g.unit || "", false))}</div>` +
     fld("Direction", `<select name="direction"><option value="down" ${g.direction !== "up" ? "selected" : ""}>Lower is better (lose weight)</option><option value="up" ${g.direction === "up" ? "selected" : ""}>Higher is better (gain / save)</option></select>`) +
-    fld("Deadline (optional)", `<input type="date" name="deadline" value="${g.deadline || ""}">`) +
+    `<div class="fld-row">${
+      fld("Deadline (optional)", `<input type="date" name="deadline" value="${g.deadline || ""}">`)}${
+      fld("Priority", `<select name="priority">${Object.keys(PRIORITY).map(k => `<option value="${k}" ${(g.priority || "med") === k ? "selected" : ""}>${PRIORITY[k].label}</option>`).join("")}</select>`)
+    }</div>` +
+    fld("Status", `<select name="status">
+      <option value="active" ${(g.status || "active") === "active" ? "selected" : ""}>Active — show it on my dashboard</option>
+      <option value="paused" ${g.status === "paused" ? "selected" : ""}>Paused — keep it, hide it for now</option>
+      <option value="done" ${g.status === "done" ? "selected" : ""}>Done — archived</option>
+    </select>`) +
     fld("Why / note", txt("note", "your reason…", g.note || "", false));
 }
 function openGoalHabits(id) {
@@ -4265,6 +4433,7 @@ function vProgress() {
   const days = [...Array(14)].map((_, i) => addDays(todayIso(), i - 13));
   const xpData = days.map(d => ({ label: +d.slice(-2), value: state.xpLog[d] || 0, tip: `${niceDate(d)} · ${state.xpLog[d] || 0} XP` }));
   const li = levelInfo();
+  const missionsDone = MISSIONS.filter(m => m.done()).length;
   return `
   <div class="grid">
     ${card("", `
@@ -4274,6 +4443,20 @@ function vProgress() {
         <div><b>${perfectStreak()}</b><small>day streak</small></div>
         <div><b>${Object.keys(state.badges).length}/${BADGES.length}</b><small>badges</small></div>
       </div>`)}
+
+    ${/* Missions moved here from the dashboard: they are a scoreboard, not a decision, and the
+          dashboard is a decision page. The XP they award is unchanged — only the placement moved. */
+      card("", cardHead(`Today's missions <small class="soft">${missionsDone}/${MISSIONS.length}</small>`) + `
+      <ul class="mission-list">
+        ${MISSIONS.map(m => {
+          const a = areaOf(m.area), md = m.done();
+          return `<li class="mission ${md ? "done" : ""}" data-nav="${m.area}" style="--a:${cssVar(a.hue)}">
+            <span class="tile-ic">${I[a.icon]}</span>
+            <span class="mission-txt"><b>${esc(m.title())}</b><small>${esc(m.sub())}</small></span>
+            <span class="mission-check">${md ? I.check : `<i class="xp-tag">+${m.xp}</i>`}</span>
+          </li>`;
+        }).join("")}
+      </ul>`)}
     ${card("", cardHead("Areas today") + `
       <ul class="area-progress">
         ${AREAS.slice(0, 8).map(a => {
@@ -4854,6 +5037,18 @@ const ACTIONS = {
 
   "task-up": (el) => moveTask(el.dataset.id, -1),
   "task-down": (el) => moveTask(el.dataset.id, 1),
+  /* Pinning is capped at three. Rather than silently refusing the fourth — which reads as a broken
+     button — it says so and leaves the existing three alone. */
+  "task-pin": (el) => {
+    const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
+    if (!td.focus && tasksOn(todayIso()).filter(x => x.focus && !x.done && !x.hard).length >= FOCUS_MAX) {
+      toast(`Today's focus holds ${FOCUS_MAX}. Unpin one first.`); return;
+    }
+    td.focus = !td.focus;
+    save(); render();
+  },
+  /* <details> toggles itself; this only remembers the state across the re-render a pin causes */
+  "focus-more": () => { ui.showMore = !ui.showMore; },
 
   /* retire a habit without destroying it */
   "habit-archive": (el) => {
@@ -5487,8 +5682,8 @@ const SUBMITS = {
   "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() }); },
   "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.remindAt = f.remindAt || ""; syncPushSchedule(); } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
-  "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", progress: [], habitIds: [], milestones: [] }); },
-  "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; syncGoalMilestones(g); } },
+  "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", priority: PRIORITY[f.priority] ? f.priority : "med", status: ["active", "paused", "done"].includes(f.status) ? f.status : "active", progress: [], habitIds: [], milestones: [] }); },
+  "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; if (PRIORITY[f.priority]) g.priority = f.priority; if (["active", "paused", "done"].includes(f.status)) g.status = f.status; syncGoalMilestones(g); } },
   "goal-log": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) { g.progress.push({ date: todayIso(), value: +f.value || 0 }); syncGoalMilestones(g); addXp(5, "Progress logged"); } },
   "gms-add": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) g.milestones.push({ id: uid(), text: f.text, done: false }); },
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
@@ -5602,7 +5797,8 @@ const SUBMITS = {
     else if (f.habitId) { habitId = f.habitId; }
     else { const link = suggestLinkForText(f.text); if (link.type === "sup") supId = link.id; else if (link.type === "area") areaId = link.id; else habitId = link.id; }
     state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "",
-      habitId, supId, areaId, order: nextTaskOrder(), repeat: null, seriesId: "", from: "" });
+      habitId, supId, areaId, order: nextTaskOrder(), repeat: null, seriesId: "", from: "",
+      priority: "med", estMin: 0, linkGoalId: "", projectId: "", focus: false, hard: false });
   },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { clearAllMedia(); localStorage.removeItem(STORE_KEY); state = defaultState(); save(); setTimeout(() => maybeOnboard(), 60); },
@@ -5637,6 +5833,23 @@ const CHANGES = {
   },
   "task-text": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.text = el.value.slice(0, 120); save(); } },
   "task-time": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.time = el.value || ""; save(); } },
+  "task-prio": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.priority = PRIORITY[el.value] ? el.value : "med"; save(); render(); } },
+  "task-est": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.estMin = clamp(parseInt(el.value, 10) || 0, 0, 1440); save(); render(); } },
+  "task-serves": (el) => {
+    const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
+    const v = el.value || "";
+    td.linkGoalId = v.startsWith("g:") ? v.slice(2) : "";
+    td.projectId = v.startsWith("p:") ? v.slice(2) : "";
+    save(); render(); openTaskDetail(td.id);
+  },
+  /* Exactly one hard task, the same one-of-many rule the app already uses elsewhere: setting this
+     clears whoever held it, so the card can never show two "the one thing"s. */
+  "task-hard": (el) => {
+    const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
+    if (el.checked) { state.todos.forEach(x => { x.hard = false; }); td.hard = true; td.focus = false; }
+    else td.hard = false;
+    save(); render(); openTaskDetail(td.id);
+  },
   "task-repeat": (el) => {
     const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
     if (!el.value) setSeriesRepeat(td, null);
