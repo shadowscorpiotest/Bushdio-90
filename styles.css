@@ -682,6 +682,27 @@ li.overdue .row-txt small { color: var(--danger); }
 .mini-badge { display: inline-grid; place-items: center; vertical-align: middle; }
 .mini-badge svg { width: 13px; height: 13px; color: #f76b15; }
 .wday { cursor: pointer; background: none; border: 1px solid transparent; }
+/* ---------- people (Social) ---------- */
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; }
+.person { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 14px 8px 12px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--surface); cursor: pointer;
+  text-align: center; transition: transform .16s var(--ease-out), border-color .16s, box-shadow .16s; }
+.person:hover { transform: translateY(-2px); border-color: var(--brand); box-shadow: 0 10px 22px -14px rgba(20, 14, 60, .5); }
+.person:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.person-ava { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 17px; font-weight: 700; color: #fff; background: var(--rc, var(--brand));
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.22); }
+.person-ava.lg { width: 54px; height: 54px; font-size: 20px; }
+.person-name { font-size: 13px; line-height: 1.25; overflow-wrap: anywhere; }
+.person-sub { font-size: 11.5px; color: var(--ink-2); line-height: 1.25; }
+.person-sub.cold { color: #d9730d; }
+.person-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.person-head h3 { margin: 0; }
+/* the "appears in" lists inside the person sheet sit under a label, so they need less vertical air */
+.check-list.tight li { padding: 8px 4px; cursor: pointer; }
+.check-list.tight li:hover { color: var(--brand); }
+.check-list.tight .a-when svg { width: 16px; height: 16px; }
+
 /* a row of togglable chips — reads as a set of choices, not a stack of form rows */
 .chip-checks { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip-check { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px 7px 10px;
