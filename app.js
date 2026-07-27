@@ -132,7 +132,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 8;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 9;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -490,6 +490,16 @@ const MIGRATIONS = [
       if (td.order == null) td.order = i;
     });
     if (s.tasksRolledOn == null) s.tasksRolledOn = "";
+  },
+
+  /* 8 → 9 · a habit can be retired. Until now the only way to stop doing one was to delete it,
+     which destroyed its history and its goal links, or to leave it breaking the streak forever. */
+  (s) => {
+    (s.habits || []).forEach((h, i) => {
+      if (h.archived == null) h.archived = false;
+      if (h.archivedOn == null) h.archivedOn = "";
+      if (h.order == null) h.order = i;
+    });
   },
 ];
 
@@ -1292,6 +1302,11 @@ function ensureHabitEntry(h, d) {
 }
 const WEEKDAY_MON0 = (d) => (new Date(d + "T12:00:00").getDay() + 6) % 7; // 0=Mon..6=Sun
 function isScheduled(h, d) {
+  /* Archiving must not rewrite the past: a habit you retire today stops being "due" from the archive
+     date FORWARD, so last week's streak, perfect days and heatmap stay exactly as they were. This one
+     line covers the due/rest lists, isPerfectDay, missions, reminders, area progress and the dashboard
+     chips — every one of them already filters through here. */
+  if (h.archived && h.archivedOn && d >= h.archivedOn) return false;
   const c = h.cadence || { mode: "daily" };
   if (c.mode === "days") return (c.days || []).includes(WEEKDAY_MON0(d));
   return true; // daily & perWeek: every day is an opportunity
@@ -1402,6 +1417,18 @@ function addHabitAmount(h, d, n) {
   if (!was && habitMet(h, d) && d === todayIso()) addXp(10, h.name);
   save();
 }
+/* "habits I'm currently doing", in display order. `state.habits` stays the full record — history and
+   lookups by id must still find an archived one. */
+const liveHabits = () => state.habits.filter(h => !h.archived).sort((a, b) => (a.order || 0) - (b.order || 0));
+const archivedHabits = () => state.habits.filter(h => h.archived);
+const nextHabitOrder = () => state.habits.reduce((m, h) => Math.max(m, h.order || 0), 0) + 1;
+/* the goal picker offers live habits, plus any archived one this goal ALREADY links — hiding that
+   would look like the link had been silently dropped */
+const goalPickHabits = (g) => state.habits.filter(h => !h.archived || (h.goalIds || []).includes(g.id));
+/* how many habits existed on a given day — used by the heatmap, which would otherwise re-scale the
+   whole of your history the moment you archived anything */
+const habitsLiveOn = (d) => state.habits.filter(h => !(h.archived && h.archivedOn && d >= h.archivedOn));
+
 function isPerfectDay(d) {
   const due = state.habits.filter(h => isScheduled(h, d) && !isSkipped(h, d));
   return due.length > 0 && due.every(h => habitMet(h, d));
@@ -1654,7 +1681,7 @@ function weeklyProgress() {
 const MISSIONS = [
   { id: "habits",  xp: 25, area: "habits",  title: () => "Complete today's habits",
     sub: () => { const due = state.habits.filter(h => isScheduled(h, todayIso()) && !isSkipped(h, todayIso())); return `${due.filter(h => habitMet(h, todayIso())).length} / ${due.length} due today`; },
-    done: () => state.habits.length > 0 && isPerfectDay(todayIso()) },
+    done: () => liveHabits().length > 0 && isPerfectDay(todayIso()) },
   { id: "workout", xp: 20, area: "workout", title: () => "Log a workout",
     sub: () => `${workoutsThisWeek()} / ${state.workout.weeklyGoal} this week`,
     done: () => (state.workout.log[todayIso()] || []).length > 0 },
@@ -1952,8 +1979,9 @@ function drawHeatmap(host) {
     for (let day = 0; day < 7; day++) {
       const d = addDays(start, w * 7 + day);
       if (d > todayIso()) continue;
-      const total = state.habits.length || 1;
-      const done = state.habits.filter(h => habitDone(h, d)).length;
+      const live = habitsLiveOn(d);
+      const total = live.length || 1;
+      const done = live.filter(h => habitDone(h, d)).length;
       const pct = done / total;
       const fill = pct === 0 ? "var(--heat-0)" : seq[Math.min(seq.length - 1, Math.floor(pct * (seq.length - 2)) + 1)];
       cells += `<rect x="${padL + w * (cell + gap)}" y="${padT + day * (cell + gap)}" width="${cell}" height="${cell}" rx="3.5" fill="${fill}" data-tip="${esc(`${niceDate(d)} · ${done}/${total} habits`)}"/>`;
@@ -2297,15 +2325,22 @@ function maybeCarryForwardAgain() {
   state.tasksRolledOn = todayIso(); closeModal(); save(); render();
   return false;
 }
-/* swap with the neighbour in the CURRENT visible order, so the arrows do what they look like */
+/* Swap with the neighbour in the CURRENT visible order, so the arrows do what they look like.
+   If two rows share an order value (possible after a migration backfill), renumber first. */
+function swapOrder(list, id, dir) {
+  const i = list.findIndex(x => x.id === id), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return false;
+  if (list[i].order === list[j].order) list.forEach((x, k) => { x.order = k; });
+  const a = list[i].order;
+  list[i].order = list[j].order; list[j].order = a;
+  return true;
+}
 function moveTask(id, dir) {
-  const list = tasksOn(todayIso()).filter(td => !td.done);
-  const i = list.findIndex(td => td.id === id), j = i + dir;
-  if (i < 0 || j < 0 || j >= list.length) return;
-  const a = list[i].order, b = list[j].order;
-  list[i].order = b; list[j].order = a;
-  if (a === b) { list.forEach((td, k) => { td.order = k; }); list[i].order = j; list[j].order = i; }
-  save(); render();
+  if (swapOrder(tasksOn(todayIso()).filter(td => !td.done), id, dir)) { save(); render(); }
+}
+function moveHabit(id, dir) {
+  const d = dayCursor("habits");
+  if (swapOrder(liveHabits().filter(h => isScheduled(h, d) && !isSkipped(h, d)), id, dir)) { save(); render(); }
 }
 
 function taskRow(td, i, total) {
@@ -2344,7 +2379,7 @@ function openTaskDetail(id) {
         <label class="fld"><span>Counts toward</span>
           <select data-change="task-link" data-id="${td.id}">
             <option value="">— none —</option>
-            <optgroup label="Habits">${state.habits.map(h => `<option value="h:${h.id}" ${td.habitId === h.id ? "selected" : ""}>${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</optgroup>
+            <optgroup label="Habits">${liveHabits().map(h => `<option value="h:${h.id}" ${td.habitId === h.id ? "selected" : ""}>${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</optgroup>
             <optgroup label="Supplements">${state.nutrition.supplements.map(s => `<option value="s:${s.id}" ${td.supId === s.id ? "selected" : ""}>${esc(s.emoji || "💊")} ${esc(s.name)}</option>`).join("")}</optgroup>
             <optgroup label="Areas">${AREAS.filter(a => a.id !== "habits").map(a => `<option value="a:${a.id}" ${td.areaId === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</optgroup>
           </select></label>
@@ -2533,7 +2568,7 @@ function syncGoalMilestones(g) {
     if (reached && !m.done) { m.done = true; addXp(15, "Milestone"); }
   });
 }
-function habitRow(h, d) {
+function habitRow(h, d, i, total) {
   const e = habitEntry(h, d) || {}, met = habitMet(h, d), streak = habitStreak(h);
   let control, sub;
   const src = habitSource(h);
@@ -2560,6 +2595,7 @@ function habitRow(h, d) {
   const col = h.color || "#6a5ae0";
   const quantBar = h.type === "quantity" ? barHtml(100 * ((e.amount) || 0) / (h.target || 1), col) : "";
   const incBtn = h.type === "quantity" ? `<button class="btn tiny ghost" data-action="habit-inc" data-id="${h.id}">+${habitStep(h)}</button>` : "";
+  const canMove = typeof i === "number" && total > 1;
   return `<li class="habit-li ${met ? "done" : ""}" style="--hc:${col}">
     ${control}
     <button class="row-emoji as-btn" data-action="habit-open" data-id="${h.id}" aria-label="Open ${esc(h.name)}">${esc(h.emoji)}</button>
@@ -2568,6 +2604,10 @@ function habitRow(h, d) {
       <small>${sub}${e.note ? " · noted" : ""}</small>${quantBar}
     </span>
     ${incBtn}
+    ${canMove ? `<span class="reorder">
+      <button class="icon-btn ghost" data-action="habit-up" data-id="${h.id}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.chevL}</button>
+      <button class="icon-btn ghost" data-action="habit-down" data-id="${h.id}" aria-label="Move down" ${i === total - 1 ? "disabled" : ""}>${I.chevR}</button>
+    </span>` : ""}
     <button class="icon-btn ghost" data-action="habit-open" data-id="${h.id}" aria-label="Details">${I.chevR}</button>
   </li>`;
 }
@@ -2583,8 +2623,9 @@ function habitHistoryRow(h) {
 function vHabits() {
   const d = dayCursor("habits"), week = weekDates();
   const isToday = d === todayIso();
-  const due = state.habits.filter(h => isScheduled(h, d) && !isSkipped(h, d));
-  const rest = state.habits.filter(h => !(isScheduled(h, d) && !isSkipped(h, d)));
+  const live = liveHabits(), archived = archivedHabits();
+  const due = live.filter(h => isScheduled(h, d) && !isSkipped(h, d));
+  const rest = live.filter(h => !(isScheduled(h, d) && !isSkipped(h, d)));
   const pct = due.length ? Math.round(100 * due.filter(h => habitMet(h, d)).length / due.length) : 0;
   return `
   <div class="grid">
@@ -2593,14 +2634,24 @@ function vHabits() {
         ${week.map((wd, i) => `
           <button class="wday ${wd === d ? "today" : ""} ${wd > todayIso() ? "future" : ""}" data-action="habit-day" data-d="${wd}">
             <small>${WD_SHORT[i]}</small><b>${+wd.slice(-2)}</b>
-            <span class="wdot ${isPerfectDay(wd) ? "full" : state.habits.some(h => habitMet(h, wd)) ? "part" : ""}"></span>
+            <span class="wdot ${isPerfectDay(wd) ? "full" : liveHabits().some(h => habitMet(h, wd)) ? "part" : ""}"></span>
           </button>`).join("")}
       </div>
       <div class="progress-line"><span>${isToday ? "Today's" : "That day's"} progress</span>${barHtml(pct)}<b>${pct}%</b></div>`)}
 
-    ${card("span2", cardHead(isToday ? "Today's habits" : niceDate(d, { weekday: "long", month: "short", day: "numeric" }), `<button class="btn ghost tiny" data-action="habit-library">${I.grid}Library</button>${addBtn("New habit", "habit-add")}`) + (state.habits.length ? `
-      <ul class="check-list habit-list">${due.map(h => habitRow(h, d)).join("") || `<p class="soft small" style="padding:8px 4px">Nothing scheduled for this day — enjoy the rest 🌤️</p>`}</ul>
-      ${rest.length ? `<p class="rest-label">Not scheduled / resting</p><ul class="check-list habit-list dim">${rest.map(h => habitRow(h, d)).join("")}</ul>` : ""}`
+    ${card("span2", cardHead(isToday ? "Today's habits" : niceDate(d, { weekday: "long", month: "short", day: "numeric" }), `<button class="btn ghost tiny" data-action="habit-library">${I.grid}Library</button>${addBtn("New habit", "habit-add")}`) + (live.length ? `
+      <ul class="check-list habit-list">${due.map((h, i) => habitRow(h, d, i, due.length)).join("") || `<p class="soft small" style="padding:8px 4px">Nothing scheduled for this day — enjoy the rest 🌤️</p>`}</ul>
+      ${rest.length ? `<p class="rest-label">Not scheduled / resting</p><ul class="check-list habit-list dim">${rest.map(h => habitRow(h, d)).join("")}</ul>` : ""}
+      ${archived.length ? `<details class="done-wrap arch-wrap"><summary>${I.moon} Archived (${archived.length})</summary>
+        <ul class="check-list habit-list dim">
+          ${archived.map(h => `<li class="habit-li archived">
+            <span class="row-emoji">${esc(h.emoji)}</span>
+            <span class="row-txt"><b>${esc(h.name)}</b><small>retired ${esc(niceDate(h.archivedOn || todayIso(), { month: "short", day: "numeric", year: "numeric" }))} · ${Object.keys(h.log || {}).length} days recorded</small></span>
+            <button class="btn tiny ghost" data-action="habit-restore" data-id="${h.id}">${I.check}Restore</button>
+          </li>`).join("")}
+        </ul>
+        <p class="soft note">${I.check} Archived habits keep every day they were logged — your past streaks and heatmap are untouched. They just stop counting from the day you retired them.</p>
+      </details>` : ""}`
       : emptyMsg("target", "No habits yet — build your first ritual.", addBtn("Add a habit", "habit-add"))))}
 
     ${card("streak-card", `
@@ -2723,7 +2774,7 @@ function openHabitDetail(id) {
       <div class="fld"><span>Part of goals</span>
         ${state.goals.length ? `<div class="goal-pick-wrap">${state.goals.map(g => `<label class="goal-pick"><input type="checkbox" data-change="habit-goal-toggle" data-h="${h.id}" data-g="${g.id}" ${(h.goalIds || []).includes(g.id) ? "checked" : ""}><span class="gp-emoji">${esc(g.emoji || "🎯")}</span><span class="gp-name">${esc(g.title || "Untitled goal")}</span><i class="gp-tick">${I.check}</i></label>`).join("")}</div>` : `<p class="soft small">No goals yet — create one below.</p>`}
       </div>
-      <div class="pill-row"><button class="btn ghost" data-action="habit-edit" data-id="${h.id}">${I.edit}Edit</button><button class="btn danger" data-action="habit-del-d" data-id="${h.id}">${I.trash}Delete</button></div>
+      <div class="pill-row"><button class="btn ghost" data-action="habit-edit" data-id="${h.id}">${I.edit}Edit</button><button class="btn ghost" data-action="${h.archived ? 'habit-restore' : 'habit-archive'}" data-id="${h.id}">${h.archived ? I.check + 'Restore' : I.moon + 'Archive'}</button><button class="btn danger" data-action="habit-del-d" data-id="${h.id}">${I.trash}Delete</button></div><p class="soft note">${I.moon} <b>Archive</b> retires a habit without touching a single day you already logged — it stops counting toward today&rsquo;s perfect day and streak from now on, and you can restore it any time. <b>Delete</b> removes it and its whole history.</p>
     </div>`);
 }
 
@@ -2776,7 +2827,7 @@ function openGoalHabits(id) {
   const g = state.goals.find(x => x.id === id); if (!g) return;
   openModal(`<header class="modal-head"><h3>Link habits · ${esc(g.title)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body"><p class="soft small">Tick the habits that build this goal.</p>
-      <ul class="link-list">${state.habits.map(h => `<li><label class="check-inline"><input type="checkbox" data-change="goal-habit-toggle" data-g="${g.id}" data-h="${h.id}" ${(h.goalIds || []).includes(g.id) ? "checked" : ""}> <span>${esc(h.emoji)} ${esc(h.name)}</span></label></li>`).join("")}</ul>
+      <ul class="link-list">${goalPickHabits(g).map(h => `<li><label class="check-inline"><input type="checkbox" data-change="goal-habit-toggle" data-g="${g.id}" data-h="${h.id}" ${(h.goalIds || []).includes(g.id) ? "checked" : ""}> <span>${esc(h.emoji)} ${esc(h.name)}</span></label></li>`).join("")}</ul>
       <div class="modal-foot"><button type="button" class="btn primary" data-action="goal-open" data-id="${g.id}">Done</button></div></div>`);
 }
 
@@ -4301,7 +4352,7 @@ async function enableReminders() {
 
 function remindersCard() {
   const r = state.reminders, perm = notifyPermission();
-  const timed = state.habits.filter(h => h.remindAt);
+  const timed = liveHabits().filter(h => h.remindAt);
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
   const standalone = window.matchMedia && window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 
@@ -4572,12 +4623,30 @@ const ACTIONS = {
 
   "task-up": (el) => moveTask(el.dataset.id, -1),
   "task-down": (el) => moveTask(el.dataset.id, 1),
+
+  /* retire a habit without destroying it */
+  "habit-archive": (el) => {
+    const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
+    h.archived = true;
+    /* dated TODAY: everything before this stays exactly as it was scored */
+    h.archivedOn = todayIso();
+    closeModal(); save(); render();
+    toastUndo(`${h.name} archived`, () => { h.archived = false; h.archivedOn = ""; save(); render(); });
+  },
+  "habit-restore": (el) => {
+    const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
+    h.archived = false; h.archivedOn = "";
+    closeModal(); save(); render();
+    toast(`${h.name} is back`);
+  },
+  "habit-up": (el) => moveHabit(el.dataset.id, -1),
+  "habit-down": (el) => moveHabit(el.dataset.id, 1),
   "todo-toggle": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.done = !td.done; if (td.done) addXp(5, "Task done"); syncTaskToLinks(td); save(); closeModal(); render(); } },
   "todo-del": (el) => { closeModal(); deleteWithUndo(() => state.todos, el.dataset.id, "Task deleted"); },
   "task-add": () => formModal("New task",
     fld("Task", txt("text", "e.g. Calisthenics workout")) +
     `<div class="fld-row"><label class="fld"><span>Time (optional)</span><input type="time" name="time"></label>
-     <label class="fld"><span>Counts toward habit</span><select name="habitId"><option value="">Auto-detect</option><option value="none">None</option>${state.habits.map(h => `<option value="${h.id}">${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</select></label></div>`, "todo-add"),
+     <label class="fld"><span>Counts toward habit</span><select name="habitId"><option value="">Auto-detect</option><option value="none">None</option>${liveHabits().map(h => `<option value="${h.id}">${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</select></label></div>`, "todo-add"),
 
   /* day navigation (shared) */
   "day-prev": (el) => { const v = el.dataset.view; setCursor(v, addDays(dayCursor(v), -1)); render(); },
@@ -4589,7 +4658,7 @@ const ACTIONS = {
   "habit-library": openHabitLibrary,
   "habit-tmpl": (el) => {
     const t = HABIT_TEMPLATES[+el.dataset.i]; if (!t) return;
-    state.habits.push({ id: uid(), name: t.name, emoji: t.emoji || "✅", type: t.type || "build", target: t.target || 0, unit: t.unit || "", why: t.why || "", color: t.color || "#6a5ae0", cadence: t.cadence || { mode: "daily" }, kind: t.kind || "", goalIds: [], milestones: [], log: {} });
+    state.habits.push({ id: uid(), name: t.name, emoji: t.emoji || "✅", type: t.type || "build", target: t.target || 0, unit: t.unit || "", why: t.why || "", color: t.color || "#6a5ae0", cadence: t.cadence || { mode: "daily" }, kind: t.kind || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() });
     save(); render(); toast(`Added ${t.emoji} ${t.name}`);
   },
   "workout-library": openWorkoutLibrary,
@@ -5158,7 +5227,7 @@ const SUBMITS = {
   "auth-signin": (f) => { doAuth("signin", f.email, f.password); return true; },
   "auth-signup": (f) => { doAuth("signup", f.email, f.password); return true; },
 
-  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {} }); },
+  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() }); },
   "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.remindAt = f.remindAt || ""; } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
   "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", progress: [], habitIds: [], milestones: [] }); },
