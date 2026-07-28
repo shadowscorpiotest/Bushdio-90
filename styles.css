@@ -1215,28 +1215,9 @@ li.done .checkbox { animation: checkPop .3s ease; }
 @keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(.99); } to { opacity: 1; transform: none; } }
 
 /* ---------- OS "Today" agenda ---------- */
-.agenda-list { display: flex; flex-direction: column; gap: 8px; }
-.agenda-item {
-  display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 14px;
-  background: var(--surface-2); border: 1px solid var(--line); cursor: pointer;
-  transition: transform .2s var(--ease-out), border-color .2s, background .2s; text-align: left; width: 100%;
-}
-.agenda-item:hover { transform: translateX(3px); border-color: var(--a, var(--brand)); }
-.agenda-item .a-check {
-  width: 26px; height: 26px; flex: 0 0 auto; border: 2px solid var(--line); border-radius: 9px;
-  display: grid; place-items: center; color: transparent; transition: background .2s, border-color .2s, color .2s, transform .15s var(--ease-spring);
-}
-.agenda-item .a-check:hover { border-color: var(--a, var(--brand)); }
-.agenda-item .a-check.on { background: var(--good); border-color: var(--good); color: #fff; }
-.agenda-item.done .a-txt b { text-decoration: line-through; color: var(--ink-3); }
 .a-ic { width: 34px; height: 34px; flex: 0 0 auto; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--a, var(--brand)) 15%, transparent); color: var(--a, var(--brand)); }
 .a-ic svg { width: 18px; height: 18px; }
-.a-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.a-txt b { font-size: 14px; font-weight: 600; }
-.a-txt small { font-size: 12px; color: var(--ink-3); }
 .a-when { font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
-.agenda-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 22px; text-align: center; color: var(--ink-3); }
-.agenda-empty .big { font-size: 34px; }
 
 /* task list */
 .task-add { display: flex; gap: 8px; margin-top: 10px; }
@@ -1262,11 +1243,6 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .done-list { opacity: .7; margin-top: 4px; }
 
 /* today's habit chips */
-.habit-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.habit-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink-2); background: var(--surface-2); border: 1.5px solid var(--line); border-radius: 999px; padding: 7px 13px; transition: transform .18s var(--ease-spring), border-color .2s, background .2s, color .2s; }
-.habit-chip:hover { transform: translateY(-1px); border-color: var(--a); }
-.habit-chip svg { width: 14px; height: 14px; }
-.habit-chip.on { background: color-mix(in srgb, var(--a) 14%, transparent); border-color: var(--a); color: var(--a); }
 
 /* mini agenda (upcoming) */
 .mini-agenda { display: flex; flex-direction: column; gap: 8px; }
@@ -1738,3 +1714,52 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 .hist-log li:last-child { border-bottom: 0; }
 .hl-when { flex: 0 0 62px; color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 11.5px; }
 .hl-what { flex: 1; min-width: 0; color: var(--ink-2); }
+
+/* ---------- dashboard · today's habits ----------
+   Compact and MEASURABLE, today only. Streaks, heatmaps and completion percentages deliberately do
+   not appear here — they belong on the Habit Tracker page. A dashboard row answers "how far am I",
+   not "how have I been doing". */
+.dash-habits { display: flex; flex-direction: column; }
+.dh { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+.dh:last-child { border-bottom: 0; }
+.dh-hit {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 11px;
+  padding: 10px 2px; min-height: 46px; text-align: left; cursor: pointer;
+}
+.dh-check {
+  width: 26px; height: 26px; flex: 0 0 auto; border: 2px solid var(--line); border-radius: 9px;
+  display: grid; place-items: center; color: transparent;
+  transition: background .2s, border-color .2s, color .2s;
+}
+.dh-hit:hover .dh-check { border-color: var(--hc, var(--brand)); }
+.dh.done .dh-check { background: var(--good); border-color: var(--good); color: #fff; }
+.dh-check svg { width: 15px; height: 15px; }
+.dh-emoji { font-size: 18px; line-height: 1; flex: 0 0 auto; }
+.dh-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.dh-txt b { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dh-txt small { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.dh-txt .bar { height: 5px; }
+.dh.done .dh-txt b { text-decoration: line-through; color: var(--ink-3); }
+.dh-group {
+  flex: 0 0 auto; width: 26px; height: 26px; display: grid; place-items: center; font-size: 13px;
+  border-radius: 8px; background: color-mix(in srgb, var(--a) 15%, transparent);
+}
+
+/* ---------- dashboard · active projects ---------- */
+.active-projects { display: flex; flex-direction: column; gap: 9px; }
+.ap-item {
+  display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 14px;
+  background: var(--surface-2); border: 1px solid var(--line); cursor: pointer;
+  transition: transform .2s var(--ease-out), border-color .2s;
+}
+.ap-item:hover { transform: translateY(-2px); border-color: #12a594; }
+.ap-emoji { font-size: 22px; line-height: 1; flex: 0 0 auto; }
+.ap-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.ap-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ap-top b { font-size: 14.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-pct { font-size: 13px; font-weight: 800; color: #12a594; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.ap-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
+.ap-next { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.ap-next svg { width: 12px; height: 12px; flex: none; }
+.ap-go { flex: 0 0 auto; color: var(--ink-3); display: grid; place-items: center; }
+.ap-go svg { width: 18px; height: 18px; }

@@ -163,7 +163,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 13;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 14;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -607,6 +607,13 @@ const MIGRATIONS = [
     ((s.social || {}).people || []).forEach(p => stamp(p, (p.touches || []).slice().sort()[0] || ""));
     (s.reading || {}).books && s.reading.books.forEach(b => stamp(b, b.started || ""));
     (s.finance || {}).entries && s.finance.entries.forEach(e => stamp(e, e.date || ""));
+  },
+
+  /* 13 → 14 · the dashboard's Active Projects card needs one thing a project didn't carry: what
+     comes next. `lastWorked` is deliberately NOT stored — it is derived from focusLog, because a
+     second copy of that fact is a second thing that can disagree with the first. */
+  (s) => {
+    (s.projects || []).forEach(p => { if (p.nextMilestone == null) p.nextMilestone = ""; });
   },
 ];
 
@@ -2528,33 +2535,11 @@ function greeting() {
 }
 
 /* ---------- Today (OS home) ---------- */
-function todayAgenda() {
-  const t = todayIso(), items = [];
-  state.habits.filter(h => h.type !== "avoid" && isScheduled(h, t) && !isSkipped(h, t)).forEach(h => {
-    items.push({ kind: "habit", id: h.id, emoji: h.emoji, hue: "#6a5ae0", title: h.name,
-      sub: h.type === "quantity" ? `${(habitEntry(h, t) || {}).amount || 0} / ${h.target} ${h.unit || ""}` : "habit",
-      done: habitMet(h, t), action: "ag-habit" });
-  });
-  const checked = state.nutrition.log[t] || {};
-  state.nutrition.meals.forEach(m => items.push({ kind: "meal", id: m.id, hue: "#30a46c", title: m.slot, sub: m.name, done: !!checked[m.id], action: "ag-meal", emoji: "🍽️" }));
-  tasksOn(t).forEach(td => items.push({ kind: "task", id: td.id, hue: "#3e63dd", title: td.text, sub: td.repeat ? repeatLabel(td.repeat).toLowerCase() : "task", done: td.done, action: "ag-task", emoji: "✅" }));
-  items.push({ kind: "reflect", hue: "#7c66dc", title: "Daily reflection", sub: reflectionOfDay(), done: !!state.reflections[t], action: "ag-reflect", emoji: "✨" });
-  state.university.tasks.filter(k => !k.done && k.due <= addDays(t, 5)).forEach(k => items.push({ kind: "deadline", nav: "university", icon: "building", hue: "#3e63dd", title: k.title, when: daysUntil(k.due), sub: "university deadline" }));
-  return items;
-}
-function agendaRow(it) {
-  if (it.nav) {
-    return `<div class="agenda-item" style="--a:${cssVar(it.hue)}" data-nav="${it.nav}">
-      <span class="a-ic" style="--a:${cssVar(it.hue)}">${I[it.icon]}</span>
-      <span class="a-txt"><b>${esc(it.title)}</b><small>${esc(it.sub)}</small></span>
-      <span class="a-when">${esc(it.when || "")}</span>
-    </div>`;
-  }
-  return `<div class="agenda-item ${it.done ? "done" : ""}" style="--a:${cssVar(it.hue)}">
-    <button class="a-check ${it.done ? "on" : ""}" data-action="${it.action}" data-id="${it.id || ""}" aria-label="${it.action === "ag-reflect" ? "Write reflection" : "Complete " + esc(it.title)}">${I.check}</button>
-    <span class="a-txt"><b>${it.emoji ? esc(it.emoji) + " " : ""}${esc(it.title)}</b><small>${esc(it.sub)}</small></span>
-  </div>`;
-}
+/* todayAgenda() and agendaRow() lived here: the old Today page's flat list of everything due.
+   That page merged into the Dashboard long ago and nothing has called either since — they were dead
+   code. The Bible asks for a TIMELINE in that slot instead, which is a different thing: ordered by
+   the clock, not a bag of items. See timelineOn(). */
+
 function openReflectModal() {
   openModal(`<header class="modal-head"><h3>${I.spark} Daily reflection</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body"><p class="reflect-prompt">${esc(reflectionOfDay())}</p>
@@ -3066,6 +3051,89 @@ function taskAddForm() {
     <button class="btn primary" type="submit" aria-label="Add task">${I.plus}</button>
   </form>`;
 }
+/* ---------- 6 · Habits, compact and measurable ----------
+   The spec is explicit: today only, measurable, NO historical statistics. Streaks, heatmaps and
+   completion percentages live on the Habit Tracker page — putting them here would turn a decision
+   into a scoreboard. What this has to show is the one thing a chip could not: how far through you
+   are. A water habit at 1.2 of 2 L is not the same as one you haven't started. */
+function habitsTodayCard(d) {
+  const due = liveHabits().filter(h => isScheduled(h, d) && !isSkipped(h, d));
+  const done = due.filter(h => habitMet(h, d)).length;
+  const head = cardHead(`Today's habits${due.length ? ` <small class="soft">${done}/${due.length}</small>` : ""}`,
+    `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`);
+  if (!due.length) return card("span2", head + `<p class="soft small">Nothing scheduled today — enjoy the rest \u{1F324}\uFE0F</p>`);
+  const rows = due.map(h => {
+    const met = habitMet(h, d), g = groupById(h.groupId);
+    const src = habitSource(h);
+    /* a fed habit is ticked by its own area, so tapping goes there rather than pretending to edit */
+    const act = h.kind === "workout" ? "habit-workout-jump" : src ? "habit-source-jump" : h.type === "avoid" ? "habit-open" : "ag-habit";
+    let sub = "", bar = "";
+    if (h.type === "quantity") {
+      const amt = habitAmount(h, d);
+      sub = `${amt} / ${h.target}${h.unit ? " " + esc(h.unit) : ""}`;
+      bar = barHtml(100 * amt / (h.target || 1), h.color);
+    } else if (h.type === "avoid") {
+      sub = (habitEntry(h, d) || {}).slip ? "slipped today" : "kept";
+    }
+    return `<li class="dh ${met ? "done" : ""}" style="--hc:${cssVar(h.color, "#6a5ae0")}">
+      <button class="dh-hit" data-action="${act}" data-id="${h.id}" aria-label="${met ? "Done" : "Complete"} ${esc(h.name)}">
+        <span class="dh-check">${I.check}</span>
+        <span class="dh-emoji" aria-hidden="true">${esc(h.emoji)}</span>
+        <span class="dh-txt"><b>${esc(h.name)}</b>${sub ? `<small>${sub}</small>` : ""}${bar}</span>
+      </button>
+      ${g ? `<span class="dh-group" style="--a:${cssVar(g.color, "#6a5ae0")}" title="${esc(g.name)}">${esc(g.emoji || "\u{1F94B}")}</span>` : ""}
+    </li>`;
+  }).join("");
+  return card("span2", head + `<ul class="dash-habits">${rows}</ul>`);
+}
+
+/* ---------- 9 · Active Projects ----------
+   Three at most, per spec. `lastWorked` is DERIVED from the focus log rather than stored: L1 already
+   records every finished session against the project it served, and a second copy of that fact is
+   just something that can disagree with the first. */
+/* daysUntil() reads the future — "in 3d", "1d overdue". A date something last happened on needs the
+   other tense, and "worked 1d overdue" is nonsense. */
+function agoLabel(d) {
+  const n = Math.round((Date.parse(todayIso() + "T12:00:00") - Date.parse(d + "T12:00:00")) / DAY_MS);
+  if (n <= 0) return "today";
+  if (n === 1) return "yesterday";
+  if (n < 7) return `${n} days ago`;
+  if (n < 14) return "last week";
+  if (n < 60) return `${Math.round(n / 7)} weeks ago`;
+  return `${Math.round(n / 30)} months ago`;
+}
+function projectLastWorked(id) {
+  let best = "";
+  Object.keys(state.focusLog || {}).forEach(d => {
+    if ((state.focusLog[d] || []).some(r => r.projectId === id) && d > best) best = d;
+  });
+  return best;
+}
+function activeProjectsCard() {
+  const live = (state.projects || []).filter(p => p.status !== "Done")
+    .map(p => ({ p, worked: projectLastWorked(p.id) }))
+    .sort((a, b) => (b.worked || "").localeCompare(a.worked || "") || (b.p.progress || 0) - (a.p.progress || 0));
+  const head = cardHead("Active projects", `<button class="btn ghost tiny" data-nav="projects">All projects</button>`);
+  if (!live.length) return card("span2", head +
+    emptyMsg("rocket", "Nothing in flight. A project is the thing a goal actually gets built by.",
+      `<button class="btn primary" data-nav="projects">${I.plus}Start one</button>`));
+  const rows = live.slice(0, 3).map(({ p, worked }) => `
+    <li class="ap-item" data-action="project-edit" data-id="${p.id}">
+      <span class="ap-emoji" aria-hidden="true">${esc(p.emoji || "\u{1F680}")}</span>
+      <span class="ap-body">
+        <span class="ap-top"><b>${esc(p.name)}</b><b class="ap-pct">${p.progress || 0}%</b></span>
+        ${barHtml(p.progress || 0, "#12a594")}
+        <span class="ap-meta">
+          <span class="ap-next">${p.nextMilestone ? `${I.target}${esc(p.nextMilestone)}` : `<i class="soft">no next step set</i>`}</span>
+          <span class="ap-when">${worked ? `worked ${esc(agoLabel(worked))}` : "not worked yet"}</span>
+        </span>
+      </span>
+      <span class="ap-go" aria-hidden="true">${I.chevR}</span>
+    </li>`).join("");
+  return card("span2", head + `<ul class="active-projects">${rows}</ul>` +
+    (live.length > 3 ? `<p class="soft small">${live.length - 3} more in Projects.</p>` : ""));
+}
+
 function currentlyReadingCard() {
   const reading = state.reading.books.filter(b => b.status === "current").slice(0, 3);
   const body = reading.length
@@ -3326,15 +3394,13 @@ function vDashboard() {
     ${focusCard(uniDue, undone, done, stranded)}
     ${hardTaskCard()}
 
-    ${card("span2", cardHead("Today's habits", `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`) + (dueHabits.length ? `
-      <div class="habit-chips">${dueHabits.map(h => `<button class="habit-chip ${habitMet(h, t) ? "on" : ""}" data-action="${h.kind === "workout" ? "habit-workout-jump" : "ag-habit"}" data-id="${h.id}" style="--a:${cssVar(h.color, "#6a5ae0")}">${esc(h.emoji)} ${esc(h.name)}${habitMet(h, t) ? " " + I.check : ""}</button>`).join("")}</div>` : `<p class="soft small">No habits scheduled today.</p>`))}
-
+    ${/* 5 · Timeline lands here in B2 */ ""}
+    ${habitsTodayCard(t)}
     ${currentlyReadingCard()}
     ${supplementsDueCard()}
+    ${activeProjectsCard()}
 
-
-
-    ${deadlines.length ? card("", cardHead("Upcoming") + `
+    ${deadlines.length ? card("", cardHead("What's next") + `
       <ul class="mini-agenda">${deadlines.map(k => { const a = areaOf(k.area); return `<li data-nav="${k.nav}"><span class="a-ic" style="--a:${cssVar(a.hue)}">${I[a.icon]}</span><span class="row-txt"><b>${esc(k.title)}</b><small>${esc(a.name.toLowerCase())}</small></span><span class="a-when ${k.due < t ? "over" : ""}">${daysUntil(k.due)}</span></li>`; }).join("")}</ul>`) : ""}
 
     ${card("", cardHead("Reflection") + `
@@ -6037,6 +6103,8 @@ const ACTIONS = {
     formModal("Edit project",
       `<div class="fld-row">${fld("Name", txt("name", "", x.name))}${fld("Emoji", txt("emoji", "🚀", x.emoji || "🚀", false))}</div>` +
       fld("Status", `<select name="status">${["Planning","In progress","Paused","Done"].map(v => `<option ${x.status === v ? "selected" : ""}>${v}</option>`).join("")}</select>`) +
+      fld("Next milestone <small class=\"soft\">— the one thing that moves this forward</small>",
+        txt("nextMilestone", "e.g. ship the migration", x.nextMilestone || "", false)) +
       fld("Note", `<textarea name="note" maxlength="400" placeholder="What is it, and what's next?">${esc(x.note || "")}</textarea>`) +
       `<input type="hidden" name="id" value="${x.id}">`, "project-edit");
   },
@@ -6482,7 +6550,7 @@ const SUBMITS = {
   },
   "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }; },
   "sup-edit": (f) => { const x = state.nutrition.supplements.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.dose = f.dose || ""; x.every = ["day","week","month"].includes(f.every) ? f.every : x.every; } },
-  "project-edit": (f) => { const x = state.projects.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.status = f.status || x.status; x.note = f.note || ""; if (x.status === "Done") x.progress = 100; } },
+  "project-edit": (f) => { const x = state.projects.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.status = f.status || x.status; x.note = f.note || ""; x.nextMilestone = (f.nextMilestone || "").slice(0, 90); if (x.status === "Done") x.progress = 100; touch("project", x.id, "Updated"); } },
   "social-edit": (f) => { const x = state.social.items.find(v => v.id === f.id); if (x) { x.title = f.title; x.emoji = f.emoji || x.emoji; x.target = Math.max(1, +f.target || 1); } },
   "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; x.tags = parseTags(f.tags); x.felt = f.felt || ""; } },
   "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
@@ -6542,7 +6610,7 @@ const SUBMITS = {
   },
   "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, category: f.category || "Other", due: f.due || "", done: false }); },
   "work-edit": (f) => { const k = state.work.items.find(x => x.id === f.id); if (k) { k.title = f.title; k.category = f.category || "Other"; k.due = f.due || ""; } },
-  "project-add": (f) => { const p = born({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); state.projects.push(p); touch("project", p.id, "Project created"); },
+  "project-add": (f) => { const p = born({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "", nextMilestone: "" }); state.projects.push(p); touch("project", p.id, "Project created"); },
   "fin-entry": (f) => {
     const amt = +f.amount || 0; if (amt <= 0) return;
     const type = f.type === "income" ? "income" : "expense";
