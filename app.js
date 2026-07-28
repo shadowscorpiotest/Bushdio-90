@@ -162,7 +162,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 11;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 12;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -185,8 +185,10 @@ function defaultState() {
     badges: {},                // {badgeId: dateEarned}
     visited: {},               // {viewId: true}
     goals: [],                 // {id,title,emoji,milestones:[{id,text,done}],priority,status}
-    /* an optional streak-style challenge — the welcome line hides entirely when this is unset */
-    challenge: null,           // {name, start, days} or null
+    /* Habit groups. A group with a `start` and a `days` count is a CHALLENGE — the two are the same
+       idea with and without a clock on it, so there is one list rather than two concepts. */
+    groups: [],                // {id,name,emoji,color,start,days,order}
+    quotes: [],                // the user's own lines, mixed into the daily rotation
     todos: [],                 // {id,text,done,date,time,order,repeat,seriesId,from,
                                //  priority,estMin,linkGoalId,projectId,focus,hard}
     tasksRolledOn: "",         // last date rollTasks() ran — synced so one device answering settles it
@@ -564,6 +566,21 @@ const MIGRATIONS = [
   (s) => {
     if (s.focus === undefined) s.focus = null;
     if (!s.focusLog || typeof s.focusLog !== "object") s.focusLog = {};
+  },
+
+  /* 11 → 12 · habit groups. The single `challenge` object shipped in schema 10 becomes the first
+     group, because a challenge IS a named set of habits that happens to have a start date and a
+     length. Anyone who had one keeps it, name and dates intact. */
+  (s) => {
+    if (!Array.isArray(s.groups)) s.groups = [];
+    if (!Array.isArray(s.quotes)) s.quotes = [];
+    const c = s.challenge;
+    if (c && c.name && !s.groups.some(g => g.name === c.name)) {
+      s.groups.push({ id: uid(), name: c.name, emoji: "\u{1F94B}", color: "#6a5ae0",
+                      start: c.start || "", days: +c.days || 0, order: 0 });
+    }
+    delete s.challenge;
+    (s.habits || []).forEach(h => { if (h.groupId == null) h.groupId = ""; });
   },
 ];
 
@@ -2239,12 +2256,34 @@ const estLabel = (m) => !m ? "" : m >= 60 ? (Math.round(m / 60 * 10) / 10) + "h"
 
 /* Day N of a challenge, if one is running. Returns null the rest of the time, so the welcome line
    simply does not mention it. */
-function challengeDay() {
-  const c = state.challenge;
-  if (!c || !c.start) return null;
-  const n = Math.floor((Date.parse(todayIso() + "T12:00:00") - Date.parse(c.start + "T12:00:00")) / 86400000) + 1;
-  if (n < 1 || (c.days && n > c.days)) return null;
-  return { n, of: c.days || 0, name: c.name || "Challenge" };
+/* ---- habit groups ----
+   A group is a named set of habits. Give it a start date and a length and it becomes a CHALLENGE
+   with a day counter; leave those blank and it is simply a category. One list, two uses. */
+const groupsAll = () => (state.groups || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+const groupById = (id) => (state.groups || []).find(g => g.id === id) || null;
+const habitsInGroup = (id) => liveHabits().filter(h => (h.groupId || "") === (id || ""));
+const isChallenge = (g) => !!(g && g.start && g.days > 0);
+
+/* Day N of a challenge group, or null. */
+function groupDay(g, d = todayIso()) {
+  if (!isChallenge(g)) return null;
+  const n = Math.floor((Date.parse(d + "T12:00:00") - Date.parse(g.start + "T12:00:00")) / 86400000) + 1;
+  if (n < 1 || n > g.days) return null;
+  return { n, of: g.days, name: g.name || "Challenge", pct: clamp(Math.round(100 * n / g.days), 0, 100) };
+}
+/* If two challenges overlap the banner shows the one STARTED MOST RECENTLY — an arbitrary rule is
+   fine, an unstated one is not, so the group card says which is showing. */
+function activeChallenge(d = todayIso()) {
+  return groupsAll().filter(g => groupDay(g, d)).sort((a, b) => a.start < b.start ? 1 : -1)[0] || null;
+}
+function challengeDay(d = todayIso()) {
+  return groupDay(activeChallenge(d), d);
+}
+/* how much of a group is done on a given day — the number its header shows */
+function groupProgress(g, d = todayIso()) {
+  const due = habitsInGroup(g ? g.id : "").filter(h => isScheduled(h, d) && !isSkipped(h, d));
+  const done = due.filter(h => habitMet(h, d)).length;
+  return { due: due.length, done, pct: due.length ? Math.round(100 * done / due.length) : 0 };
 }
 
 function greeting() {
@@ -2809,6 +2848,8 @@ function supplementsDueCard() {
    Order is fixed and deliberate: who you are today, what you are building, what you'll do about it,
    and the one thing you'd rather avoid. Nothing here reports history. */
 
+/* Enough lines that one won't come round again for three months, and the user's own are mixed in —
+   someone running a Bushido challenge wants Bushido lines, not mine. */
 const MOTIVATION = [
   "Small, boring, repeated. That's the whole trick.",
   "You don't have to feel like it. You just have to start it.",
@@ -2817,8 +2858,95 @@ const MOTIVATION = [
   "Do the hard one while you still have the morning.",
   "Progress is quiet. Keep going anyway.",
   "Today only has to be slightly better than yesterday.",
+  "Discipline is choosing what you want most over what you want now.",
+  "The work you avoid is usually the work that counts.",
+  "Start before you're ready. Ready arrives later, if at all.",
+  "A bad session still beats a skipped one.",
+  "You are what you repeat, not what you intend.",
+  "Consistency is a skill. Practise it like one.",
+  "Nobody is coming. That's the good news.",
+  "Do it tired. Do it unmotivated. Do it anyway.",
+  "The first ten minutes are the whole fight.",
+  "Rest is part of the work, not a break from it.",
+  "Comparison is a tax on your attention. Stop paying it.",
+  "You can do hard things. You've done them before.",
+  "Momentum is built, never found.",
+  "Half-finished is still further than not started.",
+  "Motivation follows action. It rarely leads.",
+  "Show up on the days it doesn't matter.",
+  "The plan is not the point. The reps are the point.",
+  "Slow is smooth. Smooth is fast.",
+  "Fall down seven times, stand up eight.",
+  "The obstacle is the way.",
+  "A river cuts through rock not by power but by persistence.",
+  "Excellence is a habit, not an act.",
+  "He who has a why can bear almost any how.",
+  "Do not pray for an easy life; pray for the strength to endure a difficult one.",
+  "The successful warrior is the average person with laser-like focus.",
+  "Perfection is the enemy of finished.",
+  "You don't rise to your goals. You fall to your systems.",
+  "Make it so easy you can't say no.",
+  "Never miss twice.",
+  "What gets scheduled gets done.",
+  "Direction matters more than speed.",
+  "Small hinges swing big doors.",
+  "The compound interest of daily effort is absurd. Trust it.",
+  "Yesterday's discipline is today's freedom.",
+  "Suffer the pain of discipline or the pain of regret.",
+  "Ordinary things done consistently produce extraordinary results.",
+  "Effort is the only thing you fully control. Spend it well.",
+  "Don't count the days. Make the days count.",
+  "One more rep. One more page. One more day.",
+  "You will never regret finishing.",
+  "Doubt is a feeling, not a verdict.",
+  "The standard you walk past is the standard you accept.",
+  "Amateurs wait for inspiration. The rest of us get up and work.",
+  "Быть, а не казаться — be, don't seem.",
+  "Fear is a compass. It points at the work.",
+  "You cannot think your way into a new habit. You act your way in.",
+  "Environment beats willpower. Change the room.",
+  "Boredom is the price of mastery.",
+  "A goal without a date is a wish with good branding.",
+  "If it's important, do it every day. If not, don't do it at all.",
+  "Two minutes now beats two hours someday.",
+  "Nothing changes until something changes daily.",
+  "The days you least want to are the days it counts double.",
+  "Quiet effort outlasts loud intention.",
+  "Be stubborn about the goal, flexible about the method.",
+  "Track it or guess. Only one of those improves.",
+  "Rest deliberately, so you don't collapse accidentally.",
+  "The body achieves what the mind believes is normal.",
+  "Habits are the compound interest of self-improvement.",
+  "Focus is saying no to a hundred good things.",
+  "A single candle is enough to end the argument with the dark.",
+  "You're not behind. You're just early in a long game.",
+  "Difficulty is where the value is stored.",
+  "Discomfort is the fee for growth. Pay it early.",
+  "First we form habits, then they form us.",
+  "The pain of today is the strength of next month.",
+  "Don't break the chain.",
+  "The master has failed more times than the beginner has tried.",
+  "Attention is the rarest form of generosity. Give it to your own life.",
+  "You can always do a little more than you think.",
+  "Water shapes stone. Be water, and be patient.",
+  "Better a diamond with a flaw than a pebble without.",
+  "Fall in love with the process and the results take care of themselves.",
+  "Move the needle a millimetre. Then do it again.",
+  "There is no finish line, and that is a relief.",
+  "Simplify until it's obvious, then do it.",
+  "Willpower is a battery, not a personality.",
+  "Protect the streak, but don't worship it.",
+  "The day is long enough for the things that matter.",
+  "Grit is patience with a spine.",
+  "You already know what to do. Go do that.",
+  "Every expert was once an embarrassment.",
+  "Some days you win. Some days you learn. No days you quit.",
+  "A promise to yourself is still a promise.",
+  "Silence the noise. Keep the signal. Begin.",
 ];
-const motivationOfDay = () => MOTIVATION[Math.floor(Date.now() / DAY_MS) % MOTIVATION.length];
+/* the built-in lines plus the user's own, so the rotation grows as they add to it */
+const quotePool = () => MOTIVATION.concat((state.quotes || []).filter(q => String(q || "").trim()));
+const motivationOfDay = () => { const p = quotePool(); return p[Math.floor(Date.now() / DAY_MS) % p.length]; };
 
 function welcomeCard(remaining) {
   const ch = challengeDay();
@@ -3028,7 +3156,10 @@ function habitRow(h, d, i, total) {
     sub = `${streak} day streak`;
   }
   const col = h.color || "#6a5ae0";
-  const quantBar = h.type === "quantity" ? barHtml(100 * ((e.amount) || 0) / (h.target || 1), col) : "";
+  /* habitAmount(), not e.amount — a habit fed by another area keeps its number in that area, so
+     e.amount is permanently 0 for it and the bar rendered at 0% while the text beside it read
+     "10 of 10". The text was right; the bar was reading the wrong field. */
+  const quantBar = h.type === "quantity" ? barHtml(100 * habitAmount(h, d) / (h.target || 1), col) : "";
   const incBtn = h.type === "quantity" ? `<button class="btn tiny ghost" data-action="habit-inc" data-id="${h.id}">+${habitStep(h)}</button>` : "";
   const canMove = typeof i === "number" && total > 1;
   return `<li class="habit-li ${met ? "done" : ""}" style="--hc:${cssVar(col, "#6a5ae0")}">
@@ -3055,6 +3186,53 @@ function habitHistoryRow(h) {
   }
   return `<div class="hist-row">${cells.join("")}</div>`;
 }
+/* The due list, split by group. Someone with no groups sees exactly what they saw before — a plain
+   list — so the feature costs nothing until it's used. */
+function dueByGroup(due, d) {
+  const empty = `<p class="soft small" style="padding:8px 4px">Nothing scheduled for this day — enjoy the rest \u{1F324}\uFE0F</p>`;
+  if (!due.length) return empty;
+  const groups = groupsAll().filter(g => due.some(h => (h.groupId || "") === g.id));
+  if (!groups.length) return `<ul class="check-list habit-list">${due.map((h, i) => habitRow(h, d, i, due.length)).join("")}</ul>`;
+  const loose = due.filter(h => !groupById(h.groupId));
+  const block = (g, list) => {
+    const gp = { due: list.length, done: list.filter(h => habitMet(h, d)).length };
+    const day = g ? groupDay(g, d) : null;
+    return `<div class="hgroup" style="--a:${cssVar(g ? g.color : "", "#8b8b99")}">
+      <div class="hgroup-head" ${g ? `data-action="group-open" data-id="${g.id}"` : ""}>
+        <span class="hgroup-emoji" aria-hidden="true">${esc(g ? (g.emoji || "\u{1F94B}") : "\u{1F33F}")}</span>
+        <span class="hgroup-txt">
+          <b>${esc(g ? g.name : "Everything else")}</b>
+          <small>${gp.done}/${gp.due} done${day ? ` \u00b7 day ${day.n} of ${day.of}` : ""}</small>
+        </span>
+        ${day ? `<span class="hgroup-day">${day.pct}%</span>` : ""}
+      </div>
+      <ul class="check-list habit-list">${list.map((h, i) => habitRow(h, d, i, list.length)).join("")}</ul>
+    </div>`;
+  };
+  return groups.map(g => block(g, due.filter(h => h.groupId === g.id))).join("")
+    + (loose.length ? block(null, loose) : "");
+}
+
+/* Groups live here rather than in a settings screen: you make one while looking at the habits you
+   want in it. A challenge is just a group with a start date and a length. */
+function groupsCard(d) {
+  const gs = groupsAll();
+  const head = cardHead("Groups & challenges", addBtn("New group", "group-add", "ghost tiny"));
+  if (!gs.length) return card("", head + `<p class="soft small">Group habits that belong together \u2014 a morning routine, a training block. Give a group a <b>start date and a length</b> and it becomes a <b>challenge</b>: the dashboard then counts your day, like <i>day 10 of 75</i>.</p>`);
+  const active = activeChallenge(d);
+  return card("", head + `<ul class="group-list">${gs.map(g => {
+    const day = groupDay(g, d), gp = groupProgress(g, d), n = habitsInGroup(g.id).length;
+    return `<li data-action="group-open" data-id="${g.id}" style="--a:${cssVar(g.color, "#6a5ae0")}">
+      <span class="row-emoji">${esc(g.emoji || "\u{1F94B}")}</span>
+      <span class="row-txt"><b>${esc(g.name)}</b>
+        <small>${n} habit${n === 1 ? "" : "s"}${gp.due ? ` \u00b7 ${gp.done}/${gp.due} today` : ""}${day ? ` \u00b7 day ${day.n} of ${day.of}` : isChallenge(g) ? " \u00b7 challenge over" : ""}</small>
+        ${day ? barHtml(day.pct, g.color) : ""}</span>
+      <span class="chev">${I.chevR}</span>
+    </li>`;
+  }).join("")}</ul>` +
+    (active ? `<p class="soft note">${I.spark} The dashboard is counting <b>${esc(active.name)}</b>. If two challenges overlap it shows the one that <b>started most recently</b>.</p>` : ""));
+}
+
 function vHabits() {
   const d = dayCursor("habits"), week = weekDates();
   const isToday = d === todayIso();
@@ -3075,7 +3253,7 @@ function vHabits() {
       <div class="progress-line"><span>${isToday ? "Today's" : "That day's"} progress</span>${barHtml(pct)}<b>${pct}%</b></div>`)}
 
     ${card("span2", cardHead(isToday ? "Today's habits" : niceDate(d, { weekday: "long", month: "short", day: "numeric" }), `<button class="btn ghost tiny" data-action="habit-library">${I.grid}Library</button>${addBtn("New habit", "habit-add")}`) + (live.length ? `
-      <ul class="check-list habit-list">${due.map((h, i) => habitRow(h, d, i, due.length)).join("") || `<p class="soft small" style="padding:8px 4px">Nothing scheduled for this day — enjoy the rest 🌤️</p>`}</ul>
+      ${dueByGroup(due, d)}
       ${rest.length ? `<p class="rest-label">Not scheduled / resting</p><ul class="check-list habit-list dim">${rest.map(h => habitRow(h, d)).join("")}</ul>` : ""}
       ${archived.length ? `<details class="done-wrap arch-wrap"><summary>${I.moon} Archived (${archived.length})</summary>
         <ul class="check-list habit-list dim">
@@ -3088,6 +3266,8 @@ function vHabits() {
         <p class="soft note">${I.check} Archived habits keep every day they were logged — your past streaks and heatmap are untouched. They just stop counting from the day you retired them.</p>
       </details>` : ""}`
       : emptyMsg("target", "No habits yet — build your first ritual.", addBtn("Add a habit", "habit-add"))))}
+
+    ${groupsCard(d)}
 
     ${card("streak-card", `
       <div class="streak-hero">${I.flame}<div><b>${perfectStreak()} days</b><small>current perfect streak</small></div></div>
@@ -3127,6 +3307,9 @@ function habitFormFields(h) {
     </select>`) +
     `<div class="fld-row">${fld("Target", num("target", h.target || 0, 0))}${fld("Unit", txt("unit", "L / pages", h.unit || "", false))}</div>` +
     fld("Why — your reason", txt("why", "keeps me focused…", h.why || "", false)) +
+    fld("Group <small class=\"soft\">— a routine, or a challenge</small>",
+      `<select name="groupId"><option value="">No group</option>${groupsAll().map(g =>
+        `<option value="${g.id}" ${h.groupId === g.id ? "selected" : ""}>${esc(g.emoji || "\u{1F94B}")} ${esc(g.name)}${isChallenge(g) ? " (challenge)" : ""}</option>`).join("")}</select>`) +
     fld("How often", `<select name="cmode">
       <option value="daily" ${c.mode === "daily" ? "selected" : ""}>Every day</option>
       <option value="days" ${c.mode === "days" ? "selected" : ""}>Specific weekdays</option>
@@ -3138,6 +3321,27 @@ function habitFormFields(h) {
         `<option value="${x.id}" ${h.kind === x.id ? "selected" : ""}>${esc(x.label)}</option>`).join("")}</select>`) +
     fld("Remind me at <small class=\"soft\">— leave empty to use the general nudge time</small>",
       `<input type="time" name="remindAt" value="${esc(h.remindAt || "")}">`);
+}
+function groupFormFields(g) {
+  g = g || {};
+  return fld("Name", txt("name", "e.g. Bushido challenge", g.name || "")) +
+    `<div class="fld-row">${fld("Emoji", txt("emoji", "\u{1F94B}", g.emoji || "\u{1F94B}", false))}<label class="fld"><span>Color</span><input type="color" name="color" value="${cssVar(g.color, "#6a5ae0")}"></label></div>` +
+    `<div class="fld-row">${fld("Starts <small class=\"soft\">— optional</small>", `<input type="date" name="start" value="${esc(g.start || "")}">`)}${fld("For how many days", num("days", g.days || 0, 0))}</div>` +
+    `<p class="soft note">${I.spark} Leave those two blank and this is simply a <b>category</b>. Fill them in and it becomes a <b>challenge</b> \u2014 the dashboard counts your day, like <i>day 10 of 75</i>.</p>`;
+}
+function openGroupDetail(id) {
+  const g = groupById(id); if (!g) { closeModal(); return; }
+  const day = groupDay(g), gp = groupProgress(g), inside = habitsInGroup(g.id);
+  openModal(`<header class="modal-head"><h3>${esc(g.emoji || "\u{1F94B}")} ${esc(g.name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      ${day ? `<div class="progress-line"><span>Day ${day.n} of ${day.of}</span>${barHtml(day.pct, g.color)}<b>${day.pct}%</b></div>`
+        : isChallenge(g) ? `<p class="soft small">This challenge ${g.start > todayIso() ? `starts ${esc(niceDate(g.start, { month: "long", day: "numeric" }))}` : "has finished"}.</p>`
+        : `<p class="soft small">A category \u2014 no dates on it, so no day counter.</p>`}
+      <div class="progress-line"><span>Today</span>${barHtml(gp.pct, g.color)}<b>${gp.done}/${gp.due}</b></div>
+      <p class="soft small" style="margin-top:10px">${inside.length} habit${inside.length === 1 ? "" : "s"} in this group${inside.length ? ": " + inside.map(h => esc(h.emoji) + " " + esc(h.name)).join(", ") : " \u2014 set a habit's <b>Group</b> from its own sheet."}</p>
+      <div class="pill-row"><button class="btn primary slim" data-action="group-edit" data-id="${g.id}">Edit</button><button class="btn danger" data-action="group-del" data-id="${g.id}">${I.trash}Delete</button></div>
+      <p class="soft note">${I.check} Deleting a group never deletes its habits \u2014 they simply stop being grouped, and keep every day they were logged.</p>
+    </div>`);
 }
 function parseCadence(f) {
   const mode = f.cmode || "daily";
@@ -3154,7 +3358,7 @@ function habitDayControl(h, d, e) {
   }
   if (h.type === "quantity") {
     const src = habitSource(h), amt = habitAmount(h, d), met = habitMet(h, d);
-    const bar = `<div class="progress-line"><span>${amt} / ${h.target}${h.unit ? " " + h.unit : ""}</span>${barHtml(100 * amt / (h.target || 1), "#6a5ae0")}<b>${met ? "✓" : Math.round(100 * amt / (h.target || 1)) + "%"}</b></div>`;
+    const bar = `<div class="progress-line"><span>${amt} / ${h.target}${h.unit ? " " + h.unit : ""}</span>${barHtml(100 * amt / (h.target || 1), cssVar(h.color, "#6a5ae0"))}<b>${met ? "✓" : Math.round(100 * amt / (h.target || 1)) + "%"}</b></div>`;
     /* fed habits have no manual controls — the number comes from the area, so editing it here
        would be a value the app ignores. Send them to the source instead. */
     if (src) return `<div class="detail-control">${bar}
@@ -5072,12 +5276,30 @@ function accountCard() {
     <p class="soft note">${I.zap} Everything keeps working offline — the cloud is just an encrypted mirror. Sync runs on the live site (not the in-chat preview).</p>`);
 }
 
+/* The daily line on the dashboard. The built-in pool is long enough that nothing repeats for three
+   months; adding your own is what makes it yours \u2014 Bushido lines for a Bushido challenge. */
+function quotesCard() {
+  const mine = (state.quotes || []);
+  return card("", cardHead(`Daily lines <small class="soft">${quotePool().length} in rotation</small>`) + `
+    <p class="reflect-prompt">${esc(motivationOfDay())}</p>
+    <p class="soft small">Today's line. It changes every day and draws from ${MOTIVATION.length} built-in lines plus anything you add below.</p>
+    <form data-submit="quote-add" class="task-add" style="margin-top:10px">
+      <input name="text" placeholder="Add your own line…" autocomplete="off" required maxlength="160">
+      <button class="btn primary" type="submit" aria-label="Add line">${I.plus}</button>
+    </form>
+    ${mine.length ? `<ul class="quote-list">${mine.map((q, i) => `<li>
+      <span class="row-txt"><b>${esc(q)}</b></span>
+      <button class="icon-btn ghost" data-action="quote-del" data-i="${i}" aria-label="Remove this line">${I.trash}</button>
+    </li>`).join("")}</ul>` : `<p class="soft small" style="margin-top:8px">None of your own yet.</p>`}`);
+}
+
 function vProfile() {
   const li = levelInfo();
   return `
   <div class="grid">
     ${accountCard()}
     ${remindersCard()}
+    ${quotesCard()}
     ${card("center span2", `
       <button class="avatar-big" data-action="profile-edit" aria-label="Edit profile">${esc(state.profile.avatar)}</button>
       <h2 style="margin-top:10px">${esc(state.profile.name || "Set your name")}</h2>
@@ -5386,6 +5608,19 @@ const ACTIONS = {
   "ms-del": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.milestones = h.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openHabitDetail(h.id); } },
 
   /* goals */
+  "quote-del": (el) => { state.quotes.splice(+el.dataset.i, 1); save(); render(); },
+  "group-add": () => formModal("New group", groupFormFields(), "group-add"),
+  "group-open": (el) => openGroupDetail(el.dataset.id),
+  "group-edit": (el) => { const g = groupById(el.dataset.id); if (g) formModal("Edit group", groupFormFields(g) + `<input type="hidden" name="id" value="${g.id}">`, "group-edit"); },
+  /* the habits outlive the group — they just lose the label, and an undo puts it back */
+  "group-del": (el) => {
+    const id = el.dataset.id; closeModal();
+    const members = state.habits.filter(h => h.groupId === id).map(h => h.id);
+    members.forEach(hid => { const h = state.habits.find(x => x.id === hid); if (h) h.groupId = ""; });
+    deleteWithUndo(() => state.groups, id, "Group deleted",
+      null,
+      () => members.forEach(hid => { const h = state.habits.find(x => x.id === hid); if (h) h.groupId = id; }));
+  },
   "goal-add": () => formModal("New goal", goalFormFields(), "goal-add"),
   "goal-log": (el) => { const g = state.goals.find(x => x.id === el.dataset.id); if (g) formModal(`Log ${esc(g.unit || "value")} · ${esc(g.title)}`, fld(`Current ${esc(g.unit || "value")}`, num("value", goalCurrent(g), 0, "any")) + `<input type="hidden" name="gid" value="${g.id}">`, "goal-log"); },
   "goal-habits": (el) => openGoalHabits(el.dataset.id),
@@ -5914,9 +6149,12 @@ const SUBMITS = {
   "auth-signin": (f) => { doAuth("signin", f.email, f.password); return true; },
   "auth-signup": (f) => { doAuth("signup", f.email, f.password); return true; },
 
-  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() }); },
-  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.remindAt = f.remindAt || ""; syncPushSchedule(); } },
+  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", groupId: groupById(f.groupId) ? f.groupId : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() }); },
+  "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.groupId = groupById(f.groupId) ? f.groupId : ""; h.remindAt = f.remindAt || ""; syncPushSchedule(); } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
+  "quote-add": (f) => { const q = String(f.text || "").trim().slice(0, 160); if (q && !state.quotes.includes(q)) state.quotes.push(q); },
+  "group-add": (f) => { if (f.name) state.groups.push({ id: uid(), name: f.name, emoji: f.emoji || "\u{1F94B}", color: f.color || "#6a5ae0", start: f.start || "", days: Math.max(0, +f.days || 0), order: (state.groups.length ? Math.max(...state.groups.map(g => g.order || 0)) + 1 : 0) }); },
+  "group-edit": (f) => { const g = groupById(f.id); if (g && f.name) { g.name = f.name; g.emoji = f.emoji || g.emoji; g.color = f.color || g.color; g.start = f.start || ""; g.days = Math.max(0, +f.days || 0); } },
   "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", priority: PRIORITY[f.priority] ? f.priority : "med", status: ["active", "paused", "done"].includes(f.status) ? f.status : "active", progress: [], habitIds: [], milestones: [] }); },
   "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; if (PRIORITY[f.priority]) g.priority = f.priority; if (["active", "paused", "done"].includes(f.status)) g.status = f.status; syncGoalMilestones(g); } },
   "goal-log": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) { g.progress.push({ date: todayIso(), value: +f.value || 0 }); syncGoalMilestones(g); addXp(5, "Progress logged"); } },
