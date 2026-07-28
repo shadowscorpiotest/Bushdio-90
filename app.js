@@ -40,7 +40,8 @@ function cssVar(v, fallback = "") {
   return fallback;
 }
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
-const parseTags = (v) => String(v || "").split(",").map(x => x.trim()).filter(Boolean).slice(0, 8);
+/* de-duplicated: the same tag twice on one thing means nothing and just clutters the chip row */
+const parseTags = (v) => [...new Set(String(v || "").split(",").map(x => x.trim()).filter(Boolean))].slice(0, 8);
 const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(+n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 const DAY_MS = 86400000;
@@ -149,6 +150,7 @@ const areaOf = (id) => AREAS.find(a => a.id === id);
 const NAV_GROUPS = [
   { label: "Overview", items: [
     { id: "dashboard", name: "Dashboard", icon: "home" },
+    { id: "goals",     name: "Goals",     icon: "target" },
     { id: "progress",  name: "Progress",  icon: "chart" },
   ]},
   { label: "Daily", items: ["habits", "health", "workout", "nutrition", "journal"].map(areaOf) },
@@ -163,7 +165,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 15;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 16;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -185,7 +187,9 @@ function defaultState() {
     claimed: {},               // {date: {missionId:true}}
     badges: {},                // {badgeId: dateEarned}
     visited: {},               // {viewId: true}
-    goals: [],                 // {id,title,emoji,milestones:[{id,text,done}],priority,status}
+    /* NB `start` is a starting NUMBER (88 kg); `startedOn` is a date. Different questions. */
+    goals: [],                 // {id,title,emoji,type,unit,direction,start,target,startedOn,deadline,
+                               //  note,priority,status,tags,progress,habitIds,milestones}
     /* Habit groups. A group with a `start` and a `days` count is a CHALLENGE — the two are the same
        idea with and without a clock on it, so there is one list rather than two concepts. */
     groups: [],                // {id,name,emoji,color,start,days,order}
@@ -623,6 +627,17 @@ const MIGRATIONS = [
      needs somewhere for the things that are not a task, a meal, a workout or a habit — a lecture, a
      meeting, a train. Starts empty; `source` distinguishes hand-entered from imported. */
   (s) => { if (!Array.isArray(s.events)) s.events = []; },
+
+  /* 15 → 16 · Goals becomes a page of its own. Two fields it never had: when you started, and tags.
+     `startedOn` is backfilled from the goal's first logged progress where there is one — the same
+     rule as everywhere else, a real date or none at all. It is what makes pace answerable: without
+     a start there is no "you are 40% through the time and 15% through the goal". */
+  (s) => {
+    (s.goals || []).forEach(g => {
+      if (!Array.isArray(g.tags)) g.tags = [];
+      if (g.startedOn == null) g.startedOn = ((g.progress || [])[0] || {}).date || g.created || "";
+    });
+  },
 ];
 
 function migrate(s) {
@@ -2037,6 +2052,7 @@ let currentView = "dashboard";
 
 const VIEW_META = {
   dashboard:    { title: "Dashboard",    sub: () => new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) },
+  goals:        { title: "Goals",        sub: () => { const n = activeGoals().length; return n ? `${n} open \u00b7 where you're going` : "Where are you going?"; } },
   progress:     { title: "Progress",     sub: () => "Your journey in numbers" },
   integrations: { title: "Integrations", sub: () => "Connect your favorite apps" },
   profile:      { title: "Profile",      sub: () => "You, leveled up" },
@@ -2479,6 +2495,40 @@ function goalStatus(g) {
   if (d <= 7) return { txt: d + "d left", cls: "warn" };
   return { txt: "In progress", cls: "" };
 }
+
+/* ---- am I actually making progress? ----
+   The most useful thing a goal page can say is whether the work is keeping up with the clock, and
+   it is answerable — but ONLY when both ends are known. With a start date and a deadline, "40% of
+   the time has gone and you are 15% of the way" is a fact. With either missing it is a guess, so
+   this returns null and the UI says nothing rather than inventing a verdict. */
+function goalPace(g) {
+  if (!g.startedOn || !g.deadline) return null;
+  const from = Date.parse(g.startedOn + "T12:00:00"), to = Date.parse(g.deadline + "T12:00:00");
+  const span = to - from;
+  if (!(span > 0)) return null;
+  const elapsed = clamp(Math.round(100 * (Date.parse(todayIso() + "T12:00:00") - from) / span), 0, 100);
+  const made = goalProgress(g).pct;
+  const gap = made - elapsed;
+  return { elapsed, made, gap,
+    /* deliberately not "on track" — the app can compare two percentages, it cannot know your plan */
+    txt: goalReached(g) ? "Reached"
+      : gap >= 10 ? "Ahead of the clock"
+      : gap <= -20 ? "The clock is ahead of you"
+      : gap <= -10 ? "Slightly behind the clock"
+      : "Keeping pace with the clock",
+    cls: goalReached(g) ? "ok" : gap <= -20 ? "err" : gap <= -10 ? "warn" : "ok" };
+}
+/* minutes of focus that named this goal, over the whole log */
+function goalFocusMins(id) {
+  let n = 0;
+  Object.keys(state.focusLog || {}).forEach(d =>
+    (state.focusLog[d] || []).forEach(r => { if (r.goalId === id) n += r.mins || 0; }));
+  return n;
+}
+const goalsByStatus = (st) => (state.goals || []).filter(g =>
+  st === "done" ? (g.status === "done" || goalReached(g))
+  : st === "paused" ? (g.status === "paused" && !goalReached(g))
+  : false);
 
 const FOCUS_MAX = 3;
 /* Exactly three, as specified. Pinned tasks come first; if fewer than three are pinned the rest fill
@@ -3390,10 +3440,10 @@ function welcomeCard(remaining) {
    actually building. Four at most — a wall of goals is the same as none. */
 function goalsCard() {
   const goals = activeGoals();
-  const head = cardHead("What you're building", `<button class="btn ghost tiny" data-nav="habits">All goals</button>`);
+  const head = cardHead("What you're building", `<button class="btn ghost tiny" data-nav="goals">All goals</button>`);
   if (!goals.length) return card("goals-card span2", head +
     emptyMsg("target", "No open goal yet — without one this page is just a to-do list.",
-      `<button class="btn primary" data-nav="habits">${I.plus}Set a goal</button>`));
+      `<button class="btn primary" data-nav="goals">${I.plus}Set a goal</button>`));
   const rows = goals.slice(0, 4).map(g => {
     const gp = goalProgress(g), pr = prio(g.priority), st = goalStatus(g);
     const dl = g.deadline ? daysLeft(g.deadline) : null;
@@ -3518,6 +3568,99 @@ function vDashboard() {
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
       <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
 
+  </div>`;
+}
+
+/* ================= Goals — "Where am I going?" =================
+   The Bible lists Goals second, right after the Dashboard. Until now it was a card at the bottom of
+   the Habit Tracker, which said the opposite: that your direction is a footnote to your routines.
+
+   The Universal Rules ask every page for Purpose, Progress, Timeline, Relationships, History,
+   Analytics and Reflection. All seven on one screen would fight the same document's "avoid clutter,
+   whitespace is valuable, users should never wonder where to look first" — so the page carries
+   Purpose, Progress and Timeline, and the per-goal sheet carries Relationships, History and the
+   rest. Each shows the ones that earn their place there. */
+
+function goalCardBig(g) {
+  const gp = goalProgress(g), pr = prio(g.priority), st = goalStatus(g), pace = goalPace(g);
+  const dl = g.deadline ? daysLeft(g.deadline) : null;
+  const mins = goalFocusMins(g.id);
+  const habits = liveHabits().filter(h => (h.goalIds || []).includes(g.id));
+  const serves = state.todos.filter(td => td.linkGoalId === g.id && !td.done).length;
+  return `<li class="gb" data-action="goal-open" data-id="${g.id}" style="--a:${cssVar(pr.hue)}">
+    <div class="gb-head">
+      <span class="gb-emoji" aria-hidden="true">${esc(g.emoji || "\u{1F3AF}")}</span>
+      <span class="gb-title">
+        <b>${esc(g.title)}</b>
+        ${g.note ? `<small>${esc(g.note)}</small>` : ""}
+      </span>
+      <span class="gb-prio">${pr.label}</span>
+    </div>
+    ${barHtml(gp.pct, pr.hue)}
+    <div class="gb-nums">
+      <b>${gp.pct}%</b>
+      <span>${g.type === "outcome"
+        ? `${gp.cur}${g.unit ? " " + esc(g.unit) : ""} \u2192 ${g.target}${g.unit ? " " + esc(g.unit) : ""}`
+        : `${gp.done} of ${gp.tot} milestones`}</span>
+      <span class="gb-status ${st.cls}">${esc(st.txt)}</span>
+    </div>
+    ${pace ? `<div class="gb-pace ${pace.cls}">
+      <span class="gb-pace-bar"><i style="width:${pace.elapsed}%"></i></span>
+      <span>${pace.elapsed}% of the time \u00b7 ${pace.made}% of the goal \u2014 ${esc(pace.txt)}</span>
+    </div>` : ""}
+    <div class="gb-foot">
+      ${g.deadline ? `<span>${I.clock}${esc(niceDate(g.deadline, { month: "short", day: "numeric" }))}${dl != null ? ` \u00b7 ${dl < 0 ? `${-dl}d over` : `${dl}d left`}` : ""}</span>` : `<span class="soft">no deadline</span>`}
+      ${habits.length ? `<span>${I.target}${habits.length} habit${habits.length > 1 ? "s" : ""}</span>` : ""}
+      ${serves ? `<span>${I.check}${serves} open task${serves > 1 ? "s" : ""}</span>` : ""}
+      ${mins ? `<span>${I.clock}${estLabel(mins)} focused</span>` : ""}
+      ${(g.tags || []).length ? `<span class="gb-tags">${g.tags.slice(0, 3).map(t => `<i>${esc(t)}</i>`).join("")}</span>` : ""}
+    </div>
+  </li>`;
+}
+
+function vGoals() {
+  const open = activeGoals(), paused = goalsByStatus("paused"), done = goalsByStatus("done");
+  const withDeadline = open.filter(g => g.deadline);
+  const soon = withDeadline.filter(g => daysLeft(g.deadline) >= 0 && daysLeft(g.deadline) <= 30).length;
+  const over = withDeadline.filter(g => daysLeft(g.deadline) < 0).length;
+  const totalMins = open.reduce((n, g) => n + goalFocusMins(g.id), 0);
+  return `
+  <div class="grid">
+    ${card("span2 goals-hero", `
+      <p class="gh-q">Where am I going?</p>
+      <div class="gh-row">
+        <div class="gh-stat"><b>${open.length}</b><small>open</small></div>
+        <div class="gh-stat"><b>${done.length}</b><small>reached</small></div>
+        ${soon ? `<div class="gh-stat warn"><b>${soon}</b><small>due within a month</small></div>` : ""}
+        ${over ? `<div class="gh-stat err"><b>${over}</b><small>past deadline</small></div>` : ""}
+        ${totalMins ? `<div class="gh-stat"><b>${estLabel(totalMins)}</b><small>focused so far</small></div>` : ""}
+      </div>`)}
+
+    ${card("span2", cardHead(`Open goals${open.length ? ` <small class="soft">${open.length}</small>` : ""}`,
+      addBtn("New goal", "goal-add")) + (open.length
+      ? `<ul class="goal-big">${open.map(goalCardBig).join("")}</ul>`
+      : emptyMsg("target", "Nothing open. A goal is the thing your habits and projects are for \u2014 without one they are just activity.",
+          addBtn("Set your first goal", "goal-add"))))}
+
+    ${paused.length ? card("span2", `<details class="done-wrap"><summary>${I.moon} Paused (${paused.length})</summary>
+      <ul class="goal-big dim">${paused.map(goalCardBig).join("")}</ul>
+      <p class="soft note">${I.check} A paused goal keeps every number it ever had. It simply stops asking for your attention on the dashboard.</p>
+    </details>`) : ""}
+
+    ${done.length ? card("span2", `<details class="done-wrap"><summary>${I.check} Reached (${done.length})</summary>
+      <ul class="goal-list">${done.map(g => {
+        const gp = goalProgress(g);
+        return `<li data-action="goal-open" data-id="${g.id}">
+          <span class="row-emoji">${esc(g.emoji || "\u{1F3AF}")}</span>
+          <span class="row-txt"><b>${esc(g.title)}</b><small>${g.deadline ? `target was ${esc(niceDate(g.deadline, { month: "short", day: "numeric", year: "numeric" }))}` : "no deadline"}${goalFocusMins(g.id) ? ` \u00b7 ${estLabel(goalFocusMins(g.id))} focused` : ""}</small></span>
+          <b class="pct">${gp.pct}%</b>
+        </li>`;
+      }).join("")}</ul>
+    </details>`) : ""}
+
+    ${card("span2", cardHead("How goals work here") + `
+      <p class="soft small">A goal is measured either by a <b>number to reach</b> or by a <b>checklist of milestones</b>. Habits are the daily actions that build it, tasks are the one-off pieces, and a <b>focus session</b> started on a linked task logs its minutes here automatically.</p>
+      <p class="soft note">${I.spark} Give a goal a <b>start date</b> and a <b>deadline</b> and this page can compare the two things it actually knows: how much of the time has gone, and how much of the goal is done. It will not tell you you're "on track" \u2014 it has no idea what your plan was.</p>`)}
   </div>`;
 }
 
@@ -3709,9 +3852,11 @@ function vHabits() {
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
       <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[todayIso()] || "")}</textarea>`)}
 
-    ${card("", cardHead("Goals", addBtn("New goal", "goal-add")) + (state.goals.length ? `
+    ${/* Goals has its own page now. This stays as the bridge — habits are the daily actions, Goals
+          is where they add up — rather than being the only place goals live. */
+      card("", cardHead("Goals", `<button class="btn ghost tiny" data-nav="goals">Open goals</button>`) + (activeGoals().length ? `
       <ul class="goal-list">
-        ${state.goals.map(g => {
+        ${activeGoals().slice(0, 4).map(g => {
           const gp = goalProgress(g);
           const sub = g.type === "outcome" ? `${goalCurrent(g)} → ${g.target} ${esc(g.unit || "")}` : `${gp.done}/${gp.tot} milestones`;
           return `<li data-action="goal-open" data-id="${g.id}">
@@ -3720,7 +3865,8 @@ function vHabits() {
             <b class="pct">${gp.pct}%</b>
           </li>`;
         }).join("")}
-      </ul>` : emptyMsg("target", "Set a goal your habits build toward.", addBtn("Add a goal", "goal-add"))))}
+      </ul>${activeGoals().length > 4 ? `<p class="soft small">${activeGoals().length - 4} more in Goals.</p>` : ""}`
+      : emptyMsg("target", "Set a goal your habits build toward.", `<button class="btn primary" data-nav="goals">${I.plus}Open Goals</button>`)))}
   </div>`;
 }
 
@@ -3885,6 +4031,17 @@ function openGoalDetail(id) {
         ${linked.length ? `<ul class="goal-habits">${linked.map(h => `<li data-action="habit-open" data-id="${h.id}"><span class="hdot" style="background:${cssVar(h.color, "#6a5ae0")}"></span><b>${esc(h.emoji)} ${esc(h.name)}</b><small class="soft">${habitStreak(h)}🔥 · ${habitCompletion(h, 30)}%</small></li>`).join("")}</ul>` : `<p class="soft small">No habits linked yet.</p>`}
         <button class="btn tiny ghost" data-action="goal-habits" data-id="${g.id}">${I.plus}Link habits</button>
       </div>
+      ${(() => {
+        const pace = goalPace(g), mins = goalFocusMins(g.id);
+        if (!pace && !mins && !g.deadline) return "";
+        return `<div class="fld"><span>Progress against the clock</span>
+          ${pace ? `<div class="gb-pace ${pace.cls}">
+            <span class="gb-pace-bar"><i style="width:${pace.elapsed}%"></i></span>
+            <span>${pace.elapsed}% of the time · ${pace.made}% of the goal — ${esc(pace.txt)}</span>
+          </div>` : `<p class="soft small">Add a <b>start date</b> as well as a deadline and this can compare the two.</p>`}
+          ${mins ? `<p class="soft small">${I.clock} ${estLabel(mins)} of focus sessions have named this goal.</p>` : ""}
+        </div>`;
+      })()}
       ${relatedCard("goal", g.id)}
       ${historyCard("goal", g.id)}
       <div class="pill-row"><button class="btn ghost" data-action="goal-edit" data-id="${g.id}">${I.edit}Edit</button><button class="btn danger" data-action="goal-del" data-id="${g.id}">${I.trash}Delete</button></div>
@@ -3902,9 +4059,12 @@ function goalFormFields(g) {
     `<div class="fld-row">${fld("Start", num("start", g.start || 0, 0, "any"))}${fld("Target", num("target", g.target || 0, 0, "any"))}${fld("Unit", txt("unit", "kg", g.unit || "", false))}</div>` +
     fld("Direction", `<select name="direction"><option value="down" ${g.direction !== "up" ? "selected" : ""}>Lower is better (lose weight)</option><option value="up" ${g.direction === "up" ? "selected" : ""}>Higher is better (gain / save)</option></select>`) +
     `<div class="fld-row">${
-      fld("Deadline (optional)", `<input type="date" name="deadline" value="${g.deadline || ""}">`)}${
-      fld("Priority", `<select name="priority">${Object.keys(PRIORITY).map(k => `<option value="${k}" ${(g.priority || "med") === k ? "selected" : ""}>${PRIORITY[k].label}</option>`).join("")}</select>`)
+      fld("Started on <small class=\"soft\">— optional</small>", `<input type="date" name="startedOn" value="${esc(g.startedOn || "")}">`)}${
+      fld("Deadline <small class=\"soft\">— optional</small>", `<input type="date" name="deadline" value="${g.deadline || ""}">`)
     }</div>` +
+    `<p class="soft note">${I.spark} Fill in <b>both</b> dates and the Goals page can compare how much of the time has gone against how much of the goal is done. Leave either blank and it stays quiet rather than guessing.</p>` +
+    fld("Priority", `<select name="priority">${Object.keys(PRIORITY).map(k => `<option value="${k}" ${(g.priority || "med") === k ? "selected" : ""}>${PRIORITY[k].label}</option>`).join("")}</select>`) +
+    fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "health, career", (g.tags || []).join(", "), false)) +
     fld("Status", `<select name="status">
       <option value="active" ${(g.status || "active") === "active" ? "selected" : ""}>Active — show it on my dashboard</option>
       <option value="paused" ${g.status === "paused" ? "selected" : ""}>Paused — keep it, hide it for now</option>
@@ -5784,7 +5944,7 @@ function vProfile() {
 
 /* ================= render ================= */
 const VIEWS = {
-  dashboard: vDashboard, habits: vHabits, health: vHealth, workout: vWorkout,
+  dashboard: vDashboard, goals: vGoals, habits: vHabits, health: vHealth, workout: vWorkout,
   nutrition: vNutrition, skills: vSkills, reading: vReading, media: vMedia,
   university: vUniversity, work: vWork, projects: vProjects, finance: vFinance, social: vSocial,
   memories: vMemories, journal: vJournal, progress: vProgress,
@@ -6646,8 +6806,8 @@ const SUBMITS = {
   "quote-add": (f) => { const q = String(f.text || "").trim().slice(0, 160); if (q && !state.quotes.includes(q)) state.quotes.push(q); },
   "group-add": (f) => { if (f.name) state.groups.push(born({ id: uid(), name: f.name, emoji: f.emoji || "\u{1F94B}", color: f.color || "#6a5ae0", start: f.start || "", days: Math.max(0, +f.days || 0), order: (state.groups.length ? Math.max(...state.groups.map(g => g.order || 0)) + 1 : 0) })); },
   "group-edit": (f) => { const g = groupById(f.id); if (g && f.name) { g.name = f.name; g.emoji = f.emoji || g.emoji; g.color = f.color || g.color; g.start = f.start || ""; g.days = Math.max(0, +f.days || 0); } },
-  "goal-add": (f) => { state.goals.push(born({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", priority: PRIORITY[f.priority] ? f.priority : "med", status: ["active", "paused", "done"].includes(f.status) ? f.status : "active", progress: [], habitIds: [], milestones: [] })); touch("goal", state.goals[state.goals.length - 1].id, "Goal created"); },
-  "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; if (PRIORITY[f.priority]) g.priority = f.priority; if (["active", "paused", "done"].includes(f.status)) g.status = f.status; syncGoalMilestones(g); } },
+  "goal-add": (f) => { state.goals.push(born({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, startedOn: f.startedOn || todayIso(), deadline: f.deadline || "", note: f.note || "", priority: PRIORITY[f.priority] ? f.priority : "med", status: ["active", "paused", "done"].includes(f.status) ? f.status : "active", tags: parseTags(f.tags), progress: [], habitIds: [], milestones: [] })); touch("goal", state.goals[state.goals.length - 1].id, "Goal created"); },
+  "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.startedOn = f.startedOn || ""; g.deadline = f.deadline || ""; g.note = f.note || ""; g.tags = parseTags(f.tags); if (PRIORITY[f.priority]) g.priority = f.priority; if (["active", "paused", "done"].includes(f.status)) g.status = f.status; syncGoalMilestones(g); } },
   "goal-log": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) { g.progress.push({ date: todayIso(), value: +f.value || 0 }); syncGoalMilestones(g); touch("goal", g.id, `Logged ${+f.value || 0}${g.unit ? " " + g.unit : ""}`); addXp(5, "Progress logged"); } },
   "gms-add": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) g.milestones.push({ id: uid(), text: f.text, done: false }); },
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
