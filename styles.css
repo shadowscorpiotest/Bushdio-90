@@ -1652,3 +1652,55 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .quote-list li { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
 .quote-list li:last-child { border-bottom: 0; }
 .quote-list .row-txt b { font-weight: 500; font-size: 13.5px; }
+
+/* ---------- drag to reorder ----------
+   `touch-action: none` sits on the HANDLE and nowhere else. On the row it would swallow vertical
+   swipes and the page would stop scrolling on a phone. */
+.grip {
+  flex: 0 0 auto; width: 30px; height: 40px; display: grid; place-items: center;
+  color: var(--ink-3); opacity: .5; cursor: grab; touch-action: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+.grip:hover { opacity: 1; }
+.grip:active { cursor: grabbing; }
+.grip svg { width: 16px; height: 16px; pointer-events: none; }
+li.dragging {
+  position: relative; z-index: 5; cursor: grabbing;
+  background: var(--surface); border-radius: 12px;
+  box-shadow: 0 16px 34px -14px rgba(0,0,0,.35);
+}
+[data-drag-list] > li { transition: transform .16s var(--ease-out); }
+[data-drag-list].is-dragging > li { transition: transform .16s var(--ease-out); }
+[data-drag-list].is-dragging > li.dragging { transition: none; }
+@media (prefers-reduced-motion: reduce) { [data-drag-list] > li { transition: none; } }
+
+/* ---------- bigger tap targets ----------
+   Ticking a habit used to mean hitting a small checkbox. The text block is the action now, so the
+   target is the width of the row. `avoid` habits deliberately keep the explicit button. */
+.habit-li .row-txt.hit { cursor: pointer; min-height: 44px; justify-content: center; }
+.habit-li .row-txt.hit:hover b { color: var(--hc, var(--brand)); }
+.habit-li .row-txt.hit:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; border-radius: 8px; }
+.habit-li .checkbox { min-width: 30px; min-height: 30px; }
+.habit-li .btn.tiny.inc { min-height: 34px; padding-inline: 12px; font-weight: 700; }
+.habit-li > .icon-btn { flex: 0 0 auto; }
+
+/* goal titles wrap rather than truncate — a goal you can't read is not a goal you can act on */
+.gf-top { flex-wrap: wrap; }
+.gf-top b { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.3; }
+
+/* The emoji is inside the tap target rather than beside it. Two adjacent targets that did different
+   things — emoji opened the detail, text ticked — was a trap, and it cost ~38px of a 390px row. */
+.habit-li .row-txt.hit { flex-direction: row; align-items: center; gap: 10px; }
+.habit-li .row-txt.hit .row-emoji { flex: 0 0 auto; font-size: 20px; line-height: 1; background: none; border: 0; padding: 0; }
+.habit-li .hit-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+
+/* Clamp rather than truncate: "10 / 10 pag…" loses the number, which is the whole point of the
+   line. Two lines each is enough for any real habit name, and the full text is in its own sheet. */
+.habit-li .hit-txt b, .habit-li .hit-txt small {
+  display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;
+}
+.habit-li .hit-txt b { -webkit-line-clamp: 2; line-clamp: 2; }
+.habit-li .hit-txt small { -webkit-line-clamp: 2; line-clamp: 2; }
+/* the row's own chrome, trimmed so the name gets the space */
+.habit-li > .icon-btn { width: 30px; height: 30px; }
+.habit-li .btn.tiny.inc { padding-inline: 10px; }
