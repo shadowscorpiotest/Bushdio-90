@@ -1806,3 +1806,65 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 }
 .tl-anytime + .timeline::before { display: none; }
 .tl-anytime + .timeline .tl-dot { border-style: dashed; }
+
+/* ---------- Goals — "Where am I going?" ---------- */
+.goals-hero { background: var(--grad-brand); color: #fff; border: 0; }
+.gh-q { font-size: clamp(19px, 2.6vw, 24px); font-weight: 800; letter-spacing: -.02em; margin-bottom: 14px; }
+.gh-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.gh-stat {
+  flex: 1 1 90px; background: rgba(255,255,255,.15); border-radius: 14px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 2px; backdrop-filter: blur(4px);
+}
+.gh-stat b { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.gh-stat small { font-size: 11.5px; opacity: .9; }
+.gh-stat.warn { background: rgba(255,214,102,.28); }
+.gh-stat.err { background: rgba(255,120,120,.32); }
+
+.goal-big { display: flex; flex-direction: column; gap: 12px; }
+.goal-big.dim { opacity: .62; }
+.gb {
+  padding: 14px; border-radius: 16px; background: var(--surface-2);
+  border: 1px solid var(--line); border-left: 3px solid var(--a); cursor: pointer;
+  transition: transform .2s var(--ease-out), border-color .2s, box-shadow .2s;
+}
+.gb:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.gb-head { display: flex; align-items: flex-start; gap: 11px; margin-bottom: 10px; }
+.gb-emoji { font-size: 24px; line-height: 1.1; flex: 0 0 auto; }
+.gb-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gb-title b { font-size: 16px; font-weight: 700; line-height: 1.3; }
+.gb-title small { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gb-prio {
+  flex: 0 0 auto; font-size: 10.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px; color: var(--a);
+  background: color-mix(in srgb, var(--a) 14%, transparent);
+}
+.gb .bar { height: 9px; }
+.gb-nums {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 8px;
+  font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.gb-nums > b { font-size: 16px; font-weight: 800; color: var(--ink); }
+.gb-status { font-weight: 700; margin-left: auto; }
+.gb-status.ok { color: var(--good); }
+.gb-status.warn { color: #d9730d; }
+.gb-status.err { color: var(--bad); }
+
+/* time spent against progress made — the one comparison the app can honestly draw */
+.gb-pace { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--ink-3); }
+.gb-pace-bar { display: block; height: 4px; border-radius: 3px; background: var(--heat-0); overflow: hidden; }
+.gb-pace-bar i { display: block; height: 100%; border-radius: 3px; background: var(--ink-3); }
+.gb-pace.ok .gb-pace-bar i { background: var(--good); }
+.gb-pace.warn .gb-pace-bar i { background: #d9730d; }
+.gb-pace.err .gb-pace-bar i { background: var(--bad); }
+
+.gb-foot {
+  display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px;
+  font-size: 11.5px; color: var(--ink-3);
+}
+.gb-foot > span { display: inline-flex; align-items: center; gap: 4px; }
+.gb-foot svg { width: 12px; height: 12px; flex: none; }
+.gb-tags { display: inline-flex; gap: 5px; }
+.gb-tags i {
+  font-style: normal; padding: 1px 7px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); font-size: 10.5px;
+}
