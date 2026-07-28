@@ -165,7 +165,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 16;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 17;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -219,7 +219,9 @@ function defaultState() {
     media: [],                 // {id,title,type,status,rating}
     university: { weeklyHours: 20, tasks: [] },
     work: { items: [] },       // {id,title,done}
-    projects: [],              // {id,name,emoji,status,progress,note}
+    /* projects {id,name,emoji,status,progress,note,purpose,priority,startedOn,deadline,
+       nextMilestone,tags:[],milestones:[{id,text,done}],files:[mediaRef]} */
+    projects: [],
     finance: { entries: [], importedClasses: [] }, // entries {id,date,type:income|expense,amount,category,note}
     /* people {id,name,emoji,relation,birthday,note,tags:[],touches:[dateIso]} — the same humans the
        rest of the app already names as "recommended by" and "who was there" */
@@ -317,9 +319,18 @@ function seedState(s) {
     { id: uid(), title: "Mock interview prep",  category: "Interviews",   due: addDays(t, 14), done: false },
   ];
   s.projects = [
-    { id: uid(), name: "LifeHub app",       emoji: "🌿", status: "In progress", progress: 60, note: "" },
-    { id: uid(), name: "AI tools research", emoji: "🤖", status: "In progress", progress: 40, note: "" },
-    { id: uid(), name: "YouTube channel",   emoji: "🎬", status: "Planning",    progress: 20, note: "" },
+    { id: uid(), name: "LifeHub app", emoji: "🌿", status: "In progress", progress: 60, note: "",
+      purpose: "One place for the whole of my life, instead of nine apps that don't talk to each other.",
+      priority: "high", startedOn: addDays(t, -60), deadline: addDays(t, 45), tags: ["side project", "code"],
+      nextMilestone: "Finish the Projects page",
+      milestones: [{ id: uid(), text: "Habits + workouts", done: true },
+                   { id: uid(), text: "Cross-device sync", done: true },
+                   { id: uid(), text: "Goals and projects", done: false },
+                   { id: uid(), text: "Ship it to myself", done: false }] },
+    { id: uid(), name: "AI tools research", emoji: "🤖", status: "In progress", progress: 40, note: "",
+      purpose: "", priority: "med", startedOn: "", deadline: "", tags: ["learning"], nextMilestone: "" },
+    { id: uid(), name: "YouTube channel", emoji: "🎬", status: "Planning", progress: 20, note: "",
+      purpose: "", priority: "low", startedOn: "", deadline: "", tags: [], nextMilestone: "" },
   ];
   s.finance.entries = [
     { id: uid(), date: addDays(t, -2),  type: "income",  amount: 2400, category: "Salary",        note: "Monthly pay" },
@@ -636,6 +647,26 @@ const MIGRATIONS = [
     (s.goals || []).forEach(g => {
       if (!Array.isArray(g.tags)) g.tags = [];
       if (g.startedOn == null) g.startedOn = ((g.progress || [])[0] || {}).date || g.created || "";
+    });
+  },
+
+  /* 16 → 17 · a project stops being six fields and a small form. It gains the things the Bible asks
+     a project to carry: why it exists, when it runs, what it's tagged with, the milestones it's
+     built from and the files that belong to it.
+
+     `nextMilestone` — a free-text "next step" — is deliberately NOT converted into a milestone. One
+     unticked milestone would read as 0%, quietly overwriting a project sitting honestly at 60%.
+     It stays as the fallback next step, and `nextMilestoneOf()` prefers a real milestone once there
+     is one, so the two can never disagree. */
+  (s) => {
+    (s.projects || []).forEach(p => {
+      if (p.purpose == null) p.purpose = "";
+      if (p.priority == null) p.priority = "med";
+      if (p.startedOn == null) p.startedOn = p.created || "";
+      if (p.deadline == null) p.deadline = "";
+      if (!Array.isArray(p.tags)) p.tags = [];
+      if (!Array.isArray(p.milestones)) p.milestones = [];
+      if (!Array.isArray(p.files)) p.files = [];
     });
   },
 ];
@@ -1746,7 +1777,7 @@ function supStatus(sup) {
    costs one entry here, not a new linking scheme. */
 const OBJECTS = {
   goal:    { label: "Goal",    list: () => state.goals,            title: o => o.title, emoji: o => o.emoji || "\u{1F3AF}", open: "goal-open" },
-  project: { label: "Project", list: () => state.projects,         title: o => o.name,  emoji: o => o.emoji || "\u{1F680}", open: "project-edit" },
+  project: { label: "Project", list: () => state.projects,         title: o => o.name,  emoji: o => o.emoji || "\u{1F680}", open: "project-open" },
   habit:   { label: "Habit",   list: () => state.habits,           title: o => o.name,  emoji: o => o.emoji || "\u2705",    open: "habit-open" },
   task:    { label: "Task",    list: () => state.todos,            title: o => o.text,  emoji: () => "\u2713",              open: "todo-open" },
   person:  { label: "Person",  list: () => peopleAll(),            title: o => o.name,  emoji: o => o.emoji || "\u{1F464}", open: "person-open" },
@@ -1953,7 +1984,7 @@ function areaProgressToday(id) {
     case "university": { const mins = studyRange(weekDates(), "university");
       return Math.round(100 * clamp(mins / 60 / state.university.weeklyHours, 0, 1)); }
     case "work": { const n = state.work.items.length; return n ? Math.round(100 * state.work.items.filter(i => i.done).length / n) : 0; }
-    case "projects": { const n = state.projects.length; return n ? Math.round(state.projects.reduce((a, p) => a + p.progress, 0) / n) : 0; }
+    case "projects": { const n = state.projects.length; return n ? Math.round(state.projects.reduce((a, p) => a + projectProgress(p).pct, 0) / n) : 0; }
     case "social": { const w = socialWeek(); return w.target ? Math.round(100 * w.done / w.target) : 0; }
     case "finance": { const m = financeMonth(); return m.income > 0 ? Math.round(100 * clamp(m.net / m.income, 0, 1)) : (m.expense > 0 ? 0 : 0); }
     case "memories": return state.memories.length ? 100 : 0;
@@ -2020,7 +2051,7 @@ const BADGES = [
   { id: "scholar",     name: "Scholar",          desc: "Log 10 hours of study",          emoji: "🎓", test: () => Object.keys(state.study.log).reduce((a, d) => a + studyMins(d), 0) >= 600 },
   { id: "journalist",  name: "Dear diary",       desc: "Write 7 journal entries",        emoji: "✒️", test: () => state.journal.length >= 7 },
   { id: "keeper",      name: "Memory keeper",    desc: "Save 5 memories",                emoji: "📸", test: () => state.memories.length >= 5 },
-  { id: "shipper",     name: "Shipped it",       desc: "Complete a project",             emoji: "🚢", test: () => state.projects.some(p => p.status === "Done") },
+  { id: "shipper",     name: "Shipped it",       desc: "Complete a project",             emoji: "🚢", test: () => state.projects.some(projectDone) },
   { id: "butterfly",   name: "Social butterfly", desc: "Hit all social goals in a week", emoji: "🦋", test: () => { const w = socialWeek(); return w.target > 0 && w.done >= w.target; } },
   { id: "explorer",    name: "Explorer",         desc: "Visit every life area",          emoji: "🧭", test: () => AREAS.every(a => state.visited[a.id]) },
 ];
@@ -2501,23 +2532,23 @@ function goalStatus(g) {
    it is answerable — but ONLY when both ends are known. With a start date and a deadline, "40% of
    the time has gone and you are 15% of the way" is a fact. With either missing it is a guess, so
    this returns null and the UI says nothing rather than inventing a verdict. */
-function goalPace(g) {
-  if (!g.startedOn || !g.deadline) return null;
-  const from = Date.parse(g.startedOn + "T12:00:00"), to = Date.parse(g.deadline + "T12:00:00");
+function paceOf(startedOn, deadline, made, doneTxt) {
+  if (!startedOn || !deadline) return null;
+  const from = Date.parse(startedOn + "T12:00:00"), to = Date.parse(deadline + "T12:00:00");
   const span = to - from;
   if (!(span > 0)) return null;
   const elapsed = clamp(Math.round(100 * (Date.parse(todayIso() + "T12:00:00") - from) / span), 0, 100);
-  const made = goalProgress(g).pct;
   const gap = made - elapsed;
   return { elapsed, made, gap,
     /* deliberately not "on track" — the app can compare two percentages, it cannot know your plan */
-    txt: goalReached(g) ? "Reached"
+    txt: doneTxt ? doneTxt
       : gap >= 10 ? "Ahead of the clock"
       : gap <= -20 ? "The clock is ahead of you"
       : gap <= -10 ? "Slightly behind the clock"
       : "Keeping pace with the clock",
-    cls: goalReached(g) ? "ok" : gap <= -20 ? "err" : gap <= -10 ? "warn" : "ok" };
+    cls: doneTxt ? "ok" : gap <= -20 ? "err" : gap <= -10 ? "warn" : "ok" };
 }
+const goalPace = (g) => paceOf(g.startedOn, g.deadline, goalProgress(g).pct, goalReached(g) ? "Reached" : "");
 /* minutes of focus that named this goal, over the whole log */
 function goalFocusMins(id) {
   let n = 0;
@@ -2525,6 +2556,63 @@ function goalFocusMins(id) {
     (state.focusLog[d] || []).forEach(r => { if (r.goalId === id) n += r.mins || 0; }));
   return n;
 }
+/* ---- projects ----
+   The Bible's question for this page is "what am I building?" — which a name and a percentage can't
+   answer. These are the derived facts a project can produce without asking anyone to maintain a
+   second copy of anything. */
+
+/* ONE source of truth for progress. Milestones win wherever they exist, because a checklist that
+   disagrees with a hand-typed percentage is worse than either alone; without them the manual number
+   is all there is. The UI hides the +10% button once milestones appear rather than leaving a switch
+   wired to nothing. */
+const projectDerived = (p) => !!(p.milestones || []).length;
+function projectProgress(p) {
+  const ms = p.milestones || [], tot = ms.length, done = ms.filter(m => m.done).length;
+  if (p.status === "Done") return { pct: 100, done, tot };
+  if (!tot) return { pct: clamp(p.progress || 0, 0, 100), done: 0, tot: 0 };
+  return { pct: Math.round(100 * done / tot), done, tot };
+}
+/* the free-text "next step" is only a fallback — once there are real milestones the first unticked
+   one IS the next step, and there is nothing for the two to disagree about */
+function nextMilestoneOf(p) {
+  const m = (p.milestones || []).find(x => !x.done);
+  return m ? m.text : (p.nextMilestone || "");
+}
+const projectDone = (p) => p.status === "Done" || (projectDerived(p) && projectProgress(p).pct === 100);
+const projectPace = (p) => paceOf(p.startedOn, p.deadline, projectProgress(p).pct, projectDone(p) ? "Shipped" : "");
+function projectStatus(p) {
+  if (projectDone(p)) return { txt: "Done", cls: "ok" };
+  if (p.status === "Paused") return { txt: "Paused", cls: "" };
+  if (!p.deadline) return { txt: p.status || "In progress", cls: "" };
+  const d = daysLeft(p.deadline);
+  if (d < 0) return { txt: Math.abs(d) + "d overdue", cls: "err" };
+  if (d <= 7) return { txt: d + "d left", cls: "warn" };
+  return { txt: p.status || "In progress", cls: "" };
+}
+/* minutes of focus that named this project — the timer already logs projectId, so time invested
+   costs nobody a single extra keystroke */
+function projectFocusMins(id) {
+  let n = 0;
+  Object.keys(state.focusLog || {}).forEach(d =>
+    (state.focusLog[d] || []).forEach(r => { if (r.projectId === id) n += r.mins || 0; }));
+  return n;
+}
+function projectSessions(id) {
+  let n = 0;
+  Object.keys(state.focusLog || {}).forEach(d =>
+    (state.focusLog[d] || []).forEach(r => { if (r.projectId === id) n++; }));
+  return n;
+}
+/* Live projects, most recently worked first — the dashboard and the Projects page agree on order
+   because they call the same function. */
+function liveProjects() {
+  return (state.projects || []).filter(p => !projectDone(p) && p.status !== "Paused")
+    .map(p => ({ p, worked: projectLastWorked(p.id) }))
+    .sort((a, b) => prioRank(a.p.priority) - prioRank(b.p.priority)
+      || (b.worked || "").localeCompare(a.worked || ""))
+    .map(x => x.p);
+}
+
 const goalsByStatus = (st) => (state.goals || []).filter(g =>
   st === "done" ? (g.status === "done" || goalReached(g))
   : st === "paused" ? (g.status === "paused" && !goalReached(g))
@@ -3271,26 +3359,27 @@ function projectLastWorked(id) {
   return best;
 }
 function activeProjectsCard() {
-  const live = (state.projects || []).filter(p => p.status !== "Done")
-    .map(p => ({ p, worked: projectLastWorked(p.id) }))
-    .sort((a, b) => (b.worked || "").localeCompare(a.worked || "") || (b.p.progress || 0) - (a.p.progress || 0));
+  const live = liveProjects();
   const head = cardHead("Active projects", `<button class="btn ghost tiny" data-nav="projects">All projects</button>`);
   if (!live.length) return card("span2", head +
     emptyMsg("rocket", "Nothing in flight. A project is the thing a goal actually gets built by.",
       `<button class="btn primary" data-nav="projects">${I.plus}Start one</button>`));
-  const rows = live.slice(0, 3).map(({ p, worked }) => `
-    <li class="ap-item" data-action="project-edit" data-id="${p.id}">
+  const rows = live.slice(0, 3).map(p => {
+    const worked = projectLastWorked(p.id), pp = projectProgress(p), next = nextMilestoneOf(p);
+    return `
+    <li class="ap-item" data-action="project-open" data-id="${p.id}">
       <span class="ap-emoji" aria-hidden="true">${esc(p.emoji || "\u{1F680}")}</span>
       <span class="ap-body">
-        <span class="ap-top"><b>${esc(p.name)}</b><b class="ap-pct">${p.progress || 0}%</b></span>
-        ${barHtml(p.progress || 0, "#12a594")}
+        <span class="ap-top"><b>${esc(p.name)}</b><b class="ap-pct">${pp.pct}%</b></span>
+        ${barHtml(pp.pct, "#12a594")}
         <span class="ap-meta">
-          <span class="ap-next">${p.nextMilestone ? `${I.target}${esc(p.nextMilestone)}` : `<i class="soft">no next step set</i>`}</span>
+          <span class="ap-next">${next ? `${I.target}${esc(next)}` : `<i class="soft">no next step set</i>`}</span>
           <span class="ap-when">${worked ? `worked ${esc(agoLabel(worked))}` : "not worked yet"}</span>
         </span>
       </span>
       <span class="ap-go" aria-hidden="true">${I.chevR}</span>
-    </li>`).join("");
+    </li>`;
+  }).join("");
   return card("span2", head + `<ul class="active-projects">${rows}</ul>` +
     (live.length > 3 ? `<p class="soft small">${live.length - 3} more in Projects.</p>` : ""));
 }
@@ -5079,31 +5168,167 @@ function vWork() {
 }
 
 /* ---------- projects ---------- */
+const PJ_HUE = "#12a594";
+
+function projectCardBig(p) {
+  const pp = projectProgress(p), pr = prio(p.priority), st = projectStatus(p), pace = projectPace(p);
+  const worked = projectLastWorked(p.id), mins = projectFocusMins(p.id), next = nextMilestoneOf(p);
+  const dl = p.deadline ? daysLeft(p.deadline) : null;
+  return `<li class="gb pj" data-action="project-open" data-id="${p.id}" style="--a:${cssVar(pr.hue)}">
+    <div class="gb-head">
+      <span class="gb-emoji" aria-hidden="true">${esc(p.emoji || "\u{1F680}")}</span>
+      <span class="gb-title">
+        <b>${esc(p.name)}</b>
+        ${p.purpose ? `<small>${esc(p.purpose)}</small>` : ""}
+      </span>
+      <span class="gb-prio">${pr.label}</span>
+    </div>
+    ${barHtml(pp.pct, PJ_HUE)}
+    <div class="gb-nums">
+      <b>${pp.pct}%</b>
+      <span>${pp.tot ? `${pp.done} of ${pp.tot} milestones` : "set by hand"}</span>
+      <span class="gb-status ${st.cls}">${esc(st.txt)}</span>
+    </div>
+    ${pace ? `<div class="gb-pace ${pace.cls}">
+      <span class="gb-pace-bar"><i style="width:${pace.elapsed}%"></i></span>
+      <span>${pace.elapsed}% of the time · ${pace.made}% of the work — ${esc(pace.txt)}</span>
+    </div>` : ""}
+    <p class="pj-next">${next ? `${I.target}<span>${esc(next)}</span>` : `<span class="soft">No next step set.</span>`}</p>
+    <div class="gb-foot">
+      <span>${worked ? `${I.clock}worked ${esc(agoLabel(worked))}` : `<i class="soft">not worked yet</i>`}</span>
+      ${mins ? `<span>${I.spark}${estLabel(mins)} invested</span>` : ""}
+      ${p.deadline ? `<span>${I.calendar}${esc(niceDate(p.deadline, { month: "short", day: "numeric" }))}${dl != null ? ` · ${dl < 0 ? `${-dl}d over` : `${dl}d left`}` : ""}</span>` : ""}
+      ${(p.files || []).length ? `<span>${I.camera}${p.files.length} file${p.files.length > 1 ? "s" : ""}</span>` : ""}
+      ${(p.tags || []).length ? `<span class="gb-tags">${p.tags.slice(0, 3).map(t => `<i>${esc(t)}</i>`).join("")}</span>` : ""}
+    </div>
+  </li>`;
+}
+
 function vProjects() {
-  const active = state.projects.filter(p => p.status !== "Done").length;
+  const all = state.projects || [];
+  const live = liveProjects();
+  const paused = all.filter(p => p.status === "Paused" && !projectDone(p));
+  const done = all.filter(projectDone);
+  const mins = live.reduce((n, p) => n + projectFocusMins(p.id), 0);
+  const stale = live.filter(p => { const w = projectLastWorked(p.id); return !w || daysLeft(w) < -14; }).length;
+  const over = live.filter(p => p.deadline && daysLeft(p.deadline) < 0).length;
   return `
   <div class="grid">
-    ${card("span2", `
-      <div class="goal-row">
-        <div><p class="soft">Active projects</p><h3>${active}</h3></div>
-        <span class="big-ic" style="--a:#12a594">${I.rocket}</span>
+    ${card("span2 goals-hero pj-hero", `
+      <p class="gh-q">What am I building?</p>
+      <div class="gh-row">
+        <div class="gh-stat"><b>${live.length}</b><small>in flight</small></div>
+        <div class="gh-stat"><b>${done.length}</b><small>shipped</small></div>
+        ${over ? `<div class="gh-stat err"><b>${over}</b><small>past deadline</small></div>` : ""}
+        ${stale ? `<div class="gh-stat warn"><b>${stale}</b><small>untouched 2+ weeks</small></div>` : ""}
+        ${mins ? `<div class="gh-stat"><b>${estLabel(mins)}</b><small>invested</small></div>` : ""}
       </div>`)}
-    ${card("span2", cardHead("Projects", addBtn("New project", "project-add")) + (state.projects.length ? `
-      <ul class="project-list">
-        ${state.projects.map(p => `
-          <li>
-            <span class="row-emoji">${esc(p.emoji)}</span>
-            <span class="row-txt"><b>${esc(p.name)}</b><small>${esc(p.status)}</small>${barHtml(p.progress, "#12a594")}</span>
-            <b class="pct">${p.progress}%</b>
-            <span class="pill-row">
-              <button class="btn tiny" data-action="project-bump" data-id="${p.id}" data-n="10">+10%</button>
-              ${p.status !== "Done" ? `<button class="btn tiny good" data-action="project-done" data-id="${p.id}">Done</button>` : ""}
-              <button class="icon-btn ghost" data-action="project-edit" data-id="${p.id}" aria-label="Edit project">${I.edit}</button>
-              <button class="icon-btn ghost" data-action="project-del" data-id="${p.id}" aria-label="Delete project">${I.trash}</button>
-            </span>
-          </li>`).join("")}
-      </ul>` : emptyMsg("rocket", "What are you building?", addBtn("Start a project", "project-add"))))}
+
+    ${card("span2", cardHead(`In flight${live.length ? ` <small class="soft">${live.length}</small>` : ""}`,
+      addBtn("New project", "project-add")) + (live.length
+      ? `<ul class="goal-big">${live.map(projectCardBig).join("")}</ul>`
+      : emptyMsg("rocket", "Nothing in flight. A goal says where you're going; a project is how it actually gets built.",
+          addBtn("Start a project", "project-add"))))}
+
+    ${paused.length ? card("span2", `<details class="done-wrap"><summary>${I.moon} Paused (${paused.length})</summary>
+      <ul class="goal-big dim">${paused.map(projectCardBig).join("")}</ul>
+      <p class="soft note">${I.check} A paused project keeps everything — its milestones, its files, every minute logged against it. It just stops competing for today.</p>
+    </details>`) : ""}
+
+    ${done.length ? card("span2", `<details class="done-wrap"><summary>${I.check} Shipped (${done.length})</summary>
+      <ul class="project-list">${done.map(p => `<li data-action="project-open" data-id="${p.id}">
+        <span class="row-emoji">${esc(p.emoji || "\u{1F680}")}</span>
+        <span class="row-txt"><b>${esc(p.name)}</b><small>${projectFocusMins(p.id) ? `${estLabel(projectFocusMins(p.id))} invested` : "no time logged"}${(p.milestones || []).length ? ` · ${p.milestones.length} milestones` : ""}</small></span>
+        <b class="pct">100%</b>
+      </li>`).join("")}</ul>
+    </details>`) : ""}
+
+    ${card("span2", cardHead("How projects work here") + `
+      <p class="soft small">A project is the work a goal gets built by. Give it <b>milestones</b> and its progress is counted from them — tick one and the bar moves, and there is no percentage to keep up to date by hand. Without milestones you set the percentage yourself.</p>
+      <p class="soft note">${I.clock} <b>Time invested comes from focus sessions.</b> Start a timer on a task that names this project and the minutes land here on their own — nothing to log twice.</p>`)}
   </div>`;
+}
+
+function openProjectDetail(id) {
+  const p = (state.projects || []).find(x => x.id === id);
+  if (!p) { closeModal(); return; }
+  const pp = projectProgress(p), st = projectStatus(p), pace = projectPace(p);
+  const mins = projectFocusMins(p.id), sessions = projectSessions(p.id), worked = projectLastWorked(p.id);
+  openModal(`
+    <header class="modal-head"><h3>${esc(p.emoji || "\u{1F680}")} ${esc(p.name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      ${p.purpose ? `<p class="habit-why">“${esc(p.purpose)}”</p>` : ""}
+      <div class="progress-line">
+        <span>${pp.tot ? `${pp.done}/${pp.tot} milestones` : `${pp.pct}% done`}</span>
+        ${barHtml(pp.pct, PJ_HUE)}<b>${pp.pct}%</b>
+      </div>
+      <p class="soft small pj-status"><span class="gb-status ${st.cls}">${esc(st.txt)}</span>${(p.tags || []).length ? ` <span class="gb-tags">${p.tags.map(t => `<i>${esc(t)}</i>`).join("")}</span>` : ""}</p>
+
+      ${!pp.tot ? `<div class="pill-row">
+        <button class="btn tiny" data-action="project-bump" data-id="${p.id}" data-n="10">+10%</button>
+        <button class="btn tiny ghost" data-action="project-bump" data-id="${p.id}" data-n="-10">−10%</button>
+      </div>` : ""}
+
+      <div class="fld"><span>Milestones${pp.tot ? " — progress is counted from these" : ""}</span>
+        ${pp.tot ? `<ul class="ms-list">
+          ${p.milestones.map(m => `<li class="${m.done ? "done" : ""}"><button class="checkbox sm" data-action="pms-toggle" data-p="${p.id}" data-m="${m.id}" aria-label="Toggle milestone">${I.check}</button><span>${esc(m.text)}</span><button class="icon-btn ghost" data-action="pms-del" data-p="${p.id}" data-m="${m.id}" aria-label="Delete milestone">${I.x}</button></li>`).join("")}
+        </ul>` : `<p class="soft small">None yet — the percentage above is the one you set by hand. Add a milestone and the bar starts counting itself instead.</p>`}
+        <button class="btn tiny ghost" data-action="pms-add" data-id="${p.id}">${I.plus}Add milestone</button>
+        ${!pp.tot && p.nextMilestone ? `<p class="soft small">${I.target} Next step: ${esc(p.nextMilestone)}</p>` : ""}
+      </div>
+
+      <div class="fld"><span>Time invested</span>
+        ${mins ? `<p class="soft small">${I.clock} <b>${estLabel(mins)}</b> across ${sessions} focus session${sessions > 1 ? "s" : ""}${worked ? ` · last worked ${esc(agoLabel(worked))}` : ""}.</p>`
+          : `<p class="soft small">No focus sessions have named this project yet. Start a timer on a task that serves it and the minutes land here on their own.</p>`}
+        ${pace ? `<div class="gb-pace ${pace.cls}">
+          <span class="gb-pace-bar"><i style="width:${pace.elapsed}%"></i></span>
+          <span>${pace.elapsed}% of the time · ${pace.made}% of the work — ${esc(pace.txt)}</span>
+        </div>` : `<p class="soft small">Give it a <b>start date</b> and a <b>deadline</b> and this can compare how much of the time has gone with how much is done. It won't guess without both.</p>`}
+      </div>
+
+      <div class="fld"><span>Files</span>
+        <div class="mem-gallery">
+          ${(p.files || []).map(f => `<span class="mem-shot">
+            <span class="media-host" data-media="${f.id}" data-media-kind="${f.kind}"><span class="media-missing">…</span></span>
+            <button class="photo-x" data-action="project-file-del" data-id="${p.id}" data-ref="${f.id}" aria-label="Remove file">${I.x}</button>
+          </span>`).join("")}
+          <label class="mem-add" aria-label="Add a photo or video to this project">
+            <input type="file" accept="image/*,video/*" data-change="project-file-add" data-id="${p.id}" hidden>
+            ${I.camera}<span>Add shot<br>or clip</span>
+          </label>
+        </div>
+        <p class="soft small">Screenshots, mockups, a clip of it working. They sync encrypted with your account, like every other photo here.</p>
+      </div>
+
+      ${p.note ? `<div class="fld"><span>Notes</span><p class="soft small">${esc(p.note)}</p></div>` : ""}
+      ${relatedCard("project", p.id)}
+      ${historyCard("project", p.id)}
+      <div class="pill-row">
+        ${!projectDone(p) ? `<button class="btn good" data-action="project-done" data-id="${p.id}">${I.check}Mark shipped</button>` : ""}
+        <button class="btn ghost" data-action="project-edit" data-id="${p.id}">${I.edit}Edit</button>
+        <button class="btn danger" data-action="project-del" data-id="${p.id}">${I.trash}Delete</button>
+      </div>
+    </div>`);
+}
+
+function projectFormFields(p) {
+  p = p || {};
+  return `<div class="fld-row">${fld("Name", txt("name", "e.g. Portfolio site", p.name || ""))}${fld("Emoji", txt("emoji", "\u{1F680}", p.emoji || "\u{1F680}", false))}</div>` +
+    fld("Why does it exist? <small class=\"soft\">— optional</small>",
+      txt("purpose", "the point of building this at all…", p.purpose || "", false)) +
+    `<div class="fld-row">${
+      fld("Status", `<select name="status">${["Planning", "In progress", "Paused", "Done"].map(v => `<option ${p.status === v ? "selected" : ""}>${v}</option>`).join("")}</select>`)}${
+      fld("Priority", `<select name="priority">${Object.keys(PRIORITY).map(k => `<option value="${k}" ${(p.priority || "med") === k ? "selected" : ""}>${PRIORITY[k].label}</option>`).join("")}</select>`)
+    }</div>` +
+    `<div class="fld-row">${
+      fld("Started on <small class=\"soft\">— optional</small>", `<input type="date" name="startedOn" value="${esc(p.startedOn || "")}">`)}${
+      fld("Deadline <small class=\"soft\">— optional</small>", `<input type="date" name="deadline" value="${esc(p.deadline || "")}">`)
+    }</div>` +
+    `<p class="soft note">${I.spark} Fill in <b>both</b> dates and the project can compare how much of the time has gone against how much of the work is done. Leave either blank and it stays quiet rather than guessing.</p>` +
+    fld("Next step <small class=\"soft\">— used until you add milestones</small>",
+      txt("nextMilestone", "e.g. ship the migration", p.nextMilestone || "", false)) +
+    fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "code, side project", (p.tags || []).join(", "), false)) +
+    fld("Notes", `<textarea name="note" maxlength="400" placeholder="What is it, and what's next?">${esc(p.note || "")}</textarea>`);
 }
 
 /* ---------- finance ---------- */
@@ -6375,13 +6600,7 @@ const ACTIONS = {
   },
   "project-edit": (el) => {
     const x = state.projects.find(v => v.id === el.dataset.id); if (!x) return;
-    formModal("Edit project",
-      `<div class="fld-row">${fld("Name", txt("name", "", x.name))}${fld("Emoji", txt("emoji", "🚀", x.emoji || "🚀", false))}</div>` +
-      fld("Status", `<select name="status">${["Planning","In progress","Paused","Done"].map(v => `<option ${x.status === v ? "selected" : ""}>${v}</option>`).join("")}</select>`) +
-      fld("Next milestone <small class=\"soft\">— the one thing that moves this forward</small>",
-        txt("nextMilestone", "e.g. ship the migration", x.nextMilestone || "", false)) +
-      fld("Note", `<textarea name="note" maxlength="400" placeholder="What is it, and what's next?">${esc(x.note || "")}</textarea>`) +
-      `<input type="hidden" name="id" value="${x.id}">`, "project-edit");
+    formModal("Edit project", projectFormFields(x) + `<input type="hidden" name="id" value="${x.id}">`, "project-edit");
   },
   "social-edit": (el) => {
     const x = state.social.items.find(v => v.id === el.dataset.id); if (!x) return;
@@ -6610,10 +6829,52 @@ const ACTIONS = {
   },
   "work-toggle": (el) => { const k = state.work.items.find(x => x.id === el.dataset.id); k.done = !k.done; if (k.done) addXp(15, k.title); save(); render(); },
   "work-del": (el) => { deleteWithUndo(() => state.work.items, el.dataset.id, "Item deleted"); },
-  "project-add": () => formModal("New project", fld("Name", txt("name", "e.g. Portfolio site")) + fld("Emoji", txt("emoji", "🚀", "🚀", false)), "project-add"),
-  "project-bump": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.progress = clamp(p.progress + +el.dataset.n, 0, 100); if (p.status === "Planning") p.status = "In progress"; save(); render(); },
-  "project-done": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.status = "Done"; p.progress = 100; touch("project", p.id, "Shipped"); addXp(60, `${p.name} shipped`); save(); render(); },
-  "project-del": (el) => { deleteWithUndo(() => state.projects, el.dataset.id, "Project deleted"); },
+  "project-add": () => formModal("New project", projectFormFields(), "project-add"),
+  "project-open": (el) => openProjectDetail(el.dataset.id),
+  /* only reachable while a project has no milestones — once it has some, progress is counted from
+     them and this button is not rendered rather than being rendered and ignored */
+  "project-bump": (el) => {
+    const p = state.projects.find(x => x.id === el.dataset.id); if (!p || projectDerived(p)) return;
+    p.progress = clamp((p.progress || 0) + +el.dataset.n, 0, 100);
+    if (p.status === "Planning") p.status = "In progress";
+    save(); render(); if (!$("#modalBackdrop").hidden) openProjectDetail(p.id);
+  },
+  "project-done": (el) => {
+    const p = state.projects.find(x => x.id === el.dataset.id); if (!p) return;
+    p.status = "Done"; p.progress = 100;
+    (p.milestones || []).forEach(m => { m.done = true; });
+    touch("project", p.id, "Shipped"); addXp(60, `${p.name} shipped`);
+    closeModal(); save(); render();
+  },
+  "project-del": (el) => {
+    const p = state.projects.find(x => x.id === el.dataset.id);
+    const refs = ((p && p.files) || []).slice();
+    closeModal();
+    /* files outlive the undo window, exactly like a memory's photos */
+    deleteWithUndo(() => state.projects, el.dataset.id, "Project deleted", () => refs.forEach(dropMedia));
+  },
+  "pms-add": (el) => {
+    formModal("New milestone", fld("Milestone", txt("text", "e.g. ship the migration")) +
+      `<input type="hidden" name="pid" value="${el.dataset.id}">`, "pms-add");
+  },
+  "pms-toggle": (el) => {
+    const p = state.projects.find(x => x.id === el.dataset.p);
+    const m = p && (p.milestones || []).find(x => x.id === el.dataset.m); if (!m) return;
+    m.done = !m.done;
+    if (m.done) { addXp(15, "Milestone"); touch("project", p.id, `Milestone: ${m.text}`); }
+    save(); render(); openProjectDetail(p.id);
+  },
+  "pms-del": (el) => {
+    const p = state.projects.find(x => x.id === el.dataset.p); if (!p) return;
+    p.milestones = (p.milestones || []).filter(x => x.id !== el.dataset.m);
+    save(); render(); openProjectDetail(p.id);
+  },
+  "project-file-del": (el) => {
+    const p = state.projects.find(x => x.id === el.dataset.id); if (!p) return;
+    dropMedia((p.files || []).find(f => f.id === el.dataset.ref));
+    p.files = (p.files || []).filter(f => f.id !== el.dataset.ref);
+    save(); render(); openProjectDetail(p.id);
+  },
   /* finance */
   "fin-income": () => finEntryForm("income"),
   "fin-expense": () => finEntryForm("expense"),
@@ -6845,7 +7106,16 @@ const SUBMITS = {
   },
   "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }; },
   "sup-edit": (f) => { const x = state.nutrition.supplements.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.dose = f.dose || ""; x.every = ["day","week","month"].includes(f.every) ? f.every : x.every; } },
-  "project-edit": (f) => { const x = state.projects.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.status = f.status || x.status; x.note = f.note || ""; x.nextMilestone = (f.nextMilestone || "").slice(0, 90); if (x.status === "Done") x.progress = 100; touch("project", x.id, "Updated"); } },
+  "project-edit": (f) => {
+    const x = state.projects.find(v => v.id === f.id); if (!x) return;
+    x.name = f.name; x.emoji = f.emoji || x.emoji; x.status = f.status || x.status;
+    x.note = f.note || ""; x.purpose = (f.purpose || "").slice(0, 200);
+    x.priority = f.priority || x.priority || "med";
+    x.startedOn = f.startedOn || ""; x.deadline = f.deadline || "";
+    x.nextMilestone = (f.nextMilestone || "").slice(0, 90); x.tags = parseTags(f.tags);
+    if (x.status === "Done") { x.progress = 100; (x.milestones || []).forEach(m => { m.done = true; }); }
+    touch("project", x.id, "Updated");
+  },
   "social-edit": (f) => { const x = state.social.items.find(v => v.id === f.id); if (x) { x.title = f.title; x.emoji = f.emoji || x.emoji; x.target = Math.max(1, +f.target || 1); } },
   "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; x.tags = parseTags(f.tags); x.felt = f.felt || ""; } },
   "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
@@ -6905,7 +7175,24 @@ const SUBMITS = {
   },
   "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, category: f.category || "Other", due: f.due || "", done: false }); },
   "work-edit": (f) => { const k = state.work.items.find(x => x.id === f.id); if (k) { k.title = f.title; k.category = f.category || "Other"; k.due = f.due || ""; } },
-  "project-add": (f) => { const p = born({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "", nextMilestone: "" }); state.projects.push(p); touch("project", p.id, "Project created"); },
+  "project-add": (f) => {
+    const p = born({ id: uid(), name: f.name, emoji: f.emoji || "🚀",
+      status: f.status || "Planning", progress: 0, note: f.note || "",
+      purpose: (f.purpose || "").slice(0, 200), priority: f.priority || "med",
+      startedOn: f.startedOn || "", deadline: f.deadline || "",
+      nextMilestone: (f.nextMilestone || "").slice(0, 90), tags: parseTags(f.tags),
+      milestones: [], files: [] });
+    state.projects.push(p); touch("project", p.id, "Project created");
+  },
+  "pms-add": (f) => {
+    const p = state.projects.find(x => x.id === f.pid);
+    if (p && (f.text || "").trim()) {
+      p.milestones = p.milestones || [];
+      p.milestones.push({ id: uid(), text: f.text.trim().slice(0, 120), done: false });
+      touch("project", p.id, `Milestone added: ${f.text.trim().slice(0, 60)}`);
+      setTimeout(() => openProjectDetail(p.id), 0);
+    }
+  },
   "fin-entry": (f) => {
     const amt = +f.amount || 0; if (amt <= 0) return;
     const type = f.type === "income" ? "income" : "expense";
@@ -6938,7 +7225,9 @@ const SUBMITS = {
   "data-sample": () => {
     clearAllMedia();
     const p = state.profile;
-    state = seedState(defaultState());
+    /* migrate(), same as a fresh install — the seed is written against today's shape, and skipping
+       the ladder here left sample data missing every field a later migration backfills */
+    state = migrate(seedState(defaultState()));
     state.profile = Object.assign(state.profile, p, { onboarded: true });
     save(); toast("Sample data loaded");
   },
@@ -7071,6 +7360,14 @@ const CHANGES = {
   "memory-photo-add": (el) => {
     const m = state.memories.find(x => x.id === el.dataset.id); if (!m) return;
     storeMediaFile(el.files[0], (ref) => { m.photos = m.photos || []; m.photos.push(ref); save(); render(); openMemoryDetail(m.id); toast("Photo added 📸"); });
+  },
+  "project-file-add": (el) => {
+    const p = state.projects.find(x => x.id === el.dataset.id); if (!p) return;
+    storeMediaFile(el.files[0], (ref) => {
+      p.files = p.files || []; p.files.push(ref);
+      touch("project", p.id, "File added");
+      save(); render(); openProjectDetail(p.id); toast("File added 📎");
+    });
   },
   "tmdb-key": (el) => { state.profile.tmdbKey = el.value.trim(); save(); },
 

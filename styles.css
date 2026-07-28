@@ -1868,3 +1868,17 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
   font-style: normal; padding: 1px 7px; border-radius: 999px;
   background: var(--surface); border: 1px solid var(--line); font-size: 10.5px;
 }
+
+/* ---------- Projects — "What am I building?" ---------- */
+/* The project hero borrows the Goals hero's shape but not its colour: a goal and the project that
+   builds it are different things, and the eye should be able to tell the two pages apart. */
+.pj-hero { background: linear-gradient(135deg, #0f8a7d 0%, #12a594 55%, #2bc2a0 100%); }
+.gb.pj { border-left-color: var(--a); }
+.pj-next {
+  display: flex; align-items: center; gap: 6px; margin-top: 10px;
+  font-size: 12.5px; color: var(--ink-2); font-weight: 600;
+}
+.pj-next svg { width: 13px; height: 13px; flex: none; color: #12a594; }
+.pj-next span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; }
+.pj-status .gb-status { margin-left: 0; }
