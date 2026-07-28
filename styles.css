@@ -1712,3 +1712,29 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 /* the row's own chrome, trimmed so the name gets the space */
 .habit-li > .icon-btn { width: 30px; height: 30px; }
 .habit-li .btn.tiny.inc { padding-inline: 10px; }
+
+/* ---------- the connected ecosystem ----------
+   Relationship chips and the history log. Generic over the OBJECTS registry, so a new area reuses
+   these rather than inventing its own. */
+.rel-block { gap: 8px; }
+.rel-row { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 4px; }
+.rel-chip {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  padding: 6px 10px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-size: 12.5px; transition: border-color .2s, transform .18s var(--ease-out);
+}
+.rel-chip.go { cursor: pointer; }
+.rel-chip.go:hover { border-color: var(--brand); transform: translateY(-1px); }
+.rel-chip i { font-style: normal; font-size: 14px; line-height: 1; flex: 0 0 auto; }
+.rel-chip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rel-chip small { color: var(--ink-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; flex: 0 0 auto; }
+.rel-x { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: var(--ink-3); flex: 0 0 auto; }
+.rel-x:hover { background: var(--bad); color: #fff; }
+.rel-x svg { width: 11px; height: 11px; }
+
+.hist-log { display: flex; flex-direction: column; gap: 2px; }
+.hist-log li { display: flex; gap: 10px; align-items: baseline; padding: 5px 2px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+.hist-log li:last-child { border-bottom: 0; }
+.hl-when { flex: 0 0 62px; color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.hl-what { flex: 1; min-width: 0; color: var(--ink-2); }

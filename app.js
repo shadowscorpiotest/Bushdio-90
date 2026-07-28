@@ -163,7 +163,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 12;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 13;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -190,6 +190,10 @@ function defaultState() {
        idea with and without a clock on it, so there is one list rather than two concepts. */
     groups: [],                // {id,name,emoji,color,start,days,order}
     quotes: [],                // the user's own lines, mixed into the daily rotation
+    /* The connected ecosystem. `links` is the graph between any two objects; `history` is what has
+       happened to each of them. Both keyed by "type:id" refs — see the OBJECTS registry. */
+    links: [],                 // {id,from,to,rel,at}
+    history: {},               // {"type:id": [{at,what}]}
     todos: [],                 // {id,text,done,date,time,order,repeat,seriesId,from,
                                //  priority,estMin,linkGoalId,projectId,focus,hard}
     tasksRolledOn: "",         // last date rollTasks() ran — synced so one device answering settles it
@@ -582,6 +586,27 @@ const MIGRATIONS = [
     }
     delete s.challenge;
     (s.habits || []).forEach(h => { if (h.groupId == null) h.groupId = ""; });
+  },
+
+  /* 12 → 13 · the connected ecosystem. The graph and the history log start empty; what matters here
+     is `created`, and specifically what it is NOT allowed to do. It is backfilled ONLY from a date
+     the record already carries. Stamping today onto a memory from last year, or inventing a
+     creation date for a habit, would be the app asserting something it cannot know — the same
+     discipline that stops the dashboard claiming a goal is "on track". No date, no claim. */
+  (s) => {
+    if (!Array.isArray(s.links)) s.links = [];
+    if (!s.history || typeof s.history !== "object") s.history = {};
+    const stamp = (o, d) => { if (o && o.created == null) o.created = d || ""; if (o && o.updated == null) o.updated = o.created || ""; };
+    (s.goals || []).forEach(g => stamp(g, (g.progress && g.progress[0] && g.progress[0].date) || ""));
+    (s.todos || []).forEach(t => stamp(t, t.from || t.date || ""));
+    (s.habits || []).forEach(h => stamp(h, Object.keys(h.log || {}).sort()[0] || ""));
+    (s.memories || []).forEach(m => stamp(m, m.date || ""));
+    (s.journal || []).forEach(j => stamp(j, j.date || ""));
+    (s.projects || []).forEach(p => stamp(p, ""));
+    (s.groups || []).forEach(g => stamp(g, g.start || ""));
+    ((s.social || {}).people || []).forEach(p => stamp(p, (p.touches || []).slice().sort()[0] || ""));
+    (s.reading || {}).books && s.reading.books.forEach(b => stamp(b, b.started || ""));
+    (s.finance || {}).entries && s.finance.entries.forEach(e => stamp(e, e.date || ""));
   },
 ];
 
@@ -1674,6 +1699,141 @@ function supStatus(sup) {
   const elapsed = Math.floor((Date.parse(todayIso()) - Date.parse(last)) / DAY_MS);
   return { due: elapsed >= period, nextInDays: Math.max(0, period - elapsed), last };
 }
+/* ================= the connected ecosystem =================
+   The Bible's core rule is that nothing exists in isolation. Until now every relationship in this
+   app was its own bespoke field — todo.habitId, todo.linkGoalId, todo.projectId, habit.goalIds,
+   goal.habitIds, memory.people, book.recommenders — eight-plus of them, none aware of the others,
+   and none able to answer the one question that matters: what is this connected to?
+
+   Three pieces below, and one deliberate omission.
+
+   The omission: this does NOT migrate the bespoke fields. They are load-bearing, covered by 28
+   suites, and rewriting all of them in one pass across 6,700 lines is how a working app breaks.
+   Instead `linksOf()` UNIONS the generic table with the bespoke fields, so a page gets one complete
+   answer while the old paths keep working untouched. They can retire one at a time later, or never. */
+
+/* 1 — the registry. Naming every object in one place is what makes the rest generic: a new area
+   costs one entry here, not a new linking scheme. */
+const OBJECTS = {
+  goal:    { label: "Goal",    list: () => state.goals,            title: o => o.title, emoji: o => o.emoji || "\u{1F3AF}", open: "goal-open" },
+  project: { label: "Project", list: () => state.projects,         title: o => o.name,  emoji: o => o.emoji || "\u{1F680}", open: "project-edit" },
+  habit:   { label: "Habit",   list: () => state.habits,           title: o => o.name,  emoji: o => o.emoji || "\u2705",    open: "habit-open" },
+  task:    { label: "Task",    list: () => state.todos,            title: o => o.text,  emoji: () => "\u2713",              open: "todo-open" },
+  person:  { label: "Person",  list: () => peopleAll(),            title: o => o.name,  emoji: o => o.emoji || "\u{1F464}", open: "person-open" },
+  book:    { label: "Book",    list: () => state.reading.books,    title: o => o.title, emoji: o => o.emoji || "\u{1F4D8}", open: "book-open" },
+  media:   { label: "Watch",   list: () => state.media,            title: o => o.title, emoji: o => o.emoji || "\u{1F3AC}", open: "media-open" },
+  memory:  { label: "Memory",  list: () => state.memories,         title: o => o.title, emoji: o => o.emoji || "\u2728",    open: "memory-open" },
+  course:  { label: "Course",  list: () => state.skills.courses,   title: o => o.name,  emoji: () => "\u{1F393}",           open: "" },
+  group:   { label: "Group",   list: () => state.groups,           title: o => o.name,  emoji: o => o.emoji || "\u{1F94B}", open: "group-open" },
+  txn:     { label: "Money",   list: () => state.finance.entries,  title: o => o.note || o.category, emoji: () => "\u{1F4B6}", open: "" },
+  uni:     { label: "Coursework", list: () => state.university.tasks, title: o => o.title, emoji: () => "\u{1F3DB}\uFE0F", open: "" },
+  work:    { label: "Career",  list: () => state.work.items,       title: o => o.title, emoji: () => "\u{1F4BC}",           open: "" },
+};
+const ref = (type, id) => `${type}:${id}`;
+const parseRef = (r) => { const i = String(r || "").indexOf(":"); return i < 0 ? null : { type: r.slice(0, i), id: r.slice(i + 1) }; };
+/* resolve a ref to the live object, or null if it has since been deleted */
+function deref(r) {
+  const p = parseRef(r); if (!p) return null;
+  const spec = OBJECTS[p.type]; if (!spec) return null;
+  const o = (spec.list() || []).find(x => x.id === p.id);
+  return o ? { type: p.type, id: p.id, obj: o, spec } : null;
+}
+const refTitle = (r) => { const d = deref(r); return d ? String(d.spec.title(d.obj) || "") : ""; };
+
+/* 2 — the graph. Directed because "serves" and "is served by" read differently, but every reader
+   below looks at both ends, so a link is findable from either object. */
+function linkExists(from, to) {
+  return (state.links || []).some(l => (l.from === from && l.to === to) || (l.from === to && l.to === from));
+}
+function addLink(from, to, rel = "related") {
+  if (!from || !to || from === to || linkExists(from, to)) return null;
+  if (!deref(from) || !deref(to)) return null;          // never link to something that isn't there
+  const l = { id: uid(), from, to, rel, at: new Date().toISOString() };
+  (state.links = state.links || []).push(l);
+  return l;
+}
+const removeLink = (id) => { state.links = (state.links || []).filter(l => l.id !== id); };
+/* every link touching this object, from either end, with the OTHER end resolved */
+const genericLinks = (type, id) => {
+  const me = ref(type, id);
+  return (state.links || []).filter(l => l.from === me || l.to === me)
+    .map(l => ({ id: l.id, rel: l.rel, ref: l.from === me ? l.to : l.from, generic: true }));
+};
+/* The union. Bespoke fields are read here rather than migrated, so nothing that works today stops
+   working, and a page still gets one complete answer. */
+function bespokeLinks(type, id) {
+  const out = [];
+  const push = (r) => { if (r && deref(r)) out.push({ id: "", rel: "related", ref: r, generic: false }); };
+  if (type === "task") {
+    const td = state.todos.find(x => x.id === id); if (!td) return out;
+    push(ref("goal", td.linkGoalId)); push(ref("project", td.projectId)); push(ref("habit", td.habitId));
+  } else if (type === "goal") {
+    state.habits.filter(h => (h.goalIds || []).includes(id)).forEach(h => push(ref("habit", h.id)));
+    state.todos.filter(t => t.linkGoalId === id).forEach(t => push(ref("task", t.id)));
+  } else if (type === "habit") {
+    const h = state.habits.find(x => x.id === id); if (!h) return out;
+    (h.goalIds || []).forEach(g => push(ref("goal", g)));
+    if (h.groupId) push(ref("group", h.groupId));
+    state.todos.filter(t => t.habitId === id).forEach(t => push(ref("task", t.id)));
+  } else if (type === "project") {
+    state.todos.filter(t => t.projectId === id).forEach(t => push(ref("task", t.id)));
+  } else if (type === "group") {
+    state.habits.filter(h => h.groupId === id).forEach(h => push(ref("habit", h.id)));
+  } else if (type === "person") {
+    const p = personById(id); if (!p) return out;
+    state.memories.filter(m => (m.people || []).some(n => normName(n) === normName(p.name))).forEach(m => push(ref("memory", m.id)));
+    state.reading.books.filter(b => (b.recommenders || []).some(n => normName(n) === normName(p.name))).forEach(b => push(ref("book", b.id)));
+    state.media.filter(m => (m.recommenders || []).some(n => normName(n) === normName(p.name))).forEach(m => push(ref("media", m.id)));
+  } else if (type === "memory") {
+    const m = state.memories.find(x => x.id === id); if (!m) return out;
+    (m.people || []).forEach(n => { const p = personByName(n); if (p) push(ref("person", p.id)); });
+  } else if (type === "book" || type === "media") {
+    const o = OBJECTS[type].list().find(x => x.id === id); if (!o) return out;
+    (o.recommenders || []).forEach(n => { const p = personByName(n); if (p) push(ref("person", p.id)); });
+  }
+  return out;
+}
+function linksOf(type, id) {
+  const all = [...bespokeLinks(type, id), ...genericLinks(type, id)];
+  const seen = new Set(); const out = [];
+  for (const l of all) {
+    if (seen.has(l.ref)) continue;
+    /* Drop dangling refs HERE rather than leaving it to whoever renders them. gcLinks() only runs
+       once a day, so between a delete and the next roll this is the only thing standing between a
+       caller and an object that no longer exists — and callers count these, not just draw them. */
+    if (!deref(l.ref)) continue;
+    seen.add(l.ref); out.push(l);
+  }
+  return out;
+}
+
+/* 3 — history. Bounded on write: an unbounded log inside a blob that is re-encrypted and uploaded
+   on every change is a slow leak, not a feature. */
+const HISTORY_MAX = 40;
+function touch(type, id, what) {
+  if (!what) return;
+  const key = ref(type, id);
+  const log = (state.history = state.history || {});
+  const rows = (log[key] = log[key] || []);
+  rows.push({ at: new Date().toISOString(), what: String(what).slice(0, 120) });
+  if (rows.length > HISTORY_MAX) rows.splice(0, rows.length - HISTORY_MAX);
+  const o = deref(key);
+  if (o) o.obj.updated = todayIso();
+}
+const historyOf = (type, id) => ((state.history || {})[ref(type, id)] || []).slice().reverse();
+
+/* A link whose endpoint is gone is garbage, and so is history for an object that no longer exists.
+   Runs with the other pruning in rollTasks(). deleteWithUndo also cleans up explicitly on expiry,
+   so an undo inside the window still restores everything the object was connected to. */
+function gcLinks() {
+  const before = (state.links || []).length;
+  state.links = (state.links || []).filter(l => deref(l.from) && deref(l.to));
+  Object.keys(state.history || {}).forEach(k => { if (!deref(k)) delete state.history[k]; });
+  return before - state.links.length;
+}
+/* stamp a new object without touching fourteen constructors */
+const born = (o) => Object.assign({ created: todayIso(), updated: todayIso() }, o);
+
 /* ---------- people ---------- */
 const peopleAll = () => (state.social.people = state.social.people || []);
 const personByName = (name) => peopleAll().find(p => normName(p.name) === normName(name)) || null;
@@ -1980,7 +2140,13 @@ function deleteWithUndo(getArr, id, label, onExpire, onRestore) {
     if (onRestore) onRestore();      // put back anything stored outside the list
     save(); render();
     toast("Restored");
-  }, onExpire);
+  }, () => {
+    /* Only now, once the undo window has closed for good, do the object's links and history go.
+       Collecting them during the window would mean an undo restored the thing but not what it was
+       connected to — the same rule the media blobs and group membership already follow. */
+    if (onExpire) onExpire();
+    gcLinks(); save();
+  });
   return gone;
 }
 
@@ -2190,6 +2356,72 @@ function bindTip() {
     tip.style.left = clamp(e.clientX + pad, 6, innerWidth - w - 6) + "px";
     tip.style.top = clamp(e.clientY - h - 10, 6, innerHeight - h - 6) + "px";
   });
+}
+
+/* ---------- the two blocks the Bible asks every page for ----------
+   Written once, generic over the OBJECTS registry, so satisfying "Relationships" and "History" on a
+   new page is one call rather than a new component. */
+
+function relChip(l) {
+  const d = deref(l.ref);
+  if (!d) return "";
+  const openable = !!d.spec.open;
+  return `<span class="rel-chip${openable ? " go" : ""}" ${openable ? `data-action="${d.spec.open}" data-id="${d.id}"` : ""}>
+    <i aria-hidden="true">${esc(d.spec.emoji(d.obj))}</i>
+    <b>${esc(d.spec.title(d.obj) || d.spec.label)}</b>
+    <small>${esc(d.spec.label)}</small>
+    ${l.generic ? `<button class="rel-x" data-action="link-del" data-lid="${l.id}" aria-label="Unlink">${I.x}</button>` : ""}
+  </span>`;
+}
+/* Links made by hand can be removed; links that come from a bespoke field (a task's goal, a
+   memory's people) are shown but not removable HERE — you change those where they live, and saying
+   so is better than offering a button that would silently do nothing. */
+function relatedCard(type, id, opts) {
+  const o = opts || {};
+  const links = linksOf(type, id);
+  const derived = links.filter(l => !l.generic).length;
+  return `<div class="fld rel-block">
+    <span>${o.label || "Connected to"}${links.length ? ` <small class="soft">${links.length}</small>` : ""}</span>
+    ${links.length ? `<div class="rel-row">${links.map(relChip).join("")}</div>`
+      : `<p class="soft small">Nothing linked yet.</p>`}
+    <button class="btn tiny ghost" data-action="link-add" data-type="${type}" data-id="${id}">${I.link}Link something</button>
+    ${derived ? `<p class="soft small">${derived} of these come from a field on the item itself — change those where they live.</p>` : ""}
+  </div>`;
+}
+function historyCard(type, id, opts) {
+  const o = opts || {};
+  const rows = historyOf(type, id).slice(0, o.limit || 8);
+  if (!rows.length && !o.always) return "";
+  return `<div class="fld"><span>History</span>
+    ${rows.length ? `<ul class="hist-log">${rows.map(r => `<li>
+      <span class="hl-when">${esc(niceDate(r.at.slice(0, 10), { month: "short", day: "numeric" }))}</span>
+      <span class="hl-what">${esc(r.what)}</span></li>`).join("")}</ul>`
+      : `<p class="soft small">Nothing recorded yet.</p>`}</div>`;
+}
+/* One picker for every object type — the payoff of the registry. */
+function openLinkPicker(type, id) {
+  const me = ref(type, id);
+  const already = new Set(linksOf(type, id).map(l => l.ref));
+  const groups = Object.keys(OBJECTS).map(t => {
+    const spec = OBJECTS[t];
+    const items = (spec.list() || []).filter(o => ref(t, o.id) !== me && !already.has(ref(t, o.id))).slice(0, 40);
+    return items.length ? `<optgroup label="${esc(spec.label)}">${items.map(o =>
+      `<option value="${esc(ref(t, o.id))}">${esc(spec.emoji(o))} ${esc(String(spec.title(o) || "").slice(0, 60))}</option>`).join("")}</optgroup>` : "";
+  }).join("");
+  const d = deref(me);
+  openModal(`<form data-submit="link-add">
+    <header class="modal-head"><h3>Link something</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="soft small">Connecting <b>${esc(d ? d.spec.title(d.obj) : "this")}</b> to something else. Both sides will show the link.</p>
+      <input type="hidden" name="from" value="${esc(me)}">
+      <label class="fld"><span>Link to</span><select name="to" required>${groups || `<option value="">Nothing else to link to yet</option>`}</select></label>
+      <label class="fld"><span>How are they related? <small class="soft">— optional</small></span>
+        <input type="text" name="rel" placeholder="serves / part of / inspired by…" maxlength="40"></label>
+    </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="modal-close">Cancel</button>
+      <button type="submit" class="btn primary">${I.link}Link</button>
+    </footer></form>`);
 }
 
 /* small building blocks */
@@ -2466,6 +2698,7 @@ function rollTasks() {
   });
   pruneTasks();
   pruneFocusLog();
+  gcLinks();
   return made;
 }
 
@@ -2550,7 +2783,15 @@ function finishFocus(markDone) {
     if (td && !td.done) { td.done = true; syncTaskToLinks(td); }
   }
   save();
-  if (mins > 0) addXp(15, `${mins} min focused`);   // addXp saves and refreshes the topbar itself
+  /* A focus session is one of the few things in this app that is unambiguously WORK. Recording it
+     against whatever it served is how a project's history stops being empty. */
+  if (mins > 0) {
+    const what = `Focused ${mins} min\u00a0\u00b7 ${f.title}`;
+    if (f.taskId) touch("task", f.taskId, `Focused ${mins} min`);
+    if (f.goalId) touch("goal", f.goalId, what);
+    if (f.projectId) touch("project", f.projectId, what);
+    addXp(15, `${mins} min focused`);              // addXp saves and refreshes the topbar itself
+  }
   renderFocusBar(); render();
   return row;
 }
@@ -2813,6 +3054,8 @@ function openTaskDetail(id) {
           <button type="button" class="btn ghost slim" data-action="task-down" data-id="${td.id}">Later${I.chevR}</button>
         </span></label>
       <p class="soft note">${I.grip} On the list you can drag a task by its handle. These buttons do the same thing — drag needs a pointer, so they stay for keyboards and anyone who'd rather not.</p>
+      ${relatedCard("task", td.id)}
+      ${historyCard("task", td.id)}
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
     </div>`);
 }
@@ -3352,6 +3595,7 @@ function openGroupDetail(id) {
       <p class="soft small" style="margin-top:10px">${inside.length} habit${inside.length === 1 ? "" : "s"} in this group${inside.length ? ": " + inside.map(h => esc(h.emoji) + " " + esc(h.name)).join(", ") : " \u2014 set a habit's <b>Group</b> from its own sheet."}</p>
       <div class="pill-row"><button class="btn primary slim" data-action="group-edit" data-id="${g.id}">Edit</button><button class="btn danger" data-action="group-del" data-id="${g.id}">${I.trash}Delete</button></div>
       <p class="soft note">${I.check} Deleting a group never deletes its habits \u2014 they simply stop being grouped, and keep every day they were logged.</p>
+      ${relatedCard("group", g.id)}
     </div>`);
 }
 function parseCadence(f) {
@@ -3409,6 +3653,8 @@ function openHabitDetail(id) {
           <button type="button" class="btn ghost slim" data-action="habit-down" data-id="${h.id}">Later${I.chevR}</button>
         </span></label>
       <p class="soft note">${I.grip} On the list you can drag a habit by its handle. These do the same thing — drag needs a pointer, so they stay for keyboards.</p>
+      ${relatedCard("habit", h.id)}
+      ${historyCard("habit", h.id)}
       ${(() => {
         const src = habitSource(h);
         if (!src) return `<p class="soft note">${I.link} Not linked to an area — you tick this one by hand. Add a source in <b>Edit</b> to have it fill itself in.</p>`;
@@ -3462,6 +3708,8 @@ function openGoalDetail(id) {
         ${linked.length ? `<ul class="goal-habits">${linked.map(h => `<li data-action="habit-open" data-id="${h.id}"><span class="hdot" style="background:${cssVar(h.color, "#6a5ae0")}"></span><b>${esc(h.emoji)} ${esc(h.name)}</b><small class="soft">${habitStreak(h)}🔥 · ${habitCompletion(h, 30)}%</small></li>`).join("")}</ul>` : `<p class="soft small">No habits linked yet.</p>`}
         <button class="btn tiny ghost" data-action="goal-habits" data-id="${g.id}">${I.plus}Link habits</button>
       </div>
+      ${relatedCard("goal", g.id)}
+      ${historyCard("goal", g.id)}
       <div class="pill-row"><button class="btn ghost" data-action="goal-edit" data-id="${g.id}">${I.edit}Edit</button><button class="btn danger" data-action="goal-del" data-id="${g.id}">${I.trash}Delete</button></div>
     </div>`);
   drawCharts();
@@ -4707,6 +4955,8 @@ function openPersonDetail(id) {
       ${line("🎬", app.media.map(m => ({ id: m.id, title: m.title, sub: m.type || "" })), "media", "Films &amp; series they recommended")}
       ${(!app.memories.length && !app.books.length && !app.media.length)
         ? `<p class="soft note">${I.heart} Name them on a memory or as who recommended a book, and it'll show up here.</p>` : ""}
+      ${relatedCard("person", p.id, { label: "Also connected to" })}
+      ${historyCard("person", p.id)}
     </div>
     <footer class="modal-foot">
       <button type="button" class="btn ghost" data-action="person-edit" data-id="${p.id}">${I.edit}Edit</button>
@@ -5530,10 +5780,12 @@ const ACTIONS = {
     h.archived = true;
     /* dated TODAY: everything before this stays exactly as it was scored */
     h.archivedOn = todayIso();
+    touch("habit", h.id, "Archived");
     closeModal(); save(); render();
     toastUndo(`${h.name} archived`, () => { h.archived = false; h.archivedOn = ""; save(); render(); });
   },
   "habit-restore": (el) => {
+    touch("habit", el.dataset.id, "Restored from archive");
     const h = state.habits.find(x => x.id === el.dataset.id); if (!h) return;
     h.archived = false; h.archivedOn = "";
     closeModal(); save(); render();
@@ -5625,6 +5877,16 @@ const ACTIONS = {
   "ms-del": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.milestones = h.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openHabitDetail(h.id); } },
 
   /* goals */
+  "link-add": (el) => openLinkPicker(el.dataset.type, el.dataset.id),
+  "link-del": (el) => {
+    const l = (state.links || []).find(x => x.id === el.dataset.lid);
+    if (!l) return;
+    removeLink(l.id); save(); render();
+    /* reopen whatever sheet we were in, so unlinking doesn't feel like the app closed on you */
+    const d = deref(l.from) || deref(l.to);
+    if (d && d.spec.open && ACTIONS[d.spec.open]) ACTIONS[d.spec.open]({ dataset: { id: d.id } });
+    toast("Unlinked");
+  },
   "quote-del": (el) => { state.quotes.splice(+el.dataset.i, 1); save(); render(); },
   "group-add": () => formModal("New group", groupFormFields(), "group-add"),
   "group-open": (el) => openGroupDetail(el.dataset.id),
@@ -6007,7 +6269,7 @@ const ACTIONS = {
   "work-del": (el) => { deleteWithUndo(() => state.work.items, el.dataset.id, "Item deleted"); },
   "project-add": () => formModal("New project", fld("Name", txt("name", "e.g. Portfolio site")) + fld("Emoji", txt("emoji", "🚀", "🚀", false)), "project-add"),
   "project-bump": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.progress = clamp(p.progress + +el.dataset.n, 0, 100); if (p.status === "Planning") p.status = "In progress"; save(); render(); },
-  "project-done": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.status = "Done"; p.progress = 100; addXp(60, `${p.name} shipped`); save(); render(); },
+  "project-done": (el) => { const p = state.projects.find(x => x.id === el.dataset.id); p.status = "Done"; p.progress = 100; touch("project", p.id, "Shipped"); addXp(60, `${p.name} shipped`); save(); render(); },
   "project-del": (el) => { deleteWithUndo(() => state.projects, el.dataset.id, "Project deleted"); },
   /* finance */
   "fin-income": () => finEntryForm("income"),
@@ -6166,15 +6428,24 @@ const SUBMITS = {
   "auth-signin": (f) => { doAuth("signin", f.email, f.password); return true; },
   "auth-signup": (f) => { doAuth("signup", f.email, f.password); return true; },
 
-  "habit-add": (f) => { state.habits.push({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", groupId: groupById(f.groupId) ? f.groupId : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() }); },
+  "habit-add": (f) => { state.habits.push(born({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", groupId: groupById(f.groupId) ? f.groupId : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() })); touch("habit", state.habits[state.habits.length - 1].id, "Habit created"); },
   "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.groupId = groupById(f.groupId) ? f.groupId : ""; h.remindAt = f.remindAt || ""; syncPushSchedule(); } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
+  "link-add": (f) => {
+    const l = addLink(f.from, f.to, (f.rel || "").trim() || "related");
+    if (!l) { toast("Already linked"); return; }
+    /* both objects remember it — a relationship is an event in the life of each */
+    const a = parseRef(f.from), b = parseRef(f.to);
+    if (a) touch(a.type, a.id, `Linked to ${refTitle(f.to)}`);
+    if (b) touch(b.type, b.id, `Linked to ${refTitle(f.from)}`);
+    toast("Linked \u{1F517}");
+  },
   "quote-add": (f) => { const q = String(f.text || "").trim().slice(0, 160); if (q && !state.quotes.includes(q)) state.quotes.push(q); },
-  "group-add": (f) => { if (f.name) state.groups.push({ id: uid(), name: f.name, emoji: f.emoji || "\u{1F94B}", color: f.color || "#6a5ae0", start: f.start || "", days: Math.max(0, +f.days || 0), order: (state.groups.length ? Math.max(...state.groups.map(g => g.order || 0)) + 1 : 0) }); },
+  "group-add": (f) => { if (f.name) state.groups.push(born({ id: uid(), name: f.name, emoji: f.emoji || "\u{1F94B}", color: f.color || "#6a5ae0", start: f.start || "", days: Math.max(0, +f.days || 0), order: (state.groups.length ? Math.max(...state.groups.map(g => g.order || 0)) + 1 : 0) })); },
   "group-edit": (f) => { const g = groupById(f.id); if (g && f.name) { g.name = f.name; g.emoji = f.emoji || g.emoji; g.color = f.color || g.color; g.start = f.start || ""; g.days = Math.max(0, +f.days || 0); } },
-  "goal-add": (f) => { state.goals.push({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", priority: PRIORITY[f.priority] ? f.priority : "med", status: ["active", "paused", "done"].includes(f.status) ? f.status : "active", progress: [], habitIds: [], milestones: [] }); },
+  "goal-add": (f) => { state.goals.push(born({ id: uid(), title: f.title, emoji: f.emoji || "🎯", type: f.type || "checklist", unit: f.unit || "", direction: f.direction || "down", start: +f.start || 0, target: +f.target || 0, deadline: f.deadline || "", note: f.note || "", priority: PRIORITY[f.priority] ? f.priority : "med", status: ["active", "paused", "done"].includes(f.status) ? f.status : "active", progress: [], habitIds: [], milestones: [] })); touch("goal", state.goals[state.goals.length - 1].id, "Goal created"); },
   "goal-edit": (f) => { const g = state.goals.find(x => x.id === f.id); if (g) { g.title = f.title; g.emoji = f.emoji || g.emoji; g.type = f.type || "checklist"; g.unit = f.unit || ""; g.direction = f.direction || "down"; g.start = +f.start || 0; g.target = +f.target || 0; g.deadline = f.deadline || ""; g.note = f.note || ""; if (PRIORITY[f.priority]) g.priority = f.priority; if (["active", "paused", "done"].includes(f.status)) g.status = f.status; syncGoalMilestones(g); } },
-  "goal-log": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) { g.progress.push({ date: todayIso(), value: +f.value || 0 }); syncGoalMilestones(g); addXp(5, "Progress logged"); } },
+  "goal-log": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) { g.progress.push({ date: todayIso(), value: +f.value || 0 }); syncGoalMilestones(g); touch("goal", g.id, `Logged ${+f.value || 0}${g.unit ? " " + g.unit : ""}`); addXp(5, "Progress logged"); } },
   "gms-add": (f) => { const g = state.goals.find(x => x.id === f.gid); if (g) g.milestones.push({ id: uid(), text: f.text, done: false }); },
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
   "workout-add": (f) => { state.workout.plan.push(Object.assign({ id: uid() }, planFromForm(f))); },
@@ -6271,7 +6542,7 @@ const SUBMITS = {
   },
   "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, category: f.category || "Other", due: f.due || "", done: false }); },
   "work-edit": (f) => { const k = state.work.items.find(x => x.id === f.id); if (k) { k.title = f.title; k.category = f.category || "Other"; k.due = f.due || ""; } },
-  "project-add": (f) => { state.projects.push({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); },
+  "project-add": (f) => { const p = born({ id: uid(), name: f.name, emoji: f.emoji || "🚀", status: "Planning", progress: 0, note: "" }); state.projects.push(p); touch("project", p.id, "Project created"); },
   "fin-entry": (f) => {
     const amt = +f.amount || 0; if (amt <= 0) return;
     const type = f.type === "income" ? "income" : "expense";
@@ -6286,9 +6557,9 @@ const SUBMITS = {
     if (f.habitId === "none") { /* explicitly unlinked */ }
     else if (f.habitId) { habitId = f.habitId; }
     else { const link = suggestLinkForText(f.text); if (link.type === "sup") supId = link.id; else if (link.type === "area") areaId = link.id; else habitId = link.id; }
-    state.todos.push({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "",
+    state.todos.push(born({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "",
       habitId, supId, areaId, order: nextTaskOrder(), repeat: null, seriesId: "", from: "",
-      priority: "med", estMin: 0, linkGoalId: "", projectId: "", focus: false, hard: false });
+      priority: "med", estMin: 0, linkGoalId: "", projectId: "", focus: false, hard: false }));
   },
   "focus-start": (f) => { startFocus(state.todos.find(x => x.id === f.id), f.mins); },
   "focus-log": (f) => { finishFocus(!!f.markDone); },

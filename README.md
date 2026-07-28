@@ -4,6 +4,24 @@
 
 No server, no account, no build step. Open `index.html` (or host the folder anywhere, e.g. GitHub Pages) and everything is saved privately in your browser's local storage.
 
+## 🔗 Everything connects
+
+Nothing in LifeHub exists in isolation. Any object — a goal, a project, a habit, a task, a person, a
+book, a memory, a course, a transaction — **can be linked to any other**, and every detail sheet shows
+a **Connected to** block listing what it touches, from either end.
+
+Links you make by hand can be removed. Links the app already knows about — the goal a task serves, the
+people named on a memory, who recommended a book — are shown alongside them but changed where they
+live, and it says so rather than offering a button that would do nothing.
+
+Each object also keeps a short **History**: when it was created, when work was logged against it, when
+it was archived. A finished focus session writes itself into the history of the task, the goal *and*
+the project it served, so a project's record fills in from the work you actually did.
+
+**One thing it deliberately won't do:** invent a creation date. Objects that pre-date this feature get
+`created` only if the record already carried a real date — a memory's date, a task's date, a habit's
+first logged day. Everything else stays blank. The app doesn't claim to know things it can't.
+
 ## ✨ Life areas
 
 | Area | What it does |
