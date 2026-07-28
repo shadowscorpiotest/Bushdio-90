@@ -6469,11 +6469,36 @@ const CHANGES = {
    Reordering also stays reachable from each item's detail sheet, because you cannot drag with a
    keyboard and this must not be the only way. */
 
-const DRAG_SLOP = 6;            // px of movement before it counts as a drag rather than a tap
+const DRAG_SLOP = 6;            // mouse: px of movement before it counts as a drag
+const DRAG_TOUCH_SLOP = 10;     // finger: a stationary finger still wanders a few px
+const DRAG_HOLD_MS = 400;       // finger: how long you must hold still before a drag arms
 let _drag = null;
 let _dragSuppressClick = false;
 
 function dragList(el) { return el ? el.closest("[data-drag-list]") : null; }
+
+/* A finger does not mean the same thing as a mouse.
+   With a mouse, pressing a drag handle is unambiguous — nothing else starts there, so the drag can
+   begin at once. With a finger it is the opposite: people scroll a list by putting a thumb wherever
+   it lands, which is often straight on the handle. Engaging immediately meant an ordinary scroll
+   picked a habit up and dropped it somewhere else. So on touch the drag must be ASKED for: hold
+   still for a moment, feel it lift, then move. Move before that and it was a scroll, and the page
+   scrolls normally. */
+function armDrag() {
+  const g = _drag;
+  if (!g || g.armed) return;
+  g.armed = true;
+  try { g.handle.setPointerCapture(g.pid); } catch { /* pointer already gone */ }
+  g.row.classList.add("dragging");
+  g.list.classList.add("is-dragging");
+  /* say it out loud, so picking something up is never a surprise */
+  if (navigator.vibrate && !reduceMotion()) { try { navigator.vibrate(12); } catch { /* not allowed */ } }
+}
+function cancelDrag() {
+  clearTimeout(_drag && _drag.holdTimer);
+  if (_drag) { _drag.row.classList.remove("dragging"); _drag.list.classList.remove("is-dragging"); }
+  _drag = null;
+}
 
 function onDragStart(e) {
   if (e.button != null && e.button !== 0) return;             // right-click / middle-click never drags
@@ -6484,20 +6509,30 @@ function onDragStart(e) {
   if (!row || !list) return;
   const rows = [...list.querySelectorAll(":scope > li")];
   if (rows.length < 2) return;
+  const touch = e.pointerType === "touch" || e.pointerType === "pen";
   _drag = {
-    list, row, kind: list.dataset.dragList, id: handle.dataset.drag,
+    list, row, handle, kind: list.dataset.dragList, id: handle.dataset.drag,
     rows, from: rows.indexOf(row), to: rows.indexOf(row),
-    startY: e.clientY, h: row.getBoundingClientRect().height, moved: false, pid: e.pointerId,
+    startY: e.clientY, startX: e.clientX, h: row.getBoundingClientRect().height,
+    moved: false, pid: e.pointerId, touch,
+    slop: touch ? DRAG_TOUCH_SLOP : DRAG_SLOP,
+    armed: false, holdTimer: null,
   };
-  handle.setPointerCapture(e.pointerId);
-  row.classList.add("dragging");
-  list.classList.add("is-dragging");
+  /* a mouse arms at once; a finger has to hold still first */
+  if (!touch) armDrag();
+  else _drag.holdTimer = setTimeout(armDrag, DRAG_HOLD_MS);
 }
 function onDragMove(e) {
   const g = _drag;
   if (!g || e.pointerId !== g.pid) return;
   const dy = e.clientY - g.startY;
-  if (!g.moved && Math.abs(dy) < DRAG_SLOP) return;           // still a tap until proven otherwise
+  if (!g.armed) {
+    /* Moving before the hold completes means this was a scroll, not a drag. Let go of it entirely
+       so the page scrolls the way it always has. */
+    if (Math.abs(dy) > 4 || Math.abs(e.clientX - g.startX) > 4) cancelDrag();
+    return;
+  }
+  if (!g.moved && Math.abs(dy) < g.slop) return;              // armed, but not yet moving
   g.moved = true;
   e.preventDefault();
   g.row.style.transform = `translateY(${dy}px)`;
@@ -6513,9 +6548,17 @@ function onDragMove(e) {
     });
   }
 }
+/* iOS decides whether a gesture scrolls the page from `touchmove`, and it will not honour
+   preventDefault from a passive listener. This is the one that actually stops the page moving
+   under a habit you are carrying — and it only fires once a drag is armed, so an ordinary swipe
+   across the handle still scrolls. */
+function onTouchMove(e) {
+  if (_drag && _drag.armed) e.preventDefault();
+}
 function onDragEnd(e) {
   const g = _drag;
   if (!g || (e && e.pointerId !== g.pid)) return;
+  clearTimeout(g.holdTimer);
   _drag = null;
   g.rows.forEach(r => { r.style.transform = ""; });
   g.row.classList.remove("dragging");
@@ -6542,6 +6585,9 @@ function bindDrag() {
   document.addEventListener("pointermove", onDragMove, { passive: false });
   document.addEventListener("pointerup", onDragEnd);
   document.addEventListener("pointercancel", onDragEnd);
+  document.addEventListener("touchmove", onTouchMove, { passive: false });
+  /* a scroll that begins elsewhere and runs under a waiting finger is still a scroll */
+  window.addEventListener("scroll", () => { if (_drag && !_drag.armed) cancelDrag(); }, { passive: true });
 }
 
 function bindEvents() {
