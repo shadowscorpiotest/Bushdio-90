@@ -95,6 +95,10 @@
   <aside class="drawer" id="drawer" aria-label="All areas"></aside>
 </div>
 
+<!-- Running focus session. Deliberately OUTSIDE #view: the app re-renders a view by replacing that
+     element's innerHTML, so a timer living inside it would be destroyed on every navigation. -->
+<div class="focus-bar" id="focusBar" role="status" aria-live="polite" hidden></div>
+
 <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 <div class="tip" id="tip" hidden></div>
 

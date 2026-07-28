@@ -162,7 +162,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 10;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 11;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -190,6 +190,10 @@ function defaultState() {
     todos: [],                 // {id,text,done,date,time,order,repeat,seriesId,from,
                                //  priority,estMin,linkGoalId,projectId,focus,hard}
     tasksRolledOn: "",         // last date rollTasks() ran — synced so one device answering settles it
+    /* the focus session. `focus` is at most one running (or finished-but-unlogged) session;
+       `focusLog[date]` is the minutes it left behind. */
+    focus: null,               // {id,taskId,title,mins,startedAt,pausedAt,pausedMs,goalId,projectId}
+    focusLog: {},              // {date: [{id,taskId,title,mins,goalId,projectId,at}]}
     habits: [],                // {id,name,emoji,kind,goalId,milestones,log:{date:{done,note,workoutId}}}
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
     workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
@@ -553,6 +557,13 @@ const MIGRATIONS = [
       if (td.hard == null) td.hard = false;
     });
     if (s.challenge === undefined) s.challenge = null;
+  },
+
+  /* 10 → 11 · the focus session. `focus` is the one that may be running right now; `focusLog` is
+     what it left behind. Both additive — an existing save simply has no session and no history. */
+  (s) => {
+    if (s.focus === undefined) s.focus = null;
+    if (!s.focusLog || typeof s.focusLog !== "object") s.focusLog = {};
   },
 ];
 
@@ -2414,7 +2425,205 @@ function rollTasks() {
     made++;
   });
   pruneTasks();
+  pruneFocusLog();
   return made;
+}
+
+/* ================= focus sessions =================
+   The app's only clock. Two rules govern everything below.
+
+   1. Elapsed time is DERIVED FROM WALL-CLOCK STAMPS, never counted in ticks. A background tab has
+      its timers throttled to roughly once a minute, and a reload has no ticks at all — a counter
+      would drift and then reset. Subtracting stored timestamps is correct across reload, sleep and
+      backgrounding without any of them being special-cased.
+   2. A tick NEVER writes. save() marks the cloud dirty and schedules an encrypt-and-upload of the
+      whole database, so a per-second save would upload continuously. State is written on start,
+      pause, resume, finish and discard — the five moments a person actually did something. */
+
+const FOCUS_DEFAULT_MIN = 25;
+const FOCUS_KEEP_DAYS = 365;         // a year of focus history is useful and tiny; forever is not
+let _focusTimer = null;
+
+const focusRunning = () => !!(state.focus && !state.focus.pausedAt);
+/* milliseconds of actual focus so far — paused time is subtracted, not counted */
+function focusElapsed(f = state.focus, now = Date.now()) {
+  if (!f) return 0;
+  return Math.max(0, (f.pausedAt || now) - f.startedAt - (f.pausedMs || 0));
+}
+/* milliseconds left, floored at zero — a finished session sits at 0 waiting to be logged, it does
+   not run into negative numbers */
+const focusLeft = (f = state.focus, now = Date.now()) =>
+  !f ? 0 : Math.max(0, f.mins * 60000 - focusElapsed(f, now));
+const focusDone = (f = state.focus, now = Date.now()) => !!f && focusLeft(f, now) === 0;
+const mmss = (ms) => {
+  const s = Math.round(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+function startFocus(td, mins) {
+  if (state.focus) { toast(`"${state.focus.title}" is still running — finish it first`); return false; }
+  /* the title and links are SNAPSHOTTED here, not looked up later. That is what lets the task be
+     deleted (or undeleted) mid-session without the bar breaking or the log losing its meaning. */
+  state.focus = {
+    id: uid(), taskId: td ? td.id : "", title: td ? td.text : "Focus",
+    mins: clamp(parseInt(mins, 10) || FOCUS_DEFAULT_MIN, 1, 240),
+    startedAt: Date.now(), pausedAt: 0, pausedMs: 0,
+    goalId: td ? (td.linkGoalId || "") : "", projectId: td ? (td.projectId || "") : "",
+  };
+  save(); renderFocusBar(); startFocusTimer();
+  return true;
+}
+function pauseFocus() {
+  if (!state.focus || state.focus.pausedAt) return;
+  state.focus.pausedAt = Date.now();
+  save(); renderFocusBar(); startFocusTimer();
+}
+function resumeFocus() {
+  const f = state.focus;
+  if (!f || !f.pausedAt) return;
+  f.pausedMs = (f.pausedMs || 0) + (Date.now() - f.pausedAt);
+  f.pausedAt = 0;
+  save(); renderFocusBar(); startFocusTimer();
+}
+function extendFocus(mins) {
+  if (!state.focus) return;
+  state.focus.mins = clamp(state.focus.mins + mins, 1, 240);
+  state.focus.rang = false;                        // it can ring again for the new stretch
+  save(); renderFocusBar(); startFocusTimer();
+}
+/* Logged minutes are CAPPED at what was committed to. You legitimately focus with the app closed —
+   that is rather the point — but the session was a promise of N minutes, so N is the most it can
+   ever claim. An elapsed value of eight hours means the tab was left open, not that you worked. */
+function finishFocus(markDone) {
+  const f = state.focus;
+  if (!f) return null;
+  const mins = clamp(Math.round(focusElapsed(f) / 60000), 0, f.mins);
+  const t = todayIso();
+  const row = { id: f.id, taskId: f.taskId, title: f.title, mins,
+                goalId: f.goalId, projectId: f.projectId, at: new Date().toISOString() };
+  (state.focusLog[t] = state.focusLog[t] || []).push(row);
+  state.focus = null;
+  stopFocusTimer();
+  /* the same path the checkbox uses, so cross-linked habits and supplements still get ticked */
+  if (markDone && f.taskId) {
+    const td = state.todos.find(x => x.id === f.taskId);
+    if (td && !td.done) { td.done = true; syncTaskToLinks(td); }
+  }
+  save();
+  if (mins > 0) addXp(15, `${mins} min focused`);   // addXp saves and refreshes the topbar itself
+  renderFocusBar(); render();
+  return row;
+}
+function discardFocus() {
+  state.focus = null;
+  stopFocusTimer();
+  save(); renderFocusBar(); render();
+}
+const focusMinutesOn = (d) => (state.focusLog[d] || []).reduce((n, r) => n + (r.mins || 0), 0);
+const focusMinutesFor = (key, id, d = todayIso()) =>
+  !id ? 0 : (state.focusLog[d] || []).filter(r => r[key] === id).reduce((n, r) => n + (r.mins || 0), 0);
+function pruneFocusLog() {
+  const cutoff = addDays(todayIso(), -FOCUS_KEEP_DAYS);
+  Object.keys(state.focusLog || {}).forEach(d => { if (d < cutoff) delete state.focusLog[d]; });
+}
+
+/* ---- the bar ----
+   Lives outside #view (see index.html) so navigating cannot destroy a running session. It is drawn
+   by renderFocusBar() on every state change; between those, the interval below touches exactly one
+   text node. It must never call render() — replacing the whole view once a second would steal focus
+   from whatever the person is typing into. */
+function renderFocusBar() {
+  const el = $("#focusBar");
+  if (!el) return;
+  const f = state.focus;
+  if (!f) { el.hidden = true; el.innerHTML = ""; return; }
+  const done = focusDone(f), paused = !!f.pausedAt;
+  el.hidden = false;
+  el.className = "focus-bar" + (done ? " is-done" : paused ? " is-paused" : "");
+  el.innerHTML = done
+    ? `<span class="fb-time" id="focusTime">${f.mins}:00</span>
+       <span class="fb-txt"><b>Time's up</b><small>${esc(f.title)}</small></span>
+       <button class="btn ghost tiny" data-action="focus-extend">+5 min</button>
+       <button class="btn primary tiny" data-action="focus-finish">${I.check}Log it</button>
+       <button class="icon-btn ghost" data-action="focus-discard" aria-label="Discard this session">${I.x}</button>`
+    : `<span class="fb-time" id="focusTime">${mmss(focusLeft(f))}</span>
+       <span class="fb-txt"><b>${esc(f.title)}</b><small>${paused ? "Paused" : `${f.mins} min session`}</small></span>
+       <button class="btn ghost tiny" data-action="${paused ? "focus-resume" : "focus-pause"}">${paused ? "Resume" : "Pause"}</button>
+       <button class="btn primary tiny" data-action="focus-finish">Finish</button>
+       <button class="icon-btn ghost" data-action="focus-discard" aria-label="Discard this session">${I.x}</button>`;
+}
+function focusTick() {
+  const f = state.focus;
+  if (!f) { stopFocusTimer(); return; }
+  if (focusDone(f)) {
+    renderFocusBar();                 // the buttons change, so this transition needs a full redraw
+    stopFocusTimer();
+    if (!f.rang) { f.rang = true; save(); ringFocus(f); }
+    return;
+  }
+  const n = $("#focusTime");
+  if (n) n.textContent = mmss(focusLeft(f));   // one text node, no save, no render
+}
+function startFocusTimer() {
+  stopFocusTimer();
+  renderFocusBar();
+  if (focusRunning() && !focusDone()) _focusTimer = setInterval(focusTick, 1000);
+  else if (state.focus && focusDone() && !state.focus.rang) focusTick();
+}
+function stopFocusTimer() { clearInterval(_focusTimer); _focusTimer = null; }
+/* Reuses the reminder permission rather than asking for its own. If reminders are off this stays
+   silent — and the start sheet says so — because a permission prompt fired the instant someone
+   sits down to concentrate is the worst possible moment to ask. */
+function ringFocus(f) {
+  toast(`${f.mins} minutes done — ${f.title} 🌿`, "xp");
+  if (notifyPermission() === "granted") {
+    sendNudge({ key: "focus-" + f.id, title: "⏱ Focus session done",
+                body: `${f.mins} minutes on "${f.title}".`, nav: "dashboard" }).catch(() => {});
+  }
+}
+
+function openFocusStart(id) {
+  const td = state.todos.find(x => x.id === id);
+  if (!td) { toast("That task is gone"); return; }
+  const suggested = td.estMin ? clamp(td.estMin, 1, 240) : FOCUS_DEFAULT_MIN;
+  openModal(`<form data-submit="focus-start">
+    <header class="modal-head"><h3>Focus session</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="focus-task">${esc(td.text)}</p>
+      <input type="hidden" name="id" value="${td.id}">
+      <label class="fld"><span>How long?</span>
+        <select name="mins">
+          ${[15, 25, 45, 60, 90].concat(suggested).filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b)
+            .map(m => `<option value="${m}" ${m === suggested ? "selected" : ""}>${m} minutes</option>`).join("")}
+        </select></label>
+      <p class="soft note">${I.spark} The clock keeps running if you switch section, close the tab or reload — it counts real time, not screen time. At the end it stops and asks before logging anything.</p>
+      ${notifyPermission() === "granted" ? "" : `<p class="soft note">${I.bell} It can't buzz you when time is up — reminders aren't switched on. Turn them on in <b>Profile → Reminders</b> if you want the bell.</p>`}
+    </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="modal-close">Cancel</button>
+      <button type="submit" class="btn primary">${I.clock}Start</button>
+    </footer></form>`);
+}
+/* Finishing OFFERS to tick the task; it never assumes. Twenty-five minutes on something rarely
+   means the something is over, and a done list full of unfinished work is worse than no done list. */
+function openFocusFinish() {
+  const f = state.focus;
+  if (!f) return;
+  const mins = clamp(Math.round(focusElapsed(f) / 60000), 0, f.mins);
+  const td = f.taskId ? state.todos.find(x => x.id === f.taskId) : null;
+  openModal(`<form data-submit="focus-log">
+    <header class="modal-head"><h3>${focusDone(f) ? "Session complete" : "End this session"}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="focus-task">${esc(f.title)}</p>
+      <p class="focus-total"><b>${mins}</b> minute${mins === 1 ? "" : "s"} focused${mins < f.mins ? ` <small class="soft">of ${f.mins} planned</small>` : ""}</p>
+      ${td && !td.done ? `<label class="chip-check" style="display:inline-flex;margin:4px 0 8px">
+        <input type="checkbox" name="markDone"><span>…and mark the task done</span></label>` : ""}
+      ${!td && f.taskId ? `<p class="soft note">${I.spark} That task has since been deleted — the minutes are still logged against what you were doing.</p>` : ""}
+    </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn danger" data-action="focus-discard">Discard</button>
+      <button type="submit" class="btn primary">${I.check}Log it</button>
+    </footer></form>`);
 }
 
 /* The prompt the user chose over silent auto-carry: shown at most once a day, and only when there is
@@ -2557,6 +2766,10 @@ function openTaskDetail(id) {
       </label>` : ""}
       ${td.repeat ? `<p class="soft note">${I.spark} A fresh copy appears on each day it's due. Changing this affects <b>future copies</b> — days you've already ticked keep their record. Completed copies older than ${KEEP_DONE_DAYS} days are cleared automatically; one-off tasks never are.</p>` : ""}
       ${td.from ? `<p class="soft note">${I.chevL} Carried forward from ${esc(niceDate(td.from, { weekday: "long", month: "short", day: "numeric" }))}.</p>` : ""}
+      ${td.done ? "" : (state.focus && state.focus.taskId === td.id)
+        ? `<button class="btn good slim" data-action="focus-finish" style="margin-bottom:10px">${I.clock}Focusing now — ${focusDone() ? "log it" : mmss(focusLeft()) + " left"}</button>`
+        : `<button class="btn ghost slim" data-action="focus-open" data-id="${td.id}" style="margin-bottom:10px">${I.clock}Start a focus session</button>`}
+      ${focusMinutesFor("taskId", td.id) ? `<p class="soft small">${I.clock} ${focusMinutesFor("taskId", td.id)} min focused on this today.</p>` : ""}
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
     </div>`);
 }
@@ -2630,6 +2843,9 @@ function goalsCard() {
   const rows = goals.slice(0, 4).map(g => {
     const gp = goalProgress(g), pr = prio(g.priority), st = goalStatus(g);
     const dl = g.deadline ? daysLeft(g.deadline) : null;
+    /* Focus minutes are shown BESIDE the goal, never folded into its progress — a goal measured in
+       kilograms cannot absorb a number of minutes without its chart becoming nonsense. */
+    const fm = focusMinutesFor("goalId", g.id);
     return `<li class="gf-item" data-action="goal-open" data-id="${g.id}">
       <span class="gf-emoji" aria-hidden="true">${esc(g.emoji || "\u{1F3AF}")}</span>
       <span class="gf-body">
@@ -2639,6 +2855,7 @@ function goalsCard() {
           <b class="gf-pct">${gp.pct}%</b>
           <span>${g.type === "outcome" ? `${gp.cur}${g.unit ? " " + esc(g.unit) : ""} → ${g.target}${g.unit ? " " + esc(g.unit) : ""}` : `${gp.done}/${gp.tot} milestones`}</span>
           ${g.deadline ? `<span class="gf-dl">${esc(niceDate(g.deadline, { month: "short", day: "numeric" }))}${dl != null ? ` · ${dl < 0 ? `${-dl}d over` : `${dl}d left`}` : ""}</span>` : ""}
+          ${fm ? `<span class="gf-focus">${I.clock}${estLabel(fm)} today</span>` : ""}
           <span class="gf-status ${st.cls}">${esc(st.txt)}</span>
         </span>
       </span>
@@ -2682,15 +2899,26 @@ function hardTaskCard() {
   const head = cardHead("Today's hard thing");
   if (!td) return card("hard-card span2", head + `<p class="soft small">Nothing marked yet. Open a task and mark it <b>the hard one</b> — the thing you'd rather push to tomorrow.</p>`);
   const serves = taskServes(td);
+  const mins = focusMinutesFor("taskId", td.id);
+  /* If a session is already running on THIS task, the button must say so — otherwise tapping it
+     just earns the "one at a time" refusal, which reads as a broken button. */
+  const onIt = !!(state.focus && state.focus.taskId === td.id);
   return card("hard-card span2" + (td.done ? " is-done" : ""), head + `
     <div class="hard-body">
       <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle ${esc(td.text)}">${I.check}</button>
       <div class="hard-txt">
         <b>${esc(td.text)}</b>
-        <small>${[td.time ? esc(td.time) : "", estLabel(td.estMin), serves ? `${serves.emoji} ${esc(serves.name)}` : ""].filter(Boolean).join(" · ") || "no time set"}</small>
+        <small>${[td.time ? esc(td.time) : "", estLabel(td.estMin), serves ? `${serves.emoji} ${esc(serves.name)}` : "",
+                  mins ? `${estLabel(mins)} focused today` : ""].filter(Boolean).join(" · ") || "no time set"}</small>
       </div>
     </div>
-    <button class="btn primary" data-action="todo-open" data-id="${td.id}">${td.done ? I.check + "Done — open it" : "Open task"}</button>`);
+    ${td.done
+      ? `<button class="btn good" data-action="todo-open" data-id="${td.id}">${I.check}Done — open it</button>`
+      : onIt
+        ? `<button class="btn good" data-action="focus-finish">${I.clock}Focusing now — ${focusDone() ? "log it" : mmss(focusLeft()) + " left"}</button>
+           <button class="btn ghost slim" data-action="todo-open" data-id="${td.id}">Open task</button>`
+        : `<button class="btn primary" data-action="focus-open" data-id="${td.id}">${I.clock}Start focus session</button>
+           <button class="btn ghost slim" data-action="todo-open" data-id="${td.id}">Open task</button>`}`);
 }
 
 function vDashboard() {
@@ -4902,6 +5130,7 @@ function render() {
   $("#view").innerHTML = (VIEWS[currentView] || vDashboard)();
   renderNav();
   renderTopbar();
+  renderFocusBar();      // lives outside #view, but must still track the state a render reflects
   drawCharts();
   hydrateMedia();
   runMotion();
@@ -5049,6 +5278,12 @@ const ACTIONS = {
   },
   /* <details> toggles itself; this only remembers the state across the re-render a pin causes */
   "focus-more": () => { ui.showMore = !ui.showMore; },
+  "focus-open": (el) => openFocusStart(el.dataset.id),
+  "focus-pause": () => pauseFocus(),
+  "focus-resume": () => resumeFocus(),
+  "focus-extend": () => extendFocus(5),
+  "focus-finish": () => openFocusFinish(),
+  "focus-discard": () => { closeModal(); discardFocus(); toast("Session discarded — nothing logged"); },
 
   /* retire a habit without destroying it */
   "habit-archive": (el) => {
@@ -5800,6 +6035,8 @@ const SUBMITS = {
       habitId, supId, areaId, order: nextTaskOrder(), repeat: null, seriesId: "", from: "",
       priority: "med", estMin: 0, linkGoalId: "", projectId: "", focus: false, hard: false });
   },
+  "focus-start": (f) => { startFocus(state.todos.find(x => x.id === f.id), f.mins); },
+  "focus-log": (f) => { finishFocus(!!f.markDone); },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { clearAllMedia(); localStorage.removeItem(STORE_KEY); state = defaultState(); save(); setTimeout(() => maybeOnboard(), 60); },
   "data-fresh": () => {
@@ -6054,10 +6291,16 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
 /* reminders: start the local nudge loop, and re-check whenever the app comes back to the foreground.
    Coming back into view is the moment that matters — it's when the browser is guaranteed to run us. */
 startReminders();
+/* Pick up a session that was running when the page was last alive. Nothing about it lived in a
+   closure, so this is just "look at state and start counting again". */
+startFocusTimer();
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   tickReminders();
+  /* a background tab has its interval throttled to about once a minute, so the displayed time is
+     stale the moment you look at it again — re-sync from the clock rather than from the ticks */
+  startFocusTimer();
   /* the app is often left open overnight — coming back is when "today" actually changes */
   if (!loadIssue && state.tasksRolledOn !== todayIso()) { if (rollTasks()) save(); render(); maybeCarryForward(); }
 });
-window.addEventListener("focus", () => tickReminders());
+window.addEventListener("focus", () => { tickReminders(); startFocusTimer(); });
