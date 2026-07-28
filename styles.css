@@ -1656,19 +1656,27 @@ li.done .checkbox { animation: checkPop .3s ease; }
 /* ---------- drag to reorder ----------
    `touch-action: none` sits on the HANDLE and nowhere else. On the row it would swallow vertical
    swipes and the page would stop scrolling on a phone. */
+/* NO `touch-action: none` here. It looks like the right thing and it is not: it tells the browser
+   this strip never scrolls, so a thumb that lands on the handle mid-scroll gets a dead page — and
+   then a few pixels of ordinary finger wander picked the habit up instead. Scrolling stays the
+   browser's until a drag is actually armed by holding still; from then on `touchmove` is
+   preventDefault()ed in JS, which is the only thing iOS honours anyway. */
 .grip {
-  flex: 0 0 auto; width: 30px; height: 40px; display: grid; place-items: center;
-  color: var(--ink-3); opacity: .5; cursor: grab; touch-action: none;
+  flex: 0 0 auto; width: 34px; height: 44px; display: grid; place-items: center;
+  color: var(--ink-3); opacity: .5; cursor: grab;
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
 }
 .grip:hover { opacity: 1; }
 .grip:active { cursor: grabbing; }
 .grip svg { width: 16px; height: 16px; pointer-events: none; }
+/* picking something up has to be visible, or a hold that armed feels like a glitch */
 li.dragging {
   position: relative; z-index: 5; cursor: grabbing;
   background: var(--surface); border-radius: 12px;
   box-shadow: 0 16px 34px -14px rgba(0,0,0,.35);
+  transform: scale(1.02);
 }
+li.dragging .grip { opacity: 1; color: var(--brand); }
 [data-drag-list] > li { transition: transform .16s var(--ease-out); }
 [data-drag-list].is-dragging > li { transition: transform .16s var(--ease-out); }
 [data-drag-list].is-dragging > li.dragging { transition: none; }
