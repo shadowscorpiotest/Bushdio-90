@@ -1763,3 +1763,46 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 .ap-next svg { width: 12px; height: 12px; flex: none; }
 .ap-go { flex: 0 0 auto; color: var(--ink-3); display: grid; place-items: center; }
 .ap-go svg { width: 18px; height: 18px; }
+
+/* ---------- dashboard · today's timeline ----------
+   A rail with the time on the left. Items with a date but no time live under "Any time today"
+   rather than being sorted as 00:00 — putting an essay deadline before breakfast would be the app
+   inventing a fact. */
+.timeline { display: flex; flex-direction: column; position: relative; }
+.timeline::before {
+  content: ""; position: absolute; left: 57px; top: 6px; bottom: 6px; width: 2px;
+  background: var(--line); border-radius: 2px;
+}
+.tl { display: flex; align-items: center; gap: 10px; padding: 9px 2px; position: relative; cursor: pointer; }
+.tl:hover .tl-txt b { color: var(--a); }
+.tl-time {
+  flex: 0 0 46px; text-align: right; font-size: 12px; font-weight: 700;
+  color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.tl-dot {
+  flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%; z-index: 1;
+  background: var(--surface); border: 2.5px solid var(--a);
+}
+.tl.done .tl-dot { background: var(--a); }
+.tl-ic { flex: 0 0 auto; font-size: 16px; line-height: 1; }
+.tl-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tl-txt b { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-txt small { font-size: 11.5px; color: var(--ink-3); }
+.tl.done .tl-txt b { text-decoration: line-through; color: var(--ink-3); }
+.tl-done { flex: 0 0 auto; color: var(--good); display: grid; place-items: center; }
+.tl-done svg { width: 16px; height: 16px; }
+
+/* where you are in the day */
+.tl-now { display: flex; align-items: center; gap: 10px; padding: 2px 2px; }
+.tl-now .tl-time { color: var(--brand); font-weight: 800; }
+.tl-line { flex: 1; height: 2px; border-radius: 2px; background: var(--brand); position: relative; }
+.tl-line::before {
+  content: ""; position: absolute; left: -3px; top: 50%; transform: translateY(-50%);
+  width: 8px; height: 8px; border-radius: 50%; background: var(--brand);
+}
+.tl-anytime {
+  margin: 12px 0 2px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.tl-anytime + .timeline::before { display: none; }
+.tl-anytime + .timeline .tl-dot { border-style: dashed; }
