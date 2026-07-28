@@ -106,6 +106,7 @@ const I = (() => {
     calendar:  w('<rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M16 2.5v4M8 2.5v4M3 10h18"/>'),
     medal:     w('<circle cx="12" cy="8.5" r="5.5"/><path d="m8.8 13.2-1.7 7.3 4.9-2.9 4.9 2.9-1.7-7.3"/>'),
     activity:  w('<path d="M22 12h-3.5l-3 8-7-16-3 8H2"/>'),
+    grip:      w('<path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" stroke-width="2.6" stroke-linecap="round"/>'),
     clock:     w('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.4 2"/>'),
     sliders:   w('<path d="M4.5 21v-6.5M4.5 10V3M12 21V11.5M12 7.5V3M19.5 21v-4.5M19.5 12V3M2 14.5h5M9.5 7.5h5M17 16.5h5"/>'),
     menu:      w('<path d="M4 7h16M4 12h16M4 17h16"/>'),
@@ -2746,15 +2747,12 @@ function taskRow(td, i, total, opts) {
   ].join("");
   /* i/total are passed only from the ordered "to do" list — the done drawer has nothing to reorder */
   const canMove = typeof i === "number" && total > 1;
-  return `<li class="todo ${td.done ? "done" : ""}">
+  return `<li class="todo ${td.done ? "done" : ""}" data-row-id="${td.id}">
     <span class="todo-time">${td.time || ""}</span>
     <button class="checkbox" data-action="todo-toggle" data-id="${td.id}" aria-label="Toggle task">${I.check}</button>
     <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${link || marks ? `<span class="task-marks">${link}${marks}</span>` : ""}</span>
     ${o.pin && !td.done ? `<button class="icon-btn ghost pin ${td.focus ? "on" : ""}" data-action="task-pin" data-id="${td.id}" aria-pressed="${td.focus ? "true" : "false"}" aria-label="${td.focus ? "Unpin from today's focus" : "Pin to today's focus"}">${I.target}</button>` : ""}
-    ${canMove ? `<span class="reorder">
-      <button class="icon-btn ghost" data-action="task-up" data-id="${td.id}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.chevL}</button>
-      <button class="icon-btn ghost" data-action="task-down" data-id="${td.id}" aria-label="Move down" ${i === total - 1 ? "disabled" : ""}>${I.chevR}</button>
-    </span>` : ""}
+    ${canMove ? `<span class="grip" data-drag="${td.id}" aria-hidden="true" title="Drag to reorder">${I.grip}</span>` : ""}
     <button class="icon-btn ghost" data-action="todo-open" data-id="${td.id}" aria-label="Edit task">${I.chevR}</button>
   </li>`;
 }
@@ -2809,6 +2807,12 @@ function openTaskDetail(id) {
         ? `<button class="btn good slim" data-action="focus-finish" style="margin-bottom:10px">${I.clock}Focusing now — ${focusDone() ? "log it" : mmss(focusLeft()) + " left"}</button>`
         : `<button class="btn ghost slim" data-action="focus-open" data-id="${td.id}" style="margin-bottom:10px">${I.clock}Start a focus session</button>`}
       ${focusMinutesFor("taskId", td.id) ? `<p class="soft small">${I.clock} ${focusMinutesFor("taskId", td.id)} min focused on this today.</p>` : ""}
+      <label class="fld"><span>Order</span>
+        <span class="pill-row">
+          <button type="button" class="btn ghost slim" data-action="task-up" data-id="${td.id}">${I.chevL}Earlier</button>
+          <button type="button" class="btn ghost slim" data-action="task-down" data-id="${td.id}">Later${I.chevR}</button>
+        </span></label>
+      <p class="soft note">${I.grip} On the list you can drag a task by its handle. These buttons do the same thing — drag needs a pointer, so they stay for keyboards and anyone who'd rather not.</p>
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
     </div>`);
 }
@@ -3009,9 +3013,9 @@ function focusCard(uniDue, undone, done, stranded) {
       <span class="row-txt" data-nav="university"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.course || "University")}</span> · due ${daysUntil(k.due)}</small></span>
     </li>`);
   const body = (uni.length + rows.length)
-    ? `<ul class="todo-list">${uni.join("")}${rows.join("")}</ul>`
+    ? `${uni.length ? `<ul class="todo-list">${uni.join("")}</ul>` : ""}${rows.length ? `<ul class="todo-list" data-drag-list="todos">${rows.join("")}</ul>` : ""}`
     : `<p class="soft small" style="padding:6px 2px">Nothing chosen yet — add the first thing below \u{1F33F}</p>`;
-  return card("focus-card span2", cardHead(`Today's focus <small class="soft">${shown.length}/${FOCUS_MAX} chosen</small>`) + body +
+  return card("focus-card span2", cardHead(`Today's focus <small class="soft">${picked.length ? `${picked.length} of ${FOCUS_MAX} chosen` : shown.length ? "picked for you" : "nothing yet"}</small>`) + body +
     (filled.length ? `<p class="soft small">${I.spark} ${filled.length === shown.length ? "These were" : `${filled.length} of these were`} picked for you by priority — tap ${I.target} on any task to choose your own.</p>` : "") +
     taskAddForm() +
     `<p class="soft note">${I.spark} Name a task after a habit, supplement or area ("Take Vitamin D3", "Pay yoga tuition") and it auto-links. Priority, duration, the goal it serves and <b>repeat</b> all live in the task's detail sheet.</p>` +
@@ -3142,9 +3146,10 @@ function habitRow(h, d, i, total) {
     /* fed by another area — the number is derived, so tapping goes there instead of editing here */
     const amt = habitAmount(h, d);
     control = `<button class="checkbox ${met ? "" : ""}" data-action="habit-source-jump" data-id="${h.id}" aria-label="Open ${esc(areaOf(src.area).name)}">${I.check}</button>`;
+    /* "10 pages of 10 pages · from Reading" said pages twice and cost three lines on a phone */
     sub = h.type === "quantity"
-      ? `${amt}${h.unit ? " " + h.unit : ""} of ${h.target}${h.unit ? " " + h.unit : ""} · from ${areaOf(src.area).name} · ${streak}🔥`
-      : `${met ? "Done" : "Not yet"} · from ${areaOf(src.area).name} · ${streak}🔥`;
+      ? `${amt} / ${h.target}${h.unit ? " " + h.unit : ""} · ${areaOf(src.area).name} · ${streak}🔥`
+      : `${met ? "Done" : "Not yet"} · ${areaOf(src.area).name} · ${streak}🔥`;
   } else if (h.type === "avoid") {
     control = `<button class="checkbox avoid ${e.slip ? "slip" : "kept"}" data-action="habit-toggle" data-id="${h.id}" aria-label="${e.slip ? "Slipped" : "Kept"}">${e.slip ? I.x : I.check}</button>`;
     sub = `${streak} days clean${e.slip ? " · slipped" : ""}`;
@@ -3160,21 +3165,27 @@ function habitRow(h, d, i, total) {
      e.amount is permanently 0 for it and the bar rendered at 0% while the text beside it read
      "10 of 10". The text was right; the bar was reading the wrong field. */
   const quantBar = h.type === "quantity" ? barHtml(100 * habitAmount(h, d) / (h.target || 1), col) : "";
-  const incBtn = h.type === "quantity" ? `<button class="btn tiny ghost" data-action="habit-inc" data-id="${h.id}">+${habitStep(h)}</button>` : "";
+  const incBtn = h.type === "quantity" ? `<button class="btn tiny ghost inc" data-action="habit-inc" data-id="${h.id}" aria-label="Add ${habitStep(h)}${h.unit ? " " + esc(h.unit) : ""}">+${habitStep(h)}</button>` : "";
   const canMove = typeof i === "number" && total > 1;
-  return `<li class="habit-li ${met ? "done" : ""}" style="--hc:${cssVar(col, "#6a5ae0")}">
+  /* The whole text block is the primary action now, not just the small checkbox — ticking a habit
+     was three or four taps' worth of aiming on a phone. `avoid` habits keep their explicit button:
+     tapping a row is not how anyone should confess a slip. */
+  const rowAct = h.kind === "workout" ? "habit-workout-jump"
+    : src ? "habit-source-jump"
+    : h.type === "avoid" ? "habit-open"
+    : "habit-toggle";
+  return `<li class="habit-li ${met ? "done" : ""}" style="--hc:${cssVar(col, "#6a5ae0")}" data-row-id="${h.id}">
     ${control}
-    <button class="row-emoji as-btn" data-action="habit-open" data-id="${h.id}" aria-label="Open ${esc(h.name)}">${esc(h.emoji)}</button>
-    <span class="row-txt open" data-action="habit-open" data-id="${h.id}">
-      <b>${esc(h.name)}${h.kind === "workout" ? ` <span class="mini-badge">${I.dumbbell}</span>` : ""}</b>
-      <small>${sub}${e.note ? " · noted" : ""}</small>${quantBar}
+    <span class="row-txt hit" data-action="${rowAct}" data-id="${h.id}" role="button" tabindex="0">
+      <span class="row-emoji" aria-hidden="true">${esc(h.emoji)}</span>
+      <span class="hit-txt">
+        <b>${esc(h.name)}${h.kind === "workout" ? ` <span class="mini-badge">${I.dumbbell}</span>` : ""}</b>
+        <small>${sub}${e.note ? " · noted" : ""}</small>${quantBar}
+      </span>
     </span>
     ${incBtn}
-    ${canMove ? `<span class="reorder">
-      <button class="icon-btn ghost" data-action="habit-up" data-id="${h.id}" aria-label="Move up" ${i === 0 ? "disabled" : ""}>${I.chevL}</button>
-      <button class="icon-btn ghost" data-action="habit-down" data-id="${h.id}" aria-label="Move down" ${i === total - 1 ? "disabled" : ""}>${I.chevR}</button>
-    </span>` : ""}
-    <button class="icon-btn ghost" data-action="habit-open" data-id="${h.id}" aria-label="Details">${I.chevR}</button>
+    ${canMove ? `<span class="grip" data-drag="${h.id}" aria-hidden="true" title="Drag to reorder">${I.grip}</span>` : ""}
+    <button class="icon-btn ghost" data-action="habit-open" data-id="${h.id}" aria-label="Details for ${esc(h.name)}">${I.chevR}</button>
   </li>`;
 }
 function habitHistoryRow(h) {
@@ -3192,7 +3203,7 @@ function dueByGroup(due, d) {
   const empty = `<p class="soft small" style="padding:8px 4px">Nothing scheduled for this day — enjoy the rest \u{1F324}\uFE0F</p>`;
   if (!due.length) return empty;
   const groups = groupsAll().filter(g => due.some(h => (h.groupId || "") === g.id));
-  if (!groups.length) return `<ul class="check-list habit-list">${due.map((h, i) => habitRow(h, d, i, due.length)).join("")}</ul>`;
+  if (!groups.length) return `<ul class="check-list habit-list" data-drag-list="habits">${due.map((h, i) => habitRow(h, d, i, due.length)).join("")}</ul>`;
   const loose = due.filter(h => !groupById(h.groupId));
   const block = (g, list) => {
     const gp = { due: list.length, done: list.filter(h => habitMet(h, d)).length };
@@ -3206,7 +3217,7 @@ function dueByGroup(due, d) {
         </span>
         ${day ? `<span class="hgroup-day">${day.pct}%</span>` : ""}
       </div>
-      <ul class="check-list habit-list">${list.map((h, i) => habitRow(h, d, i, list.length)).join("")}</ul>
+      <ul class="check-list habit-list" data-drag-list="habits">${list.map((h, i) => habitRow(h, d, i, list.length)).join("")}</ul>
     </div>`;
   };
   return groups.map(g => block(g, due.filter(h => h.groupId === g.id))).join("")
@@ -3392,6 +3403,12 @@ function openHabitDetail(id) {
       <label class="fld"><span>What did you do? · ${niceDate(d, { month: "short", day: "numeric" })}</span>
         <textarea data-change="habit-note" data-id="${h.id}" placeholder="A line about how it went…" maxlength="600">${esc(e.note || "")}</textarea></label>
       <div class="fld"><span>Last 4 weeks · ${habitCompletion(h, 30)}% completion</span>${habitHistoryRow(h)}</div>
+      <label class="fld"><span>Order in the list</span>
+        <span class="pill-row">
+          <button type="button" class="btn ghost slim" data-action="habit-up" data-id="${h.id}">${I.chevL}Earlier</button>
+          <button type="button" class="btn ghost slim" data-action="habit-down" data-id="${h.id}">Later${I.chevR}</button>
+        </span></label>
+      <p class="soft note">${I.grip} On the list you can drag a habit by its handle. These do the same thing — drag needs a pointer, so they stay for keyboards.</p>
       ${(() => {
         const src = habitSource(h);
         if (!src) return `<p class="soft note">${I.link} Not linked to an area — you tick this one by hand. Add a source in <b>Edit</b> to have it fill itself in.</p>`;
@@ -6437,8 +6454,101 @@ const CHANGES = {
 };
 
 /* ================= events ================= */
+/* ================= drag to reorder =================
+   One implementation on Pointer Events, so touch and mouse share a path — no library, no build step.
+
+   Three things this has to get right, all of them learned the hard way by every drag list ever:
+
+   1. `touch-action: none` goes on the HANDLE, never the row. On the row it would swallow vertical
+      swipes and the page would stop scrolling on a phone.
+   2. A drag ends in a `click`. Without suppressing it, letting go of a task row opens its detail
+      sheet every single time. Anything past the threshold sets a flag the click listener honours.
+   3. Under the threshold it is still a TAP, and must behave like one — otherwise "hold to drag"
+      quietly eats the fast way to tick a habit.
+
+   Reordering also stays reachable from each item's detail sheet, because you cannot drag with a
+   keyboard and this must not be the only way. */
+
+const DRAG_SLOP = 6;            // px of movement before it counts as a drag rather than a tap
+let _drag = null;
+let _dragSuppressClick = false;
+
+function dragList(el) { return el ? el.closest("[data-drag-list]") : null; }
+
+function onDragStart(e) {
+  if (e.button != null && e.button !== 0) return;             // right-click / middle-click never drags
+  const handle = e.target.closest("[data-drag]");
+  if (!handle) return;
+  const row = handle.closest("li");
+  const list = dragList(row);
+  if (!row || !list) return;
+  const rows = [...list.querySelectorAll(":scope > li")];
+  if (rows.length < 2) return;
+  _drag = {
+    list, row, kind: list.dataset.dragList, id: handle.dataset.drag,
+    rows, from: rows.indexOf(row), to: rows.indexOf(row),
+    startY: e.clientY, h: row.getBoundingClientRect().height, moved: false, pid: e.pointerId,
+  };
+  handle.setPointerCapture(e.pointerId);
+  row.classList.add("dragging");
+  list.classList.add("is-dragging");
+}
+function onDragMove(e) {
+  const g = _drag;
+  if (!g || e.pointerId !== g.pid) return;
+  const dy = e.clientY - g.startY;
+  if (!g.moved && Math.abs(dy) < DRAG_SLOP) return;           // still a tap until proven otherwise
+  g.moved = true;
+  e.preventDefault();
+  g.row.style.transform = `translateY(${dy}px)`;
+  /* which slot are we over? measured in whole rows, so the list can have any row height */
+  const to = clamp(g.from + Math.round(dy / g.h), 0, g.rows.length - 1);
+  if (to !== g.to) {
+    g.to = to;
+    g.rows.forEach((r, i) => {
+      if (r === g.row) return;
+      /* everything between the origin and the target slides one row out of the way */
+      const shift = (i > g.from && i <= to) ? -g.h : (i < g.from && i >= to) ? g.h : 0;
+      r.style.transform = shift ? `translateY(${shift}px)` : "";
+    });
+  }
+}
+function onDragEnd(e) {
+  const g = _drag;
+  if (!g || (e && e.pointerId !== g.pid)) return;
+  _drag = null;
+  g.rows.forEach(r => { r.style.transform = ""; });
+  g.row.classList.remove("dragging");
+  g.list.classList.remove("is-dragging");
+  if (!g.moved) return;                                      // a tap: let the click through
+  /* A drag: swallow the click it produces. The flag must NOT stay armed — a drag whose pointerup
+     lands somewhere that yields no click would otherwise poison the next legitimate tap, anywhere
+     in the app. The synthetic click fires before this timeout, so one turn of the loop is exactly
+     the right window. */
+  _dragSuppressClick = true;
+  setTimeout(() => { _dragSuppressClick = false; }, 0);
+  if (g.to !== g.from) commitDrag(g.kind, g.rows.map(r => r.dataset.rowId), g.from, g.to);
+}
+/* Write the new sequence into the same `order` field the arrows use, so both paths agree. */
+function commitDrag(kind, ids, from, to) {
+  const moved = ids.splice(from, 1)[0];
+  ids.splice(to, 0, moved);
+  const arr = kind === "habits" ? state.habits : state.todos;
+  ids.forEach((id, i) => { const it = arr.find(x => x.id === id); if (it) it.order = i; });
+  save(); render();
+}
+function bindDrag() {
+  document.addEventListener("pointerdown", onDragStart);
+  document.addEventListener("pointermove", onDragMove, { passive: false });
+  document.addEventListener("pointerup", onDragEnd);
+  document.addEventListener("pointercancel", onDragEnd);
+}
+
 function bindEvents() {
   document.addEventListener("click", (e) => {
+    /* a finished drag still fires a click on the row it dropped — without this, letting go of a
+       task would open its detail sheet every time */
+    if (_dragSuppressClick) { _dragSuppressClick = false; e.preventDefault(); e.stopPropagation(); return; }
     const act = e.target.closest("[data-action]");
     if (act && ACTIONS[act.dataset.action]) { ACTIONS[act.dataset.action](act); return; }
     const nav = e.target.closest("[data-nav]");
@@ -6494,6 +6604,7 @@ applyTheme();
 /* a notification tap can open us cold at #habits — honour it before the first paint */
 { const h = (location.hash || "").replace(/^#/, ""); if (h && VIEWS[h]) currentView = h; }
 bindEvents();
+bindDrag();
 bindTip();
 render();
 showLoadIssue();
