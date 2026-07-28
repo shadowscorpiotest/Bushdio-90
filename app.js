@@ -163,7 +163,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 14;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 15;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -194,6 +194,9 @@ function defaultState() {
        happened to each of them. Both keyed by "type:id" refs — see the OBJECTS registry. */
     links: [],                 // {id,from,to,rel,at}
     history: {},               // {"type:id": [{at,what}]}
+    /* Your own schedule. `source` is "" for anything you typed; it exists from day one so a calendar
+       import could be told apart later without another migration. */
+    events: [],                // {id,title,date,time,mins,category,icon,note,source,created,updated}
     todos: [],                 // {id,text,done,date,time,order,repeat,seriesId,from,
                                //  priority,estMin,linkGoalId,projectId,focus,hard}
     tasksRolledOn: "",         // last date rollTasks() ran — synced so one device answering settles it
@@ -615,6 +618,11 @@ const MIGRATIONS = [
   (s) => {
     (s.projects || []).forEach(p => { if (p.nextMilestone == null) p.nextMilestone = ""; });
   },
+
+  /* 14 → 15 · calendar events. The Bible names them a core object, and the dashboard's Timeline
+     needs somewhere for the things that are not a task, a meal, a workout or a habit — a lecture, a
+     meeting, a train. Starts empty; `source` distinguishes hand-entered from imported. */
+  (s) => { if (!Array.isArray(s.events)) s.events = []; },
 ];
 
 function migrate(s) {
@@ -1735,6 +1743,7 @@ const OBJECTS = {
   txn:     { label: "Money",   list: () => state.finance.entries,  title: o => o.note || o.category, emoji: () => "\u{1F4B6}", open: "" },
   uni:     { label: "Coursework", list: () => state.university.tasks, title: o => o.title, emoji: () => "\u{1F3DB}\uFE0F", open: "" },
   work:    { label: "Career",  list: () => state.work.items,       title: o => o.title, emoji: () => "\u{1F4BC}",           open: "" },
+  event:   { label: "Event",   list: () => state.events,           title: o => o.title, emoji: o => o.icon || "\u{1F4C5}", open: "event-open" },
 };
 const ref = (type, id) => `${type}:${id}`;
 const parseRef = (r) => { const i = String(r || "").indexOf(":"); return i < 0 ? null : { type: r.slice(0, i), id: r.slice(i + 1) }; };
@@ -2535,6 +2544,108 @@ function greeting() {
 }
 
 /* ---------- Today (OS home) ---------- */
+/* ================= 5 · Today's Timeline =================
+   The Bible asks for one ordered view of the day. Nothing new has to be entered for it: five of the
+   six sources already carry a time and were simply never read together.
+
+   The one honest complication is items with a DATE but no TIME — a coursework deadline is due
+   "today", not "today at 14:00". Those are collected separately and shown under "Any time today"
+   rather than being given a slot they don't have. Sorting them as 00:00 would put your essay before
+   breakfast, which is a lie the app would be telling on your behalf. */
+
+const EV_CATS = ["Class", "Meeting", "Personal", "Travel", "Health", "Other"];
+const CAT_ICON = { Class: "\u{1F393}", Meeting: "\u{1F91D}", Personal: "\u{1F331}",
+                   Travel: "\u{1F686}", Health: "\u2764\uFE0F", Other: "\u{1F4C5}" };
+const eventsOn = (d) => (state.events || []).filter(e => e.date === d);
+const hhmm = (t) => /^\d{2}:\d{2}$/.test(t || "") ? t : "";
+
+function timelineOn(d) {
+  const timed = [], anytime = [];
+  const add = (row) => (row.time ? timed : anytime).push(row);
+
+  eventsOn(d).forEach(e => add({ kind: "event", id: e.id, time: hhmm(e.time), title: e.title,
+    sub: e.category || "Event", icon: e.icon || CAT_ICON[e.category] || "\u{1F4C5}", hue: "#8e4ec6",
+    mins: e.mins || 0, action: "event-open" }));
+
+  /* Only TIMED tasks. An untimed task is already sitting in Today's Focus three cards up, and the
+     Bible is explicit that duplicated information is a cost, not a courtesy. Giving it a slot here
+     would say it happens at a particular hour, which is the one thing we know it doesn't. */
+  tasksOn(d).filter(td => hhmm(td.time)).forEach(td => add({ kind: "task", id: td.id, time: td.time,
+    title: td.text, sub: "task", icon: "\u2713", hue: "#3e63dd", done: td.done, action: "todo-open" }));
+
+  (state.nutrition.meals || []).filter(m => hhmm(m.time)).forEach(m => add({ kind: "meal", id: m.id,
+    time: m.time, title: m.name || m.slot, sub: m.slot || "meal", icon: "\u{1F37D}\uFE0F", hue: "#30a46c",
+    done: !!(state.nutrition.log[d] || {})[m.id], nav: "nutrition" }));
+
+  /* a plan item is scheduled by weekday, so "is it on today" is a cadence question, not a date one */
+  (state.workout.plan || []).filter(pl => hhmm(pl.time) && (pl.days || []).includes(WEEKDAY_MON0(d)))
+    .forEach(pl => add({ kind: "workout", id: pl.id, time: pl.time, title: pl.name,
+      sub: pl.category || "workout", icon: pl.emoji || "\u{1F3CB}\uFE0F", hue: "#f76b15",
+      done: (state.workout.log[d] || []).length > 0, nav: "workout" }));
+
+  liveHabits().filter(h => hhmm(h.remindAt) && isScheduled(h, d) && !isSkipped(h, d))
+    .forEach(h => add({ kind: "habit", id: h.id, time: h.remindAt, title: h.name, sub: "habit",
+      icon: h.emoji || "\u2705", hue: h.color || "#6a5ae0", done: habitMet(h, d), action: "ag-habit" }));
+
+  /* date but no time — never given a slot */
+  (state.university.tasks || []).filter(k => !k.done && k.due === d)
+    .forEach(k => anytime.push({ kind: "uni", id: k.id, time: "", title: k.title,
+      sub: k.course || "coursework", icon: "\u{1F3DB}\uFE0F", hue: "#3e63dd", nav: "university" }));
+
+  timed.sort((a, b) => a.time.localeCompare(b.time) || String(a.title).localeCompare(String(b.title)));
+  return { timed, anytime };
+}
+
+function timelineCard(d) {
+  const { timed, anytime } = timelineOn(d);
+  const isToday = d === todayIso();
+  const now = new Date().toTimeString().slice(0, 5);
+  const head = cardHead("Today's timeline", `<button class="btn ghost tiny" data-action="event-add">${I.plus}Add</button>`);
+  if (!timed.length && !anytime.length) {
+    return card("span2 timeline-card", head +
+      `<p class="soft small">Nothing scheduled today. That is a rest day, not a broken page \u{1F324}\uFE0F</p>` +
+      `<p class="soft note">${I.spark} Times come from your own tasks, meals, workout plan and habit reminders \u2014 add an event for anything else.</p>`);
+  }
+  /* the "now" line goes between the last item that has passed and the next that hasn't */
+  const nextIdx = isToday ? timed.findIndex(r => r.time > now) : -1;
+  const row = (r) => `<li class="tl ${r.done ? "done" : ""}" style="--a:${cssVar(r.hue)}"
+      ${r.action ? `data-action="${r.action}" data-id="${r.id}"` : r.nav ? `data-nav="${r.nav}"` : ""}>
+    <span class="tl-time">${r.time ? esc(r.time) : "\u2014"}</span>
+    <span class="tl-dot" aria-hidden="true"></span>
+    <span class="tl-ic" aria-hidden="true">${esc(r.icon)}</span>
+    <span class="tl-txt"><b>${esc(r.title)}</b><small>${esc(r.sub)}${r.mins ? ` \u00b7 ${estLabel(r.mins)}` : ""}</small></span>
+    ${r.done ? `<span class="tl-done" aria-label="done">${I.check}</span>` : ""}
+  </li>`;
+  const nowLine = `<li class="tl-now" aria-hidden="true"><span class="tl-time">${esc(now)}</span><span class="tl-line"></span></li>`;
+  const rows = timed.map((r, i) => (i === nextIdx ? nowLine : "") + row(r)).join("")
+    + (isToday && nextIdx === -1 && timed.length ? nowLine : "");
+  return card("span2 timeline-card", head +
+    (rows ? `<ul class="timeline">${rows}</ul>` : "") +
+    (anytime.length ? `<p class="tl-anytime">Any time today</p><ul class="timeline">${anytime.map(row).join("")}</ul>` : "") +
+    `<p class="soft note">${I.spark} This is your own schedule \u2014 LifeHub does not sync with Google or Apple Calendar. That needs a sign-in and a server, and this app deliberately has neither.</p>`);
+}
+
+function openEventDetail(id) {
+  const e = (state.events || []).find(x => x.id === id);
+  if (!e) { closeModal(); return; }
+  openModal(`<header class="modal-head"><h3>${esc(e.icon || CAT_ICON[e.category] || "\u{1F4C5}")} ${esc(e.title)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="soft small">${esc(niceDate(e.date, { weekday: "long", month: "long", day: "numeric" }))}${e.time ? ` \u00b7 ${esc(e.time)}` : " \u00b7 any time"}${e.mins ? ` \u00b7 ${estLabel(e.mins)}` : ""}</p>
+      ${e.category ? `<p class="soft small">${esc(e.category)}</p>` : ""}
+      ${e.note ? `<p class="habit-why">${esc(e.note)}</p>` : ""}
+      ${relatedCard("event", e.id)}
+      ${historyCard("event", e.id)}
+      <div class="pill-row"><button class="btn ghost" data-action="event-edit" data-id="${e.id}">${I.edit}Edit</button><button class="btn danger" data-action="event-del" data-id="${e.id}">${I.trash}Delete</button></div>
+    </div>`);
+}
+function eventFormFields(e) {
+  e = e || {};
+  return fld("What is it?", txt("title", "e.g. Statistics lecture", e.title || "")) +
+    `<div class="fld-row">${fld("Date", `<input type="date" name="date" value="${esc(e.date || todayIso())}" required>`)}${fld("Time <small class=\"soft\">— leave blank for any time</small>", `<input type="time" name="time" value="${esc(e.time || "")}">`)}</div>` +
+    `<div class="fld-row">${fld("How long? (minutes)", num("mins", e.mins || 0, 0))}${fld("Category", `<select name="category">${EV_CATS.map(c => `<option ${e.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>`)}</div>` +
+    fld("Note", `<textarea name="note" maxlength="400" placeholder="Room, who's there, what to bring…">${esc(e.note || "")}</textarea>`);
+}
+
 /* todayAgenda() and agendaRow() lived here: the old Today page's flat list of everything due.
    That page merged into the Dashboard long ago and nothing has called either since — they were dead
    code. The Bible asks for a TIMELINE in that slot instead, which is a different thing: ordered by
@@ -3394,7 +3505,7 @@ function vDashboard() {
     ${focusCard(uniDue, undone, done, stranded)}
     ${hardTaskCard()}
 
-    ${/* 5 · Timeline lands here in B2 */ ""}
+    ${timelineCard(t)}
     ${habitsTodayCard(t)}
     ${currentlyReadingCard()}
     ${supplementsDueCard()}
@@ -5943,6 +6054,10 @@ const ACTIONS = {
   "ms-del": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.milestones = h.milestones.filter(x => x.id !== el.dataset.m); save(); render(); openHabitDetail(h.id); } },
 
   /* goals */
+  "event-add": () => formModal("New event", eventFormFields(), "event-add"),
+  "event-open": (el) => openEventDetail(el.dataset.id),
+  "event-edit": (el) => { const e = (state.events || []).find(x => x.id === el.dataset.id); if (e) formModal("Edit event", eventFormFields(e) + `<input type="hidden" name="id" value="${e.id}">`, "event-edit"); },
+  "event-del": (el) => { closeModal(); deleteWithUndo(() => state.events, el.dataset.id, "Event deleted"); },
   "link-add": (el) => openLinkPicker(el.dataset.type, el.dataset.id),
   "link-del": (el) => {
     const l = (state.links || []).find(x => x.id === el.dataset.lid);
@@ -6499,6 +6614,26 @@ const SUBMITS = {
   "habit-add": (f) => { state.habits.push(born({ id: uid(), name: f.name, emoji: f.emoji || "✅", type: f.type || "build", target: +f.target || 0, unit: f.unit || "", why: f.why || "", color: f.color || "#6a5ae0", cadence: parseCadence(f), kind: HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : "", groupId: groupById(f.groupId) ? f.groupId : "", remindAt: f.remindAt || "", goalIds: [], milestones: [], log: {}, archived: false, archivedOn: "", order: nextHabitOrder() })); touch("habit", state.habits[state.habits.length - 1].id, "Habit created"); },
   "habit-edit": (f) => { const h = state.habits.find(x => x.id === f.id); if (h) { h.name = f.name; h.emoji = f.emoji || h.emoji; h.type = f.type || "build"; h.target = +f.target || 0; h.unit = f.unit || ""; h.why = f.why || ""; h.color = f.color || h.color; h.cadence = parseCadence(f); h.kind = HABIT_SOURCES.some(x => x.id === f.kind) ? f.kind : ""; h.groupId = groupById(f.groupId) ? f.groupId : ""; h.remindAt = f.remindAt || ""; syncPushSchedule(); } },
   "ms-add": (f) => { const h = state.habits.find(x => x.id === f.hid); if (h) h.milestones.push({ id: uid(), text: f.text, done: false }); },
+  "event-add": (f) => {
+    if (!f.title) return;
+    const e = born({ id: uid(), title: f.title.slice(0, 120), date: f.date || todayIso(),
+      time: /^\d{2}:\d{2}$/.test(f.time || "") ? f.time : "", mins: clamp(+f.mins || 0, 0, 1440),
+      category: EV_CATS.includes(f.category) ? f.category : "Other",
+      icon: CAT_ICON[f.category] || "\u{1F4C5}", note: (f.note || "").slice(0, 400),
+      /* "" means you typed it. A calendar import would stamp its own source here. */
+      source: "" });
+    (state.events = state.events || []).push(e);
+    touch("event", e.id, "Event created");
+  },
+  "event-edit": (f) => {
+    const e = (state.events || []).find(x => x.id === f.id); if (!e || !f.title) return;
+    e.title = f.title.slice(0, 120); e.date = f.date || e.date;
+    e.time = /^\d{2}:\d{2}$/.test(f.time || "") ? f.time : "";
+    e.mins = clamp(+f.mins || 0, 0, 1440);
+    if (EV_CATS.includes(f.category)) { e.category = f.category; e.icon = CAT_ICON[f.category]; }
+    e.note = (f.note || "").slice(0, 400);
+    touch("event", e.id, "Updated");
+  },
   "link-add": (f) => {
     const l = addLink(f.from, f.to, (f.rel || "").trim() || "related");
     if (!l) { toast("Already linked"); return; }
