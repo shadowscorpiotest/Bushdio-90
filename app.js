@@ -185,11 +185,9 @@ const AREAS = [
   { id: "health",     name: "Health",             icon: "heart",     hue: "#e5484d" },
   { id: "workout",    name: "Workout",            icon: "dumbbell",  hue: "#f76b15" },
   { id: "nutrition",  name: "Nutrition",          icon: "apple",     hue: "#30a46c" },
-  { id: "skills",     name: "Skills & Education", icon: "gradcap",   hue: "#8e4ec6" },
+  { id: "learning",   name: "Learning",           icon: "gradcap",   hue: "#8e4ec6" },
   { id: "reading",    name: "Reading",            icon: "book",      hue: "#0091ff" },
   { id: "media",      name: "Movies & Series",    icon: "film",      hue: "#d6409f" },
-  { id: "university", name: "University",         icon: "building",  hue: "#3e63dd" },
-  { id: "work",       name: "Work Preparation",   icon: "briefcase", hue: "#ad6f2d" },
   { id: "projects",   name: "Projects",           icon: "rocket",    hue: "#12a594" },
   { id: "finance",    name: "Finance",            icon: "wallet",    hue: "#2f9e6f" },
   { id: "social",     name: "Social",             icon: "users",     hue: "#e93d82" },
@@ -205,7 +203,7 @@ const NAV_GROUPS = [
     { id: "progress",  name: "Progress",  icon: "chart" },
   ]},
   { label: "Daily", items: ["habits", "health", "workout", "nutrition", "journal"].map(areaOf) },
-  { label: "Growth", items: ["skills", "reading", "university", "work", "projects"].map(areaOf) },
+  { label: "Growth", items: ["learning", "reading", "projects"].map(areaOf) },
   { label: "Life", items: ["finance", "media", "social", "memories"].map(areaOf) },
   { label: "System", items: [
     { id: "integrations", name: "Integrations", icon: "zap" },
@@ -216,7 +214,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 20;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 21;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -268,7 +266,11 @@ function defaultState() {
        {id,name,emoji,category,level,target,status,why,pbUnit,media:[],notes:[],log:[],created,updated} */
     workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [], skills: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
     nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70, fiber: 30 }, meals: [], log: {}, photos: {}, supplements: [], supTaken: {}, shopping: [] },
-    skills: { monthlyHours: 10, courses: [] },
+    /* learning: Skills & Education + University + Work Preparation, merged (schema 21)
+       courses {id,name,emoji,kind,category,institution,instructor,start,targetEnd,credits,grade,
+                gradeMax,progress,link,notes}
+       tasks   {id,title,kind:"university"|"career",tag,due,done} */
+    learning: { monthlyHours: 10, weeklyHours: 20, courses: [], tasks: [] },
     study: { log: {} },        // log[date]={skills:mins, university:mins} — ONE ledger, split by source
     reflections: {},           // {date: text}
     reading: { yearlyGoal: 12, books: [], log: {} },
@@ -345,10 +347,14 @@ function seedState(s) {
     { id: uid(), name: "Iron",       emoji: "🩸", dose: "18 mg",   every: "week" },
     { id: uid(), name: "Vitamin B12", emoji: "💊", dose: "1000 mcg", every: "month" },
   ];
-  s.skills.courses = [
-    { id: uid(), name: "Python for Beginners", progress: 60 },
-    { id: uid(), name: "UI/UX Design",         progress: 40 },
-    { id: uid(), name: "Digital Marketing",    progress: 20 },
+  const C = (o) => Object.assign({ id: uid(), emoji: "📘", kind: "self", category: "", institution: "",
+    instructor: "", start: "", targetEnd: "", credits: 0, grade: null, gradeMax: 20,
+    progress: 0, link: "", notes: "" }, o);
+  s.learning.courses = [
+    C({ name: "Python for Beginners", emoji: "🐍", progress: 60, category: "Programming", institution: "Coursera" }),
+    C({ name: "Linear Algebra", emoji: "📐", kind: "university", progress: 45, institution: "University",
+       instructor: "Dr. Ahmadi", credits: 3, grade: 17.5, gradeMax: 20 }),
+    C({ name: "UI/UX Design", emoji: "🎨", progress: 40, category: "Design" }),
   ];
   s.reading.books = [
     { id: uid(), title: "Atomic Habits", author: "James Clear", emoji: "⚛️", status: "current", pages: 320, page: 218, rating: 0, genre: "Self-help", blurb: "Tiny changes, remarkable results — the science of building good habits.", recommenders: [] },
@@ -362,17 +368,16 @@ function seedState(s) {
     { id: uid(), title: "The Dark Knight", type: "Movie",  status: "done",      rating: 5, emoji: "🦇", genre: "Action", year: "2008", blurb: "Batman faces the Joker, a criminal mastermind bent on chaos.", director: "Christopher Nolan", cast: "C. Bale, H. Ledger", recommenders: [] },
     { id: uid(), title: "Stranger Things", type: "Series", status: "watching",  rating: 0, emoji: "🔦", genre: "Sci-Fi Horror", year: "2016", blurb: "Kids in a small town uncover supernatural mysteries and secret experiments.", season: 2, epsDone: 12, epTotal: 34, recommenders: ["Jordan", "Sam"] },
   ];
-  s.university.tasks = [
-    { id: uid(), title: "Calculus assignment", course: "Math 201",    due: addDays(t, 3), done: false },
-    { id: uid(), title: "Physics lab report",  course: "Physics 110", due: addDays(t, 5), done: false },
-    { id: uid(), title: "History essay",       course: "History 101", due: addDays(t, 8), done: false },
-  ];
-  s.work.items = [
-    { id: uid(), title: "Polish resume",        category: "Resume",       due: "",             done: true },
-    { id: uid(), title: "Update LinkedIn",      category: "Networking",   due: "",             done: true },
-    { id: uid(), title: "Write cover letter",   category: "Applications", due: addDays(t, 7),  done: false },
-    { id: uid(), title: "Build portfolio site", category: "Portfolio",    due: addDays(t, 21), done: false },
-    { id: uid(), title: "Mock interview prep",  category: "Interviews",   due: addDays(t, 14), done: false },
+  const K = (o) => Object.assign({ id: uid(), kind: "university", tag: "", due: "", done: false }, o);
+  s.learning.tasks = [
+    K({ title: "Calculus assignment", tag: "Linear Algebra", due: addDays(t, 3) }),
+    K({ title: "Physics lab report",  tag: "Physics 110",    due: addDays(t, 5) }),
+    K({ title: "History essay",       tag: "History 101",    due: addDays(t, 8) }),
+    K({ title: "Polish resume",        kind: "career", tag: "Resume",       done: true }),
+    K({ title: "Update LinkedIn",      kind: "career", tag: "Networking",   done: true }),
+    K({ title: "Write cover letter",   kind: "career", tag: "Applications", due: addDays(t, 7) }),
+    K({ title: "Build portfolio site", kind: "career", tag: "Portfolio",    due: addDays(t, 21) }),
+    K({ title: "Mock interview prep",  kind: "career", tag: "Interviews",   due: addDays(t, 14) }),
   ];
   s.projects = [
     { id: uid(), name: "LifeHub app", emoji: "🌿", status: "In progress", progress: 60, note: "",
@@ -785,6 +790,59 @@ const MIGRATIONS = [
       if (x.learned == null) x.learned = "";
       if (x.reflection == null) x.reflection = "";
       if (x.nextGoal == null) x.nextGoal = "";
+    });
+  },
+
+  /* 20 → 21 · Skills & Education, University and Work Preparation become one "Learning" area.
+
+     The user's own words: "Skills and education confuse me because they have nothing I can use — I
+     can just add a name and study hours and nothing else", and the same for the other two. Three
+     shallow pages covering overlapping ground is worse than one real one, so they merge — and a
+     course finally becomes something you can open.
+
+     A uni assignment and a career-prep item were LITERALLY the same shape ({title, tag, due, done}),
+     which is why they merge into one list with a `kind` rather than staying two of everything.
+     Nothing is dropped: every course, assignment and career item is copied across before the old
+     stores are removed, and the suite round-trips a real schema-20 save to prove it. */
+  (s) => {
+    const sk = s.skills || {}, uni = s.university || {}, wk = s.work || {};
+    const L = s.learning = s.learning || {};
+    if (L.monthlyHours == null) L.monthlyHours = sk.monthlyHours != null ? sk.monthlyHours : 10;
+    if (L.weeklyHours == null) L.weeklyHours = uni.weeklyHours != null ? uni.weeklyHours : 20;
+
+    if (!Array.isArray(L.courses)) {
+      L.courses = (sk.courses || []).map(c => ({
+        id: c.id || uid(), name: c.name || "", emoji: c.emoji || "📘",
+        /* everything that was in the old area was self-directed by definition — the university
+           side only ever held assignments, never courses */
+        kind: "self", category: c.category || "", institution: "", instructor: "",
+        start: "", targetEnd: "", credits: 0, grade: null, gradeMax: 20,
+        progress: clamp(+c.progress || 0, 0, 100), link: "", notes: "",
+        created: c.created || "", updated: c.updated || "",
+      }));
+    }
+    if (!Array.isArray(L.tasks)) {
+      L.tasks = [
+        ...(uni.tasks || []).map(k => ({ id: k.id || uid(), title: k.title || "", kind: "university",
+          tag: k.course || "", due: k.due || "", done: !!k.done,
+          created: k.created || "", updated: k.updated || "" })),
+        ...(wk.items || []).map(k => ({ id: k.id || uid(), title: k.title || "", kind: "career",
+          tag: k.category || "Other", due: k.due || "", done: !!k.done,
+          created: k.created || "", updated: k.updated || "" })),
+      ];
+    }
+    delete s.skills; delete s.university; delete s.work;
+
+    /* the study ledger keeps its two totals; a per-course breakdown starts EMPTY, because nothing
+       ever recorded which course an hour belonged to and back-filling would be a guess */
+    Object.keys((s.study || {}).log || {}).forEach(d => {
+      const day = s.study.log[d];
+      if (!day.courses || typeof day.courses !== "object") day.courses = {};
+    });
+
+    /* a task pointing at an area that no longer exists renders a broken chip */
+    (s.todos || []).forEach(td => {
+      if (td.areaId === "skills" || td.areaId === "university" || td.areaId === "work") td.areaId = "learning";
     });
   },
 ];
@@ -1624,7 +1682,7 @@ const HABIT_SOURCES = [
   { id: "water",   area: "health",  label: "Health — water you log", unit: "L" },
   { id: "steps",   area: "health",  label: "Health — steps you log", unit: "steps" },
   { id: "sleep",   area: "health",  label: "Health — hours you slept", unit: "h" },
-  { id: "study",   area: "skills",  label: "Study — minutes logged (self-directed + coursework)", unit: "min" },
+  { id: "study",   area: "learning", label: "Study — minutes logged (self-directed + coursework)", unit: "min" },
 ];
 const habitSource = (h) => HABIT_SOURCES.find(x => x.id === h.kind) || null;
 const pagesOn = (d) => +state.reading.log[d] || 0;
@@ -1902,11 +1960,10 @@ const OBJECTS = {
   book:    { label: "Book",    list: () => state.reading.books,    title: o => o.title, emoji: o => o.emoji || "\u{1F4D8}", open: "book-open" },
   media:   { label: "Watch",   list: () => state.media,            title: o => o.title, emoji: o => o.emoji || "\u{1F3AC}", open: "media-open" },
   memory:  { label: "Memory",  list: () => state.memories,         title: o => o.title, emoji: o => o.emoji || "\u2728",    open: "memory-open" },
-  course:  { label: "Course",  list: () => state.skills.courses,   title: o => o.name,  emoji: () => "\u{1F393}",           open: "" },
+  course:  { label: "Course",  list: () => coursesAll(),   title: o => o.name,  emoji: o => o.emoji || "\u{1F393}", open: "course-open" },
   group:   { label: "Group",   list: () => state.groups,           title: o => o.name,  emoji: o => o.emoji || "\u{1F94B}", open: "group-open" },
   txn:     { label: "Money",   list: () => state.finance.entries,  title: o => o.note || o.category, emoji: () => "\u{1F4B6}", open: "" },
-  uni:     { label: "Coursework", list: () => state.university.tasks, title: o => o.title, emoji: () => "\u{1F3DB}\uFE0F", open: "" },
-  work:    { label: "Career",  list: () => state.work.items,       title: o => o.title, emoji: () => "\u{1F4BC}",           open: "" },
+  uni:     { label: "Deadline", list: () => learnTasks(),          title: o => o.title, emoji: o => taskKind(o).emoji,     open: "" },
   skill:   { label: "Skill",   list: () => skillsAll(),               title: o => o.name,  emoji: o => o.emoji || "\u{1F938}", open: "skill-open" },
   event:   { label: "Event",   list: () => state.events,           title: o => o.title, emoji: o => o.icon || "\u{1F4C5}", open: "event-open" },
 };
@@ -2095,17 +2152,25 @@ function areaProgressToday(id) {
     case "workout": return Math.round(100 * clamp(workoutsThisWeek() / state.workout.weeklyGoal, 0, 1));
     case "nutrition": { const n = state.nutrition.meals.length, c = state.nutrition.log[t] || {};
       return n ? Math.round(100 * Object.keys(c).filter(k => c[k]).length / n) : 0; }
-    case "skills": { const mins = Object.keys(state.study.log).filter(d => d.startsWith(monthKey())).reduce((a, d) => a + studyMins(d, "skills"), 0);
-      return Math.round(100 * clamp(mins / 60 / state.skills.monthlyHours, 0, 1)); }
+    /* one area now, so one score: this month's self-directed hours against the target, plus how
+       much of the open coursework is actually done */
+    case "learning": {
+      const mins = Object.keys(state.study.log).filter(d => d.startsWith(monthKey())).reduce((a, d) => a + studyMins(d), 0);
+      const hrs = clamp(mins / 60 / Math.max(1, state.learning.monthlyHours + state.learning.weeklyHours * 4), 0, 1);
+      const tasks = state.learning.tasks || [];
+      const done = tasks.length ? tasks.filter(k => k.done).length / tasks.length : hrs;
+      return Math.round(100 * clamp((hrs + done) / 2, 0, 1)); }
     case "reading": { const done = state.reading.books.filter(b => b.status === "done").length;
       return Math.round(100 * clamp(done / state.reading.yearlyGoal, 0, 1)); }
     case "media": { const n = state.media.length; return n ? Math.round(100 * state.media.filter(m => m.status === "done").length / n) : 0; }
-    case "university": { const mins = studyRange(weekDates(), "university");
-      return Math.round(100 * clamp(mins / 60 / state.university.weeklyHours, 0, 1)); }
-    case "work": { const n = state.work.items.length; return n ? Math.round(100 * state.work.items.filter(i => i.done).length / n) : 0; }
     case "projects": { const n = state.projects.length; return n ? Math.round(state.projects.reduce((a, p) => a + projectProgress(p).pct, 0) / n) : 0; }
     case "social": { const w = socialWeek(); return w.target ? Math.round(100 * w.done / w.target) : 0; }
-    case "finance": { const m = financeMonth(); return m.income > 0 ? Math.round(100 * clamp(m.net / m.income, 0, 1)) : (m.expense > 0 ? 0 : 0); }
+    /* Savings rate in YOUR currency. financeMonth() has returned per-currency buckets since
+       schema 19, and this still compared the whole object to 0 — so the tile read 0% for everyone
+       from the moment currencies landed. Read the bucket, not the bag. */
+    case "finance": { const m = financeMonth(), c = defaultCur();
+      const inc = m.income[c] || 0, net = m.net[c] || 0;
+      return inc > 0 ? Math.round(100 * clamp(net / inc, 0, 1)) : 0; }
     case "memories": return state.memories.length ? 100 : 0;
     case "journal": return journalToday() ? 100 : 0;
     default: return 0;
@@ -2127,7 +2192,7 @@ const MISSIONS = [
   { id: "water",   xp: 15, area: "health",  title: () => `Drink ${state.health.goals.water}L of water`,
     sub: () => `${(healthToday().water || 0).toFixed(2)} / ${state.health.goals.water} L`,
     done: () => (healthToday().water || 0) >= state.health.goals.water },
-  { id: "study",   xp: 20, area: "skills",  title: () => "Study for 1 hour",
+  { id: "study",   xp: 20, area: "learning", title: () => "Study for 1 hour",
     sub: () => `${studyMinutesToday()} / 60 min`,
     done: () => studyMinutesToday() >= 60 },
   { id: "journal", xp: 15, area: "journal", title: () => "Journal your thoughts",
@@ -2886,9 +2951,9 @@ function timelineOn(d) {
       icon: h.emoji || "\u2705", hue: h.color || "#6a5ae0", done: habitMet(h, d), action: "ag-habit" }));
 
   /* date but no time — never given a slot */
-  (state.university.tasks || []).filter(k => !k.done && k.due === d)
+  (learnTasks() || []).filter(k => !k.done && k.due === d)
     .forEach(k => anytime.push({ kind: "uni", id: k.id, time: "", title: k.title,
-      sub: k.course || "coursework", icon: "\u{1F3DB}\uFE0F", hue: "#3e63dd", nav: "university" }));
+      sub: k.tag || taskKind(k).label, icon: "\u{1F3DB}\uFE0F", hue: "#3e63dd", nav: "learning" }));
 
   timed.sort((a, b) => a.time.localeCompare(b.time) || String(a.title).localeCompare(String(b.title)));
   return { timed, anytime };
@@ -2985,7 +3050,7 @@ const AREA_RULES = [
   [/\b(pay|paid|bill|billed|tuition|rent|buy|bought|purchase|subscription|invoice|expense|budget|salary|refund|deposit|spent|cost|fee)\b/, "finance"],
   [/\b(eat|ate|meal|breakfast|lunch|dinner|snack|cook|cooked|groceries|grocery|recipe)\b/, "nutrition"],
   [/\b(project|ship|shipped|launch|deploy|prototype|feature)\b/, "projects"],
-  [/\b(study|studying|studied|course|lecture|revise|homework|assignment|exam|lesson)\b/, "skills"],
+  [/\b(study|studying|studied|course|lecture|revise|homework|assignment|exam|lesson|resume|portfolio|interview)\b/, "learning"],
   [/\b(workout|gym|train|training|exercise|run|running|lift|calisthen|yoga)\b/, "workout"],
   [/\b(read|reading|book|chapter|pages)\b/, "reading"],
   [/\b(call|texted|text|meet|meetup|hangout|visit|birthday)\b/, "social"],
@@ -3774,7 +3839,7 @@ function focusCard(uniDue, undone, done, stranded) {
     <li class="todo ${k.due < t ? "overdue" : ""}">
       <span class="todo-time"></span>
       <button class="checkbox" data-action="ag-uni" data-id="${k.id}" aria-label="Mark ${esc(k.title)} done">${I.check}</button>
-      <span class="row-txt" data-nav="university"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.course || "University")}</span> · due ${daysUntil(k.due)}</small></span>
+      <span class="row-txt" data-nav="learning"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.tag || taskKind(k).label)}</span> · due ${daysUntil(k.due)}</small></span>
     </li>`);
   const body = (uni.length + rows.length)
     ? `${uni.length ? `<ul class="todo-list">${uni.join("")}</ul>` : ""}${rows.length ? `<ul class="todo-list" data-drag-list="todos">${rows.join("")}</ul>` : ""}`
@@ -3826,10 +3891,10 @@ function vDashboard() {
   const dueHabits = state.habits.filter(h => isScheduled(h, t) && !isSkipped(h, t));
   /* everything with a date, not just University — this card is the one place you look for "what's coming" */
   const deadlines = [
-    ...state.university.tasks.filter(k => !k.done && k.due && k.due <= addDays(t, 5))
-      .map(k => ({ title: k.title, due: k.due, nav: "university", area: "university" })),
-    ...state.work.items.filter(k => !k.done && k.due && k.due <= addDays(t, 5))
-      .map(k => ({ title: k.title, due: k.due, nav: "work", area: "work" })),
+    ...learnTasks().filter(k => !k.done && k.due && k.due <= addDays(t, 5))
+      .map(k => ({ title: k.title, due: k.due, nav: "learning", area: "learning" })),
+    ...[]
+      .map(k => ({ title: k.title, due: k.due, nav: "learning", area: "learning" })),
     ...state.goals.filter(g => g.deadline && g.deadline <= addDays(t, 5) && !goalReached(g))
       .map(g => ({ title: g.title, due: g.deadline, nav: "habits", area: "habits" })),
     /* a birthday is a deadline you actually care about missing */
@@ -3837,7 +3902,7 @@ function vDashboard() {
       .map(({ p, d }) => ({ title: `${p.name}'s birthday`, due: d, nav: "social", area: "social" })),
   ].sort((a, b) => a.due < b.due ? -1 : 1);
   /* coursework due today or overdue is a thing you must do today — it belongs in Today's Focus */
-  const uniDue = state.university.tasks.filter(k => !k.done && k.due && k.due <= t)
+  const uniDue = learnTasks().filter(k => !k.done && k.due && k.due <= t)
     .sort((a, b) => a.due < b.due ? -1 : 1);
   const remaining = undone.length + uniDue.length + dueHabits.filter(h => !habitMet(h, t)).length;
   return `
@@ -5030,7 +5095,7 @@ function vNutrition() {
   </div>`;
 }
 
-/* ---------- skills ---------- */
+/* ---------- learning ---------- */
 function skillsTrend() {
   const out = [];
   for (let i = 7; i >= 0; i--) {
@@ -5046,40 +5111,256 @@ function skillsTrend() {
   }
   return out;
 }
-function vSkills() {
-  const cur = dayCursor("skills"), curMonth = cur.slice(0, 7);
-  const mins = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "skills"), 0);
-  const uniMins = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "university"), 0);
-  const hrs = Math.round(mins / 6) / 10;
-  const courses = [...state.skills.courses].sort((a, b) => (a.progress === 100 ? 1 : 0) - (b.progress === 100 ? 1 : 0));
+
+/* ===== Learning — "what am I learning?" =====
+   Three thin pages (Skills & Education, University, Work Preparation) merged into one real one.
+   The user's complaint was exact: a course was a name and a percentage, "nothing I can use". */
+const COURSE_KINDS = [
+  { id: "self",       label: "Self-directed", emoji: "🧑‍💻", hue: "#8e4ec6" },
+  { id: "university", label: "University",    emoji: "🏛️", hue: "#3e63dd" },
+  { id: "cert",       label: "Certification", emoji: "📜", hue: "#ad6f2d" },
+];
+const TASK_KINDS = [
+  { id: "university", label: "Coursework", emoji: "🏛️", hue: "#3e63dd" },
+  { id: "career",     label: "Career",     emoji: "💼", hue: "#ad6f2d" },
+];
+const courseKind = (c) => COURSE_KINDS.find(x => x.id === c.kind) || COURSE_KINDS[0];
+const taskKind = (k) => TASK_KINDS.find(x => x.id === k.kind) || TASK_KINDS[0];
+const coursesAll = () => (state.learning.courses = state.learning.courses || []);
+const learnTasks = () => (state.learning.tasks = state.learning.tasks || []);
+const courseById = (id) => coursesAll().find(c => c.id === id) || null;
+const openCourses = () => coursesAll().filter(c => (c.progress || 0) < 100);
+
+/* Minutes attributed to a specific course. The study ledger keeps the totals; this is a BREAKDOWN of
+   the same minutes, not a second ledger, so it can only ever be a subset. Nothing was back-filled —
+   before this shipped nothing recorded which course an hour belonged to, and guessing would be a
+   lie in the one place a student would actually check. */
+function courseMins(id) {
+  let n = 0;
+  Object.keys(state.study.log || {}).forEach(d => { n += +((state.study.log[d].courses || {})[id]) || 0; });
+  return n;
+}
+const attributedMins = () => coursesAll().reduce((a, c) => a + courseMins(c.id), 0);
+
+/* Weighted by credits where they exist, and it counts ONLY graded courses — an average that
+   quietly includes ungraded ones is not an average of anything. It says how many it left out. */
+function courseGpa() {
+  const graded = coursesAll().filter(c => c.grade != null && c.grade !== "" && +c.gradeMax > 0);
+  const ungraded = coursesAll().filter(c => c.kind === "university" && (c.grade == null || c.grade === "")).length;
+  if (!graded.length) return null;
+  let pts = 0, w = 0;
+  graded.forEach(c => { const cr = Math.max(1, +c.credits || 1); pts += cr * (+c.grade / +c.gradeMax); w += cr; });
+  const pct = pts / w;
+  const maxes = [...new Set(graded.map(c => +c.gradeMax))];
+  return { pct: Math.round(1000 * pct) / 10, n: graded.length, ungraded,
+           /* only quote a scale when every graded course shares one */
+           scale: maxes.length === 1 ? maxes[0] : null,
+           onScale: maxes.length === 1 ? Math.round(10 * pct * maxes[0]) / 10 : null };
+}
+const learnOverdue = () => learnTasks().filter(k => !k.done && k.due && k.due < todayIso());
+function nextDeadline() {
+  return learnTasks().filter(k => !k.done && k.due).sort((a, b) => a.due.localeCompare(b.due))[0] || null;
+}
+
+function courseCard(c) {
+  const kd = courseKind(c), mins = courseMins(c.id), done = (c.progress || 0) >= 100;
+  return `<li class="lc ${done ? "done" : ""}" data-action="course-open" data-id="${c.id}" style="--a:${cssVar(kd.hue)}">
+    <span class="lc-emoji" aria-hidden="true">${esc(c.emoji || kd.emoji)}</span>
+    <span class="lc-body">
+      <span class="lc-top"><b>${esc(c.name)}</b><b class="lc-pct">${c.progress || 0}%</b></span>
+      ${barHtml(c.progress || 0, kd.hue)}
+      <span class="lc-meta">
+        <span class="lc-kind">${esc(kd.label)}</span>
+        ${c.institution ? `<span>${esc(c.institution)}</span>` : ""}
+        ${c.credits ? `<span>${c.credits} cr</span>` : ""}
+        ${(c.grade != null && c.grade !== "") ? `<span class="lc-grade">${c.grade}/${c.gradeMax || 20}</span>` : ""}
+        ${mins ? `<span>${I.clock}${estLabel(mins)}</span>` : ""}
+      </span>
+    </span>
+    <span class="lc-go" aria-hidden="true">${I.chevR}</span>
+  </li>`;
+}
+
+function vLearning() {
+  const cur = dayCursor("learning"), curMonth = cur.slice(0, 7);
+  const self = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "skills"), 0);
+  const uni = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "university"), 0);
+  const hrs = (m) => Math.round(m / 6) / 10;
+  const target = state.learning.monthlyHours;
+  const courses = [...coursesAll()].sort((a, b) => ((a.progress || 0) >= 100 ? 1 : 0) - ((b.progress || 0) >= 100 ? 1 : 0)
+    || COURSE_KINDS.findIndex(k => k.id === a.kind) - COURSE_KINDS.findIndex(k => k.id === b.kind)
+    || a.name.localeCompare(b.name));
+  const tasks = [...learnTasks()].sort((a, b) => (a.done - b.done)
+    || ((a.due || "9999") < (b.due || "9999") ? -1 : 1));
+  const open = tasks.filter(k => !k.done);
+  const gpa = courseGpa(), over = learnOverdue(), next = nextDeadline();
+  const career = tasks.filter(k => k.kind === "career");
+  const careerPct = career.length ? Math.round(100 * career.filter(k => k.done).length / career.length) : 0;
+
   return `
   <div class="grid">
-    ${card("span2 daynav-card", dayNav("skills"))}
+    ${card("span2 daynav-card", dayNav("learning"))}
+
+    ${card("span2 goals-hero learn-hero", `
+      <p class="gh-q">What am I learning?</p>
+      <div class="gh-row">
+        <div class="gh-stat"><b>${hrs(self + uni)}h</b><small>this month</small></div>
+        <div class="gh-stat"><b>${openCourses().length}</b><small>courses open</small></div>
+        ${open.length ? `<div class="gh-stat"><b>${open.length}</b><small>deadline${open.length === 1 ? "" : "s"} open</small></div>` : ""}
+        ${over.length ? `<div class="gh-stat err"><b>${over.length}</b><small>overdue</small></div>` : ""}
+        ${gpa ? `<div class="gh-stat"><b>${gpa.scale ? gpa.onScale : gpa.pct + "%"}</b><small>${gpa.scale ? `of ${gpa.scale}` : "average"}</small></div>` : ""}
+      </div>
+      ${next ? `<p class="learn-next">${I.clock} Next: <b>${esc(next.title)}</b> · ${esc(daysUntil(next.due))}</p>` : ""}`)}
+
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">Self-directed learning · this month</p><h3>${hrs} / ${state.skills.monthlyHours} study hours</h3>${barHtml(100 * hrs / state.skills.monthlyHours, "#8e4ec6")}<small class="soft study-total">${I.building} plus <b>${Math.round(uniMins / 6) / 10} h</b> coursework · <b>${Math.round((mins + uniMins) / 6) / 10} h</b> studied in total this month</small></div>
+        <div><p class="soft">Study time · this month</p><h3>${hrs(self)} / ${target} h self-directed</h3>
+          ${barHtml(100 * hrs(self) / Math.max(1, target), "#8e4ec6")}
+          <small class="soft study-total">${I.building} plus <b>${hrs(uni)} h</b> coursework · <b>${hrs(self + uni)} h</b> in total</small></div>
         <span class="big-ic" style="--a:#8e4ec6">${I.gradcap}</span>
       </div>
       <div class="pill-row" style="margin-top:14px">
         <button class="btn ghost" data-action="study-log" data-kind="skills" data-n="30">+30 min</button>
         <button class="btn ghost" data-action="study-log" data-kind="skills" data-n="60">+1 h</button>
-        <button class="btn ghost" data-action="skills-goal">${I.sliders}Goal</button>
+        <button class="btn ghost" data-action="study-log" data-kind="university" data-n="60">+1 h coursework</button>
+        <button class="btn ghost" data-action="learn-goal">${I.sliders}Goals</button>
       </div>`)}
+
     ${card("span2", cardHead("Study time · last 8 weeks") + `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(skillsTrend()))}' data-color="#8e4ec6" data-label="Study hours per week"></div>`)}
-    ${card("span2", cardHead("Courses &amp; skills", addBtn("New course", "course-add")) + (courses.length ? `
-      <ul class="course-list">
-        ${courses.map(c => `
-          <li class="${c.progress === 100 ? "done" : ""}">
-            <span class="row-txt"><b>${esc(c.name)}${c.category ? ` <span class="chip-genre">${esc(c.category)}</span>` : ""}</b>${barHtml(c.progress, "#8e4ec6")}</span>
-            <b class="pct">${c.progress}%</b>
-            <span class="pill-row">
-              ${c.progress < 100 ? `<button class="btn tiny" data-action="course-bump" data-id="${c.id}" data-n="5">+5%</button><button class="btn tiny good" data-action="course-done" data-id="${c.id}">Done</button>` : `<button class="btn tiny ghost" data-action="course-bump" data-id="${c.id}" data-n="-100">Reopen</button>`}
-              <button class="icon-btn ghost" data-action="course-edit" data-id="${c.id}" aria-label="Edit course">${I.edit}</button>
-              <button class="icon-btn ghost" data-action="course-del" data-id="${c.id}" aria-label="Delete course">${I.trash}</button>
-            </span>
-          </li>`).join("")}
-      </ul>` : emptyMsg("gradcap", "Track what you're learning on your own — Python, languages, design…", addBtn("Add a course", "course-add"))))}
+
+    ${card("span2", cardHead(`Courses${courses.length ? ` <small class="soft">${courses.length}</small>` : ""}`, addBtn("New course", "course-add")) + (courses.length
+      ? `<ul class="course-cards">${courses.map(courseCard).join("")}</ul>`
+        + (gpa ? `<p class="soft note">${I.chart} Average <b>${gpa.scale ? `${gpa.onScale} of ${gpa.scale}` : `${gpa.pct}%`}</b> across ${gpa.n} graded course${gpa.n === 1 ? "" : "s"}${gpa.ungraded ? ` — ${gpa.ungraded} not graded yet, and not counted.` : "."}</p>` : "")
+      : emptyMsg("gradcap", "Everything you're studying — a language, a university subject, a certification — in one place.", addBtn("Add a course", "course-add"))))}
+
+    ${card("span2", cardHead(`Deadlines${open.length ? ` <small class="soft">${open.length}</small>` : ""}`, addBtn("Add", "learn-task-add")) + (tasks.length ? `
+      <ul class="check-list">
+        ${tasks.map(k => {
+          const kd = taskKind(k);
+          return `<li class="${k.done ? "done" : ""} ${!k.done && k.due && k.due < todayIso() ? "overdue" : ""}">
+            <button class="checkbox" data-action="learn-task-toggle" data-id="${k.id}" aria-label="Toggle ${esc(k.title)}">${I.check}</button>
+            <span class="row-txt"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:${cssVar(kd.hue)}">${esc(k.tag || kd.label)}</span>${k.due ? ` · ${esc(niceDate(k.due))}` : ""}</small></span>
+            ${dueMeta(k.due, k.done)}
+            <button class="icon-btn ghost" data-action="learn-task-edit" data-id="${k.id}" aria-label="Edit">${I.edit}</button>
+            <button class="icon-btn ghost" data-action="learn-task-del" data-id="${k.id}" aria-label="Delete">${I.trash}</button>
+          </li>`;
+        }).join("")}
+      </ul>` : emptyMsg("building", "Assignments, exam dates, application deadlines — anything with a date on it.", addBtn("Add one", "learn-task-add"))))}
+
+    ${career.length ? card("span2", cardHead("Career readiness") + `
+      <div class="career-row">
+        ${ring(careerPct, { size: 104, sw: 9, color: "#ad6f2d", center: careerPct + "%", sub: "ready", label: "career readiness" })}
+        <p class="soft">${career.filter(k => k.done).length} of ${career.length} career items done. Resume, portfolio, applications and interview prep all live in the list above — tagged <b>Career</b>.</p>
+      </div>`) : ""}
+
+    ${card("span2", cardHead("How Learning works here") + `
+      <p class="soft small">Self-directed study, university coursework and career prep used to be three separate pages with almost nothing in them. They're one area now — courses on top, everything with a date underneath.</p>
+      <p class="soft note">${I.spark} <b>Hours per course</b> only count study you logged <i>against that course</i>. Time logged before this existed, or logged without naming one, is in your totals but not on any course — it was never recorded which course it belonged to, and LifeHub won't guess.</p>`)}
   </div>`;
+}
+
+function openCourseDetail(id) {
+  const c = courseById(id);
+  if (!c) { closeModal(); return; }
+  const kd = courseKind(c), mins = courseMins(c.id);
+  const done = (c.progress || 0) >= 100;
+  const linked = learnTasks().filter(k => !k.done && normName(k.tag) === normName(c.name));
+  return openModal(`
+    <header class="modal-head"><h3>${esc(c.emoji || kd.emoji)} ${esc(c.name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <div class="progress-line"><span>${esc(kd.label)}</span>${barHtml(c.progress || 0, kd.hue)}<b>${c.progress || 0}%</b></div>
+      ${!done ? `<div class="pill-row">
+        <button class="btn tiny" data-action="course-bump" data-id="${c.id}" data-n="5">+5%</button>
+        <button class="btn tiny ghost" data-action="course-bump" data-id="${c.id}" data-n="-5">−5%</button>
+        <button class="btn tiny good" data-action="course-done" data-id="${c.id}">${I.check}Finished</button>
+      </div>` : `<div class="pill-row"><button class="btn tiny ghost" data-action="course-bump" data-id="${c.id}" data-n="-100">Reopen</button></div>`}
+
+      ${(c.institution || c.instructor || c.start || c.targetEnd || c.credits) ? `<div class="fld"><span>Details</span>
+        <p class="soft small">
+          ${c.institution ? `<b>Where:</b> ${esc(c.institution)}<br>` : ""}
+          ${c.instructor ? `<b>Who:</b> ${esc(c.instructor)}<br>` : ""}
+          ${c.start || c.targetEnd ? `<b>When:</b> ${c.start ? esc(niceDate(c.start, { month: "short", day: "numeric", year: "numeric" })) : "—"} → ${c.targetEnd ? esc(niceDate(c.targetEnd, { month: "short", day: "numeric", year: "numeric" })) : "—"}<br>` : ""}
+          ${c.credits ? `<b>Credits:</b> ${c.credits}` : ""}
+        </p></div>` : ""}
+
+      <div class="fld"><span>Grade</span>
+        ${(c.grade != null && c.grade !== "") ? `<p class="soft small">${I.trophy} <b>${c.grade} / ${c.gradeMax || 20}</b>${c.credits ? ` · ${c.credits} credit${c.credits === 1 ? "" : "s"}, weighted into your average` : ""}.</p>`
+          : `<p class="soft small">Not graded yet — so it isn't counted in your average. Add one from Edit when you have it.</p>`}
+      </div>
+
+      <div class="fld"><span>Time on this course</span>
+        ${mins ? `<p class="soft small">${I.clock} <b>${estLabel(mins)}</b> logged against this course.</p>`
+          : `<p class="soft small">Nothing logged against this course yet. Use <b>Log study</b> below and it starts counting — study logged without naming a course stays in your totals but not here.</p>`}
+        <button class="btn tiny ghost" data-action="course-study" data-id="${c.id}">${I.plus}Log study</button>
+      </div>
+
+      ${linked.length ? `<div class="fld"><span>Open deadlines tagged "${esc(c.name)}"</span>
+        <ul class="hist-log">${linked.map(k => `<li>
+          <span class="hl-when">${esc(niceDate(k.due, { month: "short", day: "numeric" }))}</span>
+          <span class="hl-what">${esc(k.title)}</span></li>`).join("")}</ul></div>` : ""}
+
+      ${c.link ? `<div class="fld"><span>Materials</span><p class="soft small"><a href="${esc(safeUrl(c.link))}" target="_blank" rel="noopener">${esc(c.link)}</a></p></div>` : ""}
+      ${c.notes ? `<div class="fld"><span>Notes</span><p class="soft small">${esc(c.notes)}</p></div>` : ""}
+      ${relatedCard("course", c.id)}
+      ${historyCard("course", c.id)}
+      <div class="pill-row">
+        <button class="btn ghost" data-action="course-edit" data-id="${c.id}">${I.edit}Edit</button>
+        <button class="btn danger" data-action="course-del" data-id="${c.id}">${I.trash}Delete</button>
+      </div>
+    </div>`);
+}
+
+/* one place that reads the course form, so add and edit can never drift apart */
+function courseFromForm(f) {
+  const g = String(f.grade || "").trim();
+  return {
+    name: String(f.name || "").trim().slice(0, 90), emoji: f.emoji || "📘",
+    kind: COURSE_KINDS.some(k => k.id === f.kind) ? f.kind : "self",
+    category: (f.category || "").slice(0, 40),
+    institution: (f.institution || "").slice(0, 60),
+    instructor: (() => { const n = String(f.instructor || "").trim(); if (n) ensurePerson(n); return n.slice(0, 60); })(),
+    start: f.start || "", targetEnd: f.targetEnd || "",
+    credits: Math.max(0, +f.credits || 0),
+    /* an empty grade must stay NULL, not become 0 — a zero is a mark, "not graded yet" is not */
+    grade: g === "" ? null : +g,
+    gradeMax: Math.max(1, +f.gradeMax || 20),
+    progress: clamp(+f.progress || 0, 0, 100),
+    link: (f.link || "").slice(0, 300), notes: (f.notes || "").slice(0, 400),
+  };
+}
+function courseFormFields(c) {
+  c = c || {};
+  return `<div class="fld-row">${fld("Course", txt("name", "e.g. Linear Algebra", c.name || ""))}${fld("Emoji", txt("emoji", "📘", c.emoji || "📘", false))}</div>` +
+    fld("What kind?", `<select name="kind">${COURSE_KINDS.map(k => `<option value="${k.id}" ${(c.kind || "self") === k.id ? "selected" : ""}>${k.emoji} ${k.label}</option>`).join("")}</select>`) +
+    `<div class="fld-row">${
+      fld("Where <small class=\"soft\">— optional</small>", txt("institution", "university, Coursera…", c.institution || "", false))}${
+      fld("Who teaches it <small class=\"soft\">— optional</small>", `<input type="text" name="instructor" list="people-list" value="${esc(c.instructor || "")}" autocomplete="off">`)
+    }</div>` + peopleDatalist() +
+    `<div class="fld-row">${
+      fld("Started <small class=\"soft\">— optional</small>", `<input type="date" name="start" value="${esc(c.start || "")}">`)}${
+      fld("Ends <small class=\"soft\">— optional</small>", `<input type="date" name="targetEnd" value="${esc(c.targetEnd || "")}">`)
+    }</div>` +
+    `<div class="fld-row">${
+      fld("Credits <small class=\"soft\">— optional</small>", `<input type="number" name="credits" min="0" step="1" value="${c.credits || ""}" inputmode="numeric">`)}${
+      fld("Grade <small class=\"soft\">— optional</small>", `<input type="number" name="grade" min="0" step="any" value="${(c.grade == null ? "" : c.grade)}" inputmode="decimal">`)}${
+      fld("out of", `<input type="number" name="gradeMax" min="1" step="any" value="${c.gradeMax || 20}" inputmode="decimal">`)
+    }</div>` +
+    `<p class="soft note">${I.spark} A grade only counts toward your average once you enter it — an average that quietly includes ungraded courses is an average of nothing.</p>` +
+    fld("Progress %", `<input type="number" name="progress" min="0" max="100" value="${c.progress || 0}" inputmode="numeric">`) +
+    fld("Link <small class=\"soft\">— optional</small>", txt("link", "https://…", c.link || "", false)) +
+    fld("Notes", `<textarea name="notes" maxlength="400" placeholder="syllabus, what to revise…">${esc(c.notes || "")}</textarea>`);
+}
+
+function learnTaskFormFields(k) {
+  k = k || {};
+  return fld("What's due?", txt("title", "e.g. Calculus problem set 4", k.title || "")) +
+    `<div class="fld-row">${
+      fld("Kind", `<select name="kind">${TASK_KINDS.map(x => `<option value="${x.id}" ${(k.kind || "university") === x.id ? "selected" : ""}>${x.emoji} ${x.label}</option>`).join("")}</select>`)}${
+      fld("Due", `<input type="date" name="due" value="${esc(k.due || todayIso())}">`)
+    }</div>` +
+    fld("Course or category <small class=\"soft\">— optional</small>",
+      `<input type="text" name="tag" list="course-names" value="${esc(k.tag || "")}" placeholder="Linear Algebra / Resume" autocomplete="off">` +
+      `<datalist id="course-names">${[...coursesAll().map(c => c.name), ...WORK_CATS].map(n => `<option value="${esc(n)}"></option>`).join("")}</datalist>`);
 }
 
 /* ---------- reading ---------- */
@@ -5595,41 +5876,7 @@ function openMediaDetail(id) {
     </div>`);
 }
 
-/* ---------- university ---------- */
-function vUniversity() {
-  const cur = dayCursor("university");
-  const mins = studyRange(weekOfDate(cur), "university");
-  const selfMins = studyRange(weekOfDate(cur), "skills");
-  const hrs = Math.round(mins / 6) / 10;
-  const tasks = [...state.university.tasks].sort((a, b) => (a.done - b.done) || (a.due < b.due ? -1 : 1));
-  return `
-  <div class="grid">
-    ${card("span2 daynav-card", dayNav("university"))}
-    ${card("span2", `
-      <div class="goal-row">
-        <div><p class="soft">${cur === todayIso() ? "This week" : "Week of " + niceDate(mondayOf(cur))}</p><h3>${hrs} / ${state.university.weeklyHours} study hours</h3>${barHtml(100 * hrs / state.university.weeklyHours, "#3e63dd")}<small class="soft study-total">${I.gradcap} plus <b>${Math.round(selfMins / 6) / 10} h</b> self-directed · <b>${Math.round((mins + selfMins) / 6) / 10} h</b> studied in total this week</small></div>
-        <span class="big-ic" style="--a:#3e63dd">${I.building}</span>
-      </div>
-      <div class="pill-row" style="margin-top:14px">
-        <button class="btn ghost" data-action="study-log" data-kind="university" data-n="30">+30 min</button>
-        <button class="btn ghost" data-action="study-log" data-kind="university" data-n="60">+1 h</button>
-        <button class="btn ghost" data-action="uni-goal">${I.sliders}Goal</button>
-      </div>`)}
-    ${card("span2", cardHead("Assignments & deadlines <small class=\"soft\">your formal coursework</small>", addBtn("Add task", "uni-task-add")) + (tasks.length ? `
-      <ul class="check-list">
-        ${tasks.map(k => `
-          <li class="${k.done ? "done" : ""} ${!k.done && k.due < todayIso() ? "overdue" : ""}">
-            <button class="checkbox" data-action="uni-task-toggle" data-id="${k.id}" aria-label="Toggle ${esc(k.title)}">${I.check}</button>
-            <span class="row-txt"><b>${esc(k.title)}</b><small>${k.course ? esc(k.course) + " · " : ""}${niceDate(k.due)}</small></span>
-            ${dueMeta(k.due, k.done)}
-            <button class="icon-btn ghost" data-action="uni-task-edit" data-id="${k.id}" aria-label="Edit">${I.edit}</button>
-            <button class="icon-btn ghost" data-action="uni-task-del" data-id="${k.id}" aria-label="Delete task">${I.trash}</button>
-          </li>`).join("")}
-      </ul>` : emptyMsg("building", "No deadlines — enjoy the calm 🌤️", addBtn("Add a task", "uni-task-add"))))}
-  </div>`;
-}
-
-/* ---------- work prep (career tracker) ---------- */
+/* ---------- learning: deadlines & career prep helpers ---------- */
 const WORK_CATS = ["Resume", "Portfolio", "Applications", "Interviews", "Networking", "Skills", "Other"];
 function dueMeta(due, done) {
   if (!due || done) return "";
@@ -5637,36 +5884,6 @@ function dueMeta(due, done) {
   const overdue = due < todayIso();
   const soon = !overdue && due <= addDays(todayIso(), 3);
   return `<span class="due-tag ${overdue ? "over" : soon ? "soon" : ""}">${overdue ? "Overdue" : d}</span>`;
-}
-function vWork() {
-  const items = state.work.items;
-  const pct = items.length ? Math.round(100 * items.filter(i => i.done).length / items.length) : 0;
-  const doneN = items.filter(i => i.done).length;
-  const cats = WORK_CATS.filter(c => items.some(i => (i.category || "Other") === c));
-  return `
-  <div class="grid">
-    ${card("center", `${ring(pct, { size: 130, sw: 10, color: "#ad6f2d", center: pct + "%", sub: "ready", label: "career readiness" })}
-      <p class="soft" style="margin-top:10px">Career readiness · ${doneN}/${items.length} done</p>`)}
-    ${card("span2", cardHead("Career checklist", addBtn("Add item", "work-add")) + (items.length ? `
-      <div class="work-groups">
-        ${cats.map(cat => {
-          const list = items.filter(i => (i.category || "Other") === cat).sort((a, b) => (a.done - b.done) || ((a.due || "9") < (b.due || "9") ? -1 : 1));
-          const cd = list.filter(i => i.done).length;
-          return `<div class="work-group">
-            <div class="wg-head"><b>${esc(cat)}</b><small>${cd}/${list.length}</small></div>
-            <ul class="check-list">
-              ${list.map(k => `<li class="${k.done ? "done" : ""}">
-                <button class="checkbox" data-action="work-toggle" data-id="${k.id}" aria-label="Toggle ${esc(k.title)}">${I.check}</button>
-                <span class="row-txt"><b>${esc(k.title)}</b>${k.due ? `<small>${I.clock} ${niceDate(k.due)}</small>` : ""}</span>
-                ${dueMeta(k.due, k.done)}
-                <button class="icon-btn ghost" data-action="work-edit" data-id="${k.id}" aria-label="Edit">${I.edit}</button>
-                <button class="icon-btn ghost" data-action="work-del" data-id="${k.id}" aria-label="Delete item">${I.trash}</button>
-              </li>`).join("")}
-            </ul>
-          </div>`;
-        }).join("")}
-      </div>` : emptyMsg("briefcase", "Build your career plan — resume, portfolio, applications, interviews.", addBtn("Add an item", "work-add"))))}
-  </div>`;
 }
 
 /* ---------- projects ---------- */
@@ -6359,10 +6576,8 @@ function dueNudges(now) {
       body: s.dose ? `${s.dose} · ${SUP_LABEL[s.every] || "daily"}` : "Tap to mark it taken", nav: "nutrition" }));
 
   if (k.deadlines) {
-    state.university.tasks.filter(x => !x.done && x.due === t).forEach(x =>
-      out.push({ key: `uni:${x.id}:${t}`, title: "Due today", body: x.title + (x.course ? ` · ${x.course}` : ""), nav: "university" }));
-    state.work.items.filter(x => !x.done && x.due === t).forEach(x =>
-      out.push({ key: `work:${x.id}:${t}`, title: "Due today", body: x.title, nav: "work" }));
+    learnTasks().filter(x => !x.done && x.due === t).forEach(x =>
+      out.push({ key: `learn:${x.id}:${t}`, title: "Due today", body: x.title + (x.tag ? ` \u00b7 ${x.tag}` : ""), nav: "learning" }));
   }
 
   if (k.tasks) state.todos.filter(x => !x.done && x.date === t && x.time && now >= x.time).forEach(x =>
@@ -6722,8 +6937,8 @@ function vProfile() {
 /* ================= render ================= */
 const VIEWS = {
   dashboard: vDashboard, goals: vGoals, habits: vHabits, health: vHealth, workout: vWorkout,
-  nutrition: vNutrition, skills: vSkills, reading: vReading, media: vMedia,
-  university: vUniversity, work: vWork, projects: vProjects, finance: vFinance, social: vSocial,
+  nutrition: vNutrition, learning: vLearning, reading: vReading, media: vMedia,
+  projects: vProjects, finance: vFinance, social: vSocial,
   memories: vMemories, journal: vJournal, progress: vProgress,
   integrations: vIntegrations, profile: vProfile,
 };
@@ -6837,7 +7052,7 @@ const ACTIONS = {
   },
   "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
   "ag-uni": (el) => {
-    const k = state.university.tasks.find(x => x.id === el.dataset.id);
+    const k = learnTasks().find(x => x.id === el.dataset.id);
     if (!k) return;
     k.done = true; addXp(10, k.title);
     save(); checkBadges(); render(); toast("Assignment done ✓");
@@ -7271,49 +7486,52 @@ const ACTIONS = {
 
   /* skills / university */
   "study-log": (el) => {
-    const k = el.dataset.kind, t = dayCursor(k);
+    /* The bucket ("skills" / "university") is not a view. It used to be BOTH, because each bucket
+       had its own page with its own day cursor — after the merge there is one page, so the day
+       being navigated is Learning's. Reading dayCursor(bucket) here silently wrote every entry to
+       today, however far back you had navigated. */
+    const k = el.dataset.kind, t = dayCursor("learning");
     const day = state.study.log[t] = state.study.log[t] || {};
     day[k] = (day[k] || 0) + +el.dataset.n;
     addXp(Math.round(+el.dataset.n / 6), "Study time");
     save(); render();
   },
-  "skills-goal": () => formModal("Monthly goal", fld("Study hours per month", num("hours", state.skills.monthlyHours, 1)), "skills-goal"),
-  "uni-goal": () => formModal("Weekly goal", fld("Study hours per week", num("hours", state.university.weeklyHours, 1)), "uni-goal"),
-  "course-add": () => formModal("New course",
-    fld("Course / skill", txt("name", "e.g. Python for beginners")) +
-    fld("Category (optional)", txt("category", "e.g. Programming, Language", "", false)), "course-add"),
+  "learn-goal": () => formModal("Study goals",
+    `<div class="fld-row">${fld("Self-directed hours / month", num("monthly", state.learning.monthlyHours, 1))}${fld("Coursework hours / week", num("weekly", state.learning.weeklyHours, 1))}</div>`, "learn-goal"),
+  "course-open": (el) => openCourseDetail(el.dataset.id),
+  "course-study": (el) => {
+    const c = courseById(el.dataset.id); if (!c) return;
+    formModal(`Study · ${c.name}`,
+      `<div class="fld-row">${fld("Minutes", num("mins", 60, 1))}${fld("Date", `<input type="date" name="date" value="${todayIso()}">`)}</div>` +
+      `<p class="soft note">${I.spark} These minutes go into your monthly totals <b>and</b> onto this course.</p>` +
+      `<input type="hidden" name="cid" value="${c.id}">`, "course-study", "Log it");
+  },
+  "course-add": () => formModal("New course", courseFormFields(), "course-add", "Add"),
   "course-edit": (el) => {
-    const c = state.skills.courses.find(x => x.id === el.dataset.id); if (!c) return;
-    formModal("Edit course",
-      fld("Course / skill", txt("name", "", c.name)) +
-      `<div class="fld-row">${fld("Progress %", num("progress", c.progress, 0, 5))}${fld("Category", txt("category", "", c.category || "", false))}</div>` +
-      `<input type="hidden" name="id" value="${c.id}">`, "course-edit");
+    const c = courseById(el.dataset.id); if (!c) return;
+    formModal("Edit course", courseFormFields(c) + `<input type="hidden" name="id" value="${c.id}">`, "course-edit");
   },
-  "course-done": (el) => { const c = state.skills.courses.find(x => x.id === el.dataset.id); if (c && c.progress < 100) { c.progress = 100; addXp(40, `${c.name} completed`); save(); render(); } },
+  "course-done": (el) => { const c = courseById(el.dataset.id); if (c && c.progress < 100) { c.progress = 100; touch("course", c.id, "Finished"); addXp(40, `${c.name} completed`); save(); render(); closeModal(); } },
   "course-bump": (el) => {
-    const c = state.skills.courses.find(x => x.id === el.dataset.id);
-    const was = c.progress;
-    c.progress = clamp(c.progress + +el.dataset.n, 0, 100);
-    if (c.progress === 100 && was < 100) addXp(40, `${c.name} completed`);
-    save(); render();
+    const c = courseById(el.dataset.id); if (!c) return;
+    const was = c.progress || 0;
+    c.progress = clamp(was + +el.dataset.n, 0, 100);
+    if (c.progress === 100 && was < 100) { touch("course", c.id, "Finished"); addXp(40, `${c.name} completed`); }
+    save(); render(); if (!$("#modalBackdrop").hidden) openCourseDetail(c.id);
   },
-  "course-del": (el) => { deleteWithUndo(() => state.skills.courses, el.dataset.id, "Course deleted"); },
-  "uni-task-add": () => formModal("New assignment",
-    fld("Task", txt("title", "e.g. Calculus assignment")) +
-    `<div class="fld-row">${fld("Course (optional)", txt("course", "e.g. Math 201", "", false))}${fld("Due date", `<input type="date" name="due" value="${addDays(todayIso(), 3)}" required>`)}</div>`, "uni-task-add"),
-  "uni-task-edit": (el) => {
-    const k = state.university.tasks.find(x => x.id === el.dataset.id); if (!k) return;
-    formModal("Edit assignment",
-      fld("Task", txt("title", "", k.title)) +
-      `<div class="fld-row">${fld("Course", txt("course", "", k.course || "", false))}${fld("Due date", `<input type="date" name="due" value="${k.due || ""}" required>`)}</div>` +
-      `<input type="hidden" name="id" value="${k.id}">`, "uni-task-edit");
+  "course-del": (el) => { closeModal(); deleteWithUndo(() => coursesAll(), el.dataset.id, "Course deleted"); },
+  /* one list, one form — a coursework deadline and a career deadline were the same four fields */
+  "learn-task-add": () => formModal("New deadline", learnTaskFormFields(), "learn-task-add", "Add"),
+  "learn-task-edit": (el) => {
+    const k = learnTasks().find(x => x.id === el.dataset.id); if (!k) return;
+    formModal("Edit deadline", learnTaskFormFields(k) + `<input type="hidden" name="id" value="${k.id}">`, "learn-task-edit");
   },
-  "uni-task-toggle": (el) => {
-    const k = state.university.tasks.find(x => x.id === el.dataset.id);
+  "learn-task-toggle": (el) => {
+    const k = learnTasks().find(x => x.id === el.dataset.id); if (!k) return;
     k.done = !k.done; if (k.done) addXp(15, k.title);
     save(); render();
   },
-  "uni-task-del": (el) => { deleteWithUndo(() => state.university.tasks, el.dataset.id, "Assignment deleted"); },
+  "learn-task-del": (el) => { deleteWithUndo(() => learnTasks(), el.dataset.id, "Deadline deleted"); },
 
   /* reading */
   "reading-tab": (el) => { ui.readingTab = el.dataset.id; render(); },
@@ -7436,18 +7654,6 @@ const ACTIONS = {
   "media-del": (el) => { deleteWithUndo(() => state.media, el.dataset.id, "Removed from your list"); },
 
   /* work / projects / social / memories */
-  "work-add": () => formModal("New career item",
-    fld("Item", txt("title", "e.g. Rewrite resume summary")) +
-    `<div class="fld-row">${fld("Category", `<select name="category">${WORK_CATS.map(c => `<option>${c}</option>`).join("")}</select>`)}${fld("Target date (optional)", `<input type="date" name="due" value="">`)}</div>`, "work-add"),
-  "work-edit": (el) => {
-    const k = state.work.items.find(x => x.id === el.dataset.id); if (!k) return;
-    formModal("Edit career item",
-      fld("Item", txt("title", "", k.title)) +
-      `<div class="fld-row">${fld("Category", `<select name="category">${WORK_CATS.map(c => `<option ${(k.category || "Other") === c ? "selected" : ""}>${c}</option>`).join("")}</select>`)}${fld("Target date", `<input type="date" name="due" value="${k.due || ""}">`)}</div>` +
-      `<input type="hidden" name="id" value="${k.id}">`, "work-edit");
-  },
-  "work-toggle": (el) => { const k = state.work.items.find(x => x.id === el.dataset.id); k.done = !k.done; if (k.done) addXp(15, k.title); save(); render(); },
-  "work-del": (el) => { deleteWithUndo(() => state.work.items, el.dataset.id, "Item deleted"); },
   "project-add": () => formModal("New project", projectFormFields(), "project-add"),
   "project-open": (el) => openProjectDetail(el.dataset.id),
   /* only reachable while a project has no milestones — once it has some, progress is counted from
@@ -7800,12 +8006,45 @@ const SUBMITS = {
   "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); if (CURRENCIES[f.cur]) x.cur = f.cur; x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
   "class-edit": (f) => { const x = state.workout.classes.find(v => v.id === f.id); if (x) { x.name = f.name; x.total = Math.max(1, +f.total || x.total); x.price = +f.price || 0; if (CURRENCIES[f.cur]) x.cur = f.cur; x.start = f.start || x.start; } },
   "sup-add": (f) => { state.nutrition.supplements.push({ id: uid(), name: f.name, emoji: f.emoji || "💊", dose: f.dose || "", every: ["day", "week", "month"].includes(f.every) ? f.every : "day" }); },
-  "skills-goal": (f) => { state.skills.monthlyHours = +f.hours; },
-  "uni-goal": (f) => { state.university.weeklyHours = +f.hours; },
-  "course-add": (f) => { state.skills.courses.push({ id: uid(), name: f.name, progress: 0, category: f.category || "" }); },
-  "course-edit": (f) => { const c = state.skills.courses.find(x => x.id === f.id); if (c) { c.name = f.name; c.progress = clamp(+f.progress || 0, 0, 100); c.category = f.category || ""; } },
-  "uni-task-add": (f) => { state.university.tasks.push({ id: uid(), title: f.title, course: f.course || "", due: f.due, done: false }); },
-  "uni-task-edit": (f) => { const k = state.university.tasks.find(x => x.id === f.id); if (k) { k.title = f.title; k.course = f.course || ""; k.due = f.due || k.due; } },
+  "learn-goal": (f) => {
+    state.learning.monthlyHours = Math.max(1, +f.monthly || state.learning.monthlyHours);
+    state.learning.weeklyHours = Math.max(1, +f.weekly || state.learning.weeklyHours);
+  },
+  "course-add": (f) => {
+    if (!String(f.name || "").trim()) return;
+    const c = born(Object.assign({ id: uid() }, courseFromForm(f)));
+    coursesAll().push(c); touch("course", c.id, "Course added");
+  },
+  "course-edit": (f) => {
+    const c = courseById(f.id); if (!c) return;
+    Object.assign(c, courseFromForm(f), { updated: todayIso() });
+    touch("course", c.id, "Updated");
+    setTimeout(() => openCourseDetail(c.id), 0);
+  },
+  /* the minutes land in the monthly totals AND on the course — one set of minutes, two views of it */
+  "course-study": (f) => {
+    const c = courseById(f.cid); if (!c) return;
+    const n = Math.max(1, +f.mins || 0), d = f.date || todayIso();
+    const day = state.study.log[d] = state.study.log[d] || {};
+    const bucket = c.kind === "university" ? "university" : "skills";
+    day[bucket] = (day[bucket] || 0) + n;
+    day.courses = day.courses || {};
+    day.courses[c.id] = (day.courses[c.id] || 0) + n;
+    addXp(Math.round(n / 6), "Study time");
+    touch("course", c.id, `Studied ${n} min`);
+    setTimeout(() => openCourseDetail(c.id), 0);
+  },
+  "learn-task-add": (f) => {
+    if (!String(f.title || "").trim()) return;
+    learnTasks().push(born({ id: uid(), title: f.title.trim(), kind: TASK_KINDS.some(x => x.id === f.kind) ? f.kind : "university",
+      tag: (f.tag || "").slice(0, 60), due: f.due || "", done: false }));
+  },
+  "learn-task-edit": (f) => {
+    const k = learnTasks().find(x => x.id === f.id); if (!k) return;
+    k.title = f.title || k.title;
+    if (TASK_KINDS.some(x => x.id === f.kind)) k.kind = f.kind;
+    k.tag = (f.tag || "").slice(0, 60); k.due = f.due || k.due; k.updated = todayIso();
+  },
   "book-add": (f) => { state.reading.books.push({ id: uid(), title: f.title, author: f.author || "Unknown", emoji: f.emoji || "📘", cover: f.cover || null, genre: f.genre || "", blurb: "", notes: "", recommenders: [], favorite: false, status: "current", pages: +f.pages, page: 0, rating: 0, started: todayIso() }); },
   "book-edit": (f) => {
     const b = state.reading.books.find(x => x.id === f.id);
@@ -7852,8 +8091,6 @@ const SUBMITS = {
     if (m.type === "Series") { m.season = Math.max(1, +f.season || 1); m.epTotal = Math.max(0, +f.epTotal || 0); m.epsDone = clamp(m.epsDone || 0, 0, m.epTotal || Infinity); }
     else { m.director = f.director || ""; m.cast = f.cast || ""; }
   },
-  "work-add": (f) => { state.work.items.push({ id: uid(), title: f.title, category: f.category || "Other", due: f.due || "", done: false }); },
-  "work-edit": (f) => { const k = state.work.items.find(x => x.id === f.id); if (k) { k.title = f.title; k.category = f.category || "Other"; k.due = f.due || ""; } },
   "project-add": (f) => {
     const p = born({ id: uid(), name: f.name, emoji: f.emoji || "🚀",
       status: f.status || "Planning", progress: 0, note: f.note || "",
