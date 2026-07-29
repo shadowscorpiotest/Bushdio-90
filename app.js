@@ -165,7 +165,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 17;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 18;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -668,6 +668,27 @@ const MIGRATIONS = [
       if (!Array.isArray(p.milestones)) p.milestones = [];
       if (!Array.isArray(p.files)) p.files = [];
     });
+  },
+
+  /* 17 → 18 · work sessions. A project's history was "Focused 45 min" over and over — the time, but
+     never what it produced. The four reflection fields go on the focusLog row the timer already
+     writes, not into a parallel log that could disagree with it.
+
+     `doneOn` on a milestone is what makes velocity answerable. It is deliberately left BLANK on
+     milestones that are already ticked: there is no record of when that happened, and inventing one
+     would be the same lie as inventing a creation date. The honest consequence is that velocity
+     stays silent until two milestones have been ticked under this version — which is the correct
+     behaviour, not a shortcoming to paper over. */
+  (s) => {
+    Object.keys(s.focusLog || {}).forEach(d => (s.focusLog[d] || []).forEach(r => {
+      if (r.focus == null) r.focus = 0;              // 0 = not rated
+      if (r.outcome == null) r.outcome = "";
+      if (r.obstacles == null) r.obstacles = "";
+      if (r.next == null) r.next = "";
+    }));
+    (s.projects || []).forEach(p => (p.milestones || []).forEach(m => {
+      if (m.doneOn == null) m.doneOn = "";
+    }));
   },
 ];
 
@@ -2597,11 +2618,52 @@ function projectFocusMins(id) {
     (state.focusLog[d] || []).forEach(r => { if (r.projectId === id) n += r.mins || 0; }));
   return n;
 }
-function projectSessions(id) {
-  let n = 0;
+/* every logged session that named this project, newest first, each carrying the day it happened */
+function projectSessionRows(id) {
+  const out = [];
   Object.keys(state.focusLog || {}).forEach(d =>
-    (state.focusLog[d] || []).forEach(r => { if (r.projectId === id) n++; }));
-  return n;
+    (state.focusLog[d] || []).forEach(r => { if (r.projectId === id) out.push(Object.assign({ date: d }, r)); }));
+  return out.sort((a, b) => b.date.localeCompare(a.date) || String(b.at || "").localeCompare(String(a.at || "")));
+}
+const projectSessions = (id) => projectSessionRows(id).length;
+const hasReflection = (r) => !!(r.outcome || r.obstacles || r.next || r.focus);
+
+/* Sessions per week over the last 8 Monday-weeks, in the shape drawBarChart already reads —
+   the same construction skillsTrend() uses, so month boundaries are somebody else's solved problem. */
+function projectSessionsTrend(id) {
+  const rows = projectSessionRows(id), out = [];
+  for (let i = 7; i >= 0; i--) {
+    const monday = mondayOf(addDays(todayIso(), -i * 7));
+    const end = addDays(monday, 7);
+    const wk = rows.filter(r => r.date >= monday && r.date < end);
+    const mins = wk.reduce((n, r) => n + (r.mins || 0), 0);
+    out.push({ label: i === 0 ? "This wk" : niceDate(monday, { month: "short", day: "numeric" }),
+      value: wk.length,
+      tip: `Week of ${niceDate(monday)}: ${wk.length} session${wk.length === 1 ? "" : "s"}${mins ? ` · ${estLabel(mins)}` : ""}` });
+  }
+  return out;
+}
+
+/* How fast milestones actually get ticked — but only from milestones ticked SINCE this shipped,
+   because nothing recorded when the older ones were done. Two dated ticks is the minimum that can
+   produce an interval at all; below that this returns null and the sheet shows nothing rather than
+   a heading with no number under it. Same contract as paceOf(). */
+function milestoneVelocity(p) {
+  const dated = (p.milestones || []).filter(m => m.done && m.doneOn)
+    .map(m => m.doneOn).sort();
+  if (dated.length < 2) return null;
+  const span = (Date.parse(dated[dated.length - 1] + "T12:00:00") - Date.parse(dated[0] + "T12:00:00")) / DAY_MS;
+  const every = Math.max(1, Math.round(span / (dated.length - 1)));
+  const left = (p.milestones || []).filter(m => !m.done).length;
+  return { dated: dated.length, every, left,
+           eta: left ? addDays(todayIso(), every * left) : "",
+           /* it can only speak for the ticks it has dates for, and it says so */
+           partial: dated.length < (p.milestones || []).filter(m => m.done).length };
+}
+function projectAvgFocus(id) {
+  const rated = projectSessionRows(id).filter(r => r.focus > 0);
+  if (!rated.length) return null;
+  return { avg: Math.round(10 * rated.reduce((n, r) => n + r.focus, 0) / rated.length) / 10, n: rated.length };
 }
 /* Live projects, most recently worked first — the dashboard and the Projects page agree on order
    because they call the same function. */
@@ -3001,14 +3063,28 @@ function extendFocus(mins) {
 /* Logged minutes are CAPPED at what was committed to. You legitimately focus with the app closed —
    that is rather the point — but the session was a promise of N minutes, so N is the most it can
    ever claim. An elapsed value of eight hours means the tab was left open, not that you worked. */
-function finishFocus(markDone) {
+/* `re` carries the optional reflection. Every field empty must produce exactly the row this wrote
+   before P2 — the reflection is never the price of recording the work. */
+function finishFocus(markDone, re) {
   const f = state.focus;
   if (!f) return null;
+  const r = re || {};
   const mins = clamp(Math.round(focusElapsed(f) / 60000), 0, f.mins);
   const t = todayIso();
   const row = { id: f.id, taskId: f.taskId, title: f.title, mins,
-                goalId: f.goalId, projectId: f.projectId, at: new Date().toISOString() };
+                goalId: f.goalId, projectId: f.projectId, at: new Date().toISOString(),
+                focus: clamp(+r.focus || 0, 0, 5),
+                outcome: String(r.outcome || "").slice(0, 400),
+                obstacles: String(r.obstacles || "").slice(0, 400),
+                next: String(r.next || "").slice(0, 200) };
   (state.focusLog[t] = state.focusLog[t] || []).push(row);
+  /* The next action becomes the project's next step only when asked, and only where there are no
+     milestones — with milestones the next step is already the first unticked one, and a second
+     answer to "what's next" is the exact thing the Projects page was built to remove. */
+  if (r.setNext && row.next && f.projectId) {
+    const pr = (state.projects || []).find(x => x.id === f.projectId);
+    if (pr && !projectDerived(pr)) pr.nextMilestone = row.next.slice(0, 90);
+  }
   state.focus = null;
   stopFocusTimer();
   /* the same path the checkbox uses, so cross-linked habits and supplements still get ticked */
@@ -3020,7 +3096,8 @@ function finishFocus(markDone) {
   /* A focus session is one of the few things in this app that is unambiguously WORK. Recording it
      against whatever it served is how a project's history stops being empty. */
   if (mins > 0) {
-    const what = `Focused ${mins} min\u00a0\u00b7 ${f.title}`;
+    /* an outcome, where one was written, is more use in a history line than the task's title */
+    const what = `Focused ${mins} min\u00a0\u00b7 ${row.outcome || f.title}`;
     if (f.taskId) touch("task", f.taskId, `Focused ${mins} min`);
     if (f.goalId) touch("goal", f.goalId, what);
     if (f.projectId) touch("project", f.projectId, what);
@@ -3121,11 +3198,38 @@ function openFocusStart(id) {
 }
 /* Finishing OFFERS to tick the task; it never assumes. Twenty-five minutes on something rarely
    means the something is over, and a done list full of unfinished work is worse than no done list. */
+const FOCUS_RATING = ["", "Scattered", "Patchy", "OK", "Good", "Deep"];
+/* The reflection is offered ONLY for a session that served a project. A 25-minute timer on "reply
+   to emails" gets the same one-tap finish it always had — four textareas on every pomodoro is the
+   friction the Bible's own principles warn against, and a goal has nowhere to display them. */
+function focusReflectFields(pr) {
+  const canSetNext = !projectDerived(pr);
+  return `<details class="reflect">
+    <summary>How did it go? <small class="soft">— optional</small></summary>
+    <div class="reflect-body">
+      <div class="fld"><span>Focus</span>
+        <div class="rate-row" role="radiogroup" aria-label="How focused were you?">
+          ${[1, 2, 3, 4, 5].map(n => `<label class="rate-chip">
+            <input type="radio" name="focus" value="${n}"><span>${n}<i>${esc(FOCUS_RATING[n])}</i></span>
+          </label>`).join("")}
+        </div>
+      </div>
+      ${fld("What got done", `<textarea name="outcome" maxlength="400" rows="2" placeholder="the thing you actually finished…"></textarea>`)}
+      ${fld("What got in the way <small class=\"soft\">— optional</small>", `<textarea name="obstacles" maxlength="400" rows="2" placeholder="what slowed it down"></textarea>`)}
+      ${fld("Next action", txt("next", "where to pick up next time", "", false))}
+      ${canSetNext ? `<label class="chip-check" style="display:inline-flex;margin-top:2px">
+        <input type="checkbox" name="setNext"><span>…and make this ${esc(pr.name)}'s next step</span></label>`
+        : `<p class="soft small">${I.target} ${esc(pr.name)} takes its next step from its milestones, so this note stays with the session.</p>`}
+      <p class="soft note">${I.clock} Sessions — and these notes with them — are kept for ${Math.round(FOCUS_KEEP_DAYS / 365)} year, then dropped. They can't be edited afterwards, so write what you'd want to read.</p>
+    </div>
+  </details>`;
+}
 function openFocusFinish() {
   const f = state.focus;
   if (!f) return;
   const mins = clamp(Math.round(focusElapsed(f) / 60000), 0, f.mins);
   const td = f.taskId ? state.todos.find(x => x.id === f.taskId) : null;
+  const pr = f.projectId ? (state.projects || []).find(x => x.id === f.projectId) : null;
   openModal(`<form data-submit="focus-log">
     <header class="modal-head"><h3>${focusDone(f) ? "Session complete" : "End this session"}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body">
@@ -3134,6 +3238,7 @@ function openFocusFinish() {
       ${td && !td.done ? `<label class="chip-check" style="display:inline-flex;margin:4px 0 8px">
         <input type="checkbox" name="markDone"><span>…and mark the task done</span></label>` : ""}
       ${!td && f.taskId ? `<p class="soft note">${I.spark} That task has since been deleted — the minutes are still logged against what you were doing.</p>` : ""}
+      ${pr ? focusReflectFields(pr) : ""}
     </div>
     <footer class="modal-foot">
       <button type="button" class="btn danger" data-action="focus-discard">Discard</button>
@@ -5278,12 +5383,34 @@ function openProjectDetail(id) {
       </div>
 
       <div class="fld"><span>Time invested</span>
-        ${mins ? `<p class="soft small">${I.clock} <b>${estLabel(mins)}</b> across ${sessions} focus session${sessions > 1 ? "s" : ""}${worked ? ` · last worked ${esc(agoLabel(worked))}` : ""}.</p>`
+        ${mins ? `<p class="soft small">${I.clock} <b>${estLabel(mins)}</b> across ${sessions} focus session${sessions > 1 ? "s" : ""}${worked ? ` · last worked ${esc(agoLabel(worked))}` : ""}${(() => { const af = projectAvgFocus(p.id); return af ? ` · focus ${af.avg}/5 over ${af.n} rated` : ""; })()}.</p>`
           : `<p class="soft small">No focus sessions have named this project yet. Start a timer on a task that serves it and the minutes land here on their own.</p>`}
         ${pace ? `<div class="gb-pace ${pace.cls}">
           <span class="gb-pace-bar"><i style="width:${pace.elapsed}%"></i></span>
           <span>${pace.elapsed}% of the time · ${pace.made}% of the work — ${esc(pace.txt)}</span>
         </div>` : `<p class="soft small">Give it a <b>start date</b> and a <b>deadline</b> and this can compare how much of the time has gone with how much is done. It won't guess without both.</p>`}
+        ${sessions ? `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(projectSessionsTrend(p.id)))}' data-color="${PJ_HUE}" data-h="110" data-label="Sessions per week"></div>` : ""}
+        ${(() => {
+          const v = milestoneVelocity(p);
+          if (!v) return "";
+          return `<p class="soft small">${I.target} A milestone about every <b>${v.every} day${v.every === 1 ? "" : "s"}</b> across ${v.dated} dated ticks${v.left ? ` — at that rate the last of the ${v.left} remaining lands around <b>${esc(niceDate(v.eta, { month: "short", day: "numeric" }))}</b>` : ""}.${v.partial ? " Older milestones aren't counted — nothing recorded when they were ticked." : ""}</p>`;
+        })()}
+      </div>
+
+      <div class="fld"><span>Work sessions${sessions ? ` <small class="soft">${sessions}</small>` : ""}</span>
+        ${sessions ? `<ul class="ws-list">${projectSessionRows(p.id).slice(0, 8).map(r => `<li class="ws${hasReflection(r) ? "" : " bare"}">
+          <span class="ws-top">
+            <b>${esc(niceDate(r.date, { month: "short", day: "numeric" }))}</b>
+            <span class="ws-mins">${r.mins} min</span>
+            ${r.focus ? `<span class="ws-rate" title="how focused">${"●".repeat(r.focus)}<i>${"●".repeat(5 - r.focus)}</i> ${esc(FOCUS_RATING[r.focus])}</span>` : ""}
+          </span>
+          ${r.outcome ? `<p class="ws-out">${esc(r.outcome)}</p>` : ""}
+          ${r.obstacles ? `<p class="ws-obs">${I.x}${esc(r.obstacles)}</p>` : ""}
+          ${r.next ? `<p class="ws-next">${I.target}${esc(r.next)}</p>` : ""}
+          ${!hasReflection(r) ? `<p class="ws-out soft">${esc(r.title || "Focus session")}</p>` : ""}
+        </li>`).join("")}</ul>
+        ${sessions > 8 ? `<p class="soft small">${sessions - 8} older session${sessions - 8 === 1 ? "" : "s"} not shown.</p>` : ""}`
+        : `<p class="soft small">Nothing logged yet. When you finish a focus session on this project you can note what got done, what got in the way and where to pick up — or skip it, and the minutes are still recorded.</p>`}
       </div>
 
       <div class="fld"><span>Files</span>
@@ -5309,6 +5436,7 @@ function openProjectDetail(id) {
         <button class="btn danger" data-action="project-del" data-id="${p.id}">${I.trash}Delete</button>
       </div>
     </div>`);
+  drawCharts();          // the sessions-per-week host is injected outside the render cycle
 }
 
 function projectFormFields(p) {
@@ -6861,6 +6989,9 @@ const ACTIONS = {
     const p = state.projects.find(x => x.id === el.dataset.p);
     const m = p && (p.milestones || []).find(x => x.id === el.dataset.m); if (!m) return;
     m.done = !m.done;
+    /* stamped on tick, cleared on untick — this is what makes velocity answerable, and an untick
+       means it was never really done, so the date must go with it */
+    m.doneOn = m.done ? todayIso() : "";
     if (m.done) { addXp(15, "Milestone"); touch("project", p.id, `Milestone: ${m.text}`); }
     save(); render(); openProjectDetail(p.id);
   },
@@ -7212,7 +7343,7 @@ const SUBMITS = {
       priority: "med", estMin: 0, linkGoalId: "", projectId: "", focus: false, hard: false }));
   },
   "focus-start": (f) => { startFocus(state.todos.find(x => x.id === f.id), f.mins); },
-  "focus-log": (f) => { finishFocus(!!f.markDone); },
+  "focus-log": (f) => { finishFocus(!!f.markDone, f); },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
   "data-reset": () => { clearAllMedia(); localStorage.removeItem(STORE_KEY); state = defaultState(); save(); setTimeout(() => maybeOnboard(), 60); },
   "data-fresh": () => {
