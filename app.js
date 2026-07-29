@@ -42,7 +42,58 @@ function cssVar(v, fallback = "") {
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 /* de-duplicated: the same tag twice on one thing means nothing and just clutters the chip row */
 const parseTags = (v) => [...new Set(String(v || "").split(",").map(x => x.trim()).filter(Boolean))].slice(0, 8);
-const money = (n) => (n < 0 ? "-$" : "$") + Math.abs(+n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
+/* ---- money ----
+   This used to hardcode a "$", which meant an 18,000,000-toman gymnastics package rendered as
+   $18,000,000 — the app confidently stating something false. Every amount now carries the currency
+   it was actually paid in. Toman, not Rial: prices in Iran are quoted in toman. */
+const CURRENCIES = {
+  USD: { code: "USD", sym: "$",     name: "US dollar", pre: true,  dp: 2 },
+  IRT: { code: "IRT", sym: "تومان", name: "Toman",     pre: false, dp: 0 },
+};
+const CUR_CODES = Object.keys(CURRENCIES);
+const defaultCur = () => (typeof state !== "undefined" && state && state.profile && CURRENCIES[state.profile.currency]) ? state.profile.currency : "USD";
+const curOf = (c) => CURRENCIES[c] || CURRENCIES[defaultCur()];
+function money(n, cur) {
+  const c = curOf(cur);
+  const v = Math.abs(+n || 0).toLocaleString(undefined, { maximumFractionDigits: c.dp });
+  const sign = (+n || 0) < 0 ? "−" : "";
+  return c.pre ? `${sign}${c.sym}${v}` : `${sign}${v} ${c.sym}`;
+}
+/* Sum a list into one bucket per currency. Deliberately NOT one number: dollars and toman cannot be
+   added without a rate, and the app doesn't have one unless you gave it one. */
+function sumByCur(rows, getAmt, getCur) {
+  const out = {};
+  (rows || []).forEach(r => {
+    const c = CURRENCIES[getCur(r)] ? getCur(r) : defaultCur();
+    out[c] = (out[c] || 0) + (+getAmt(r) || 0);
+  });
+  return out;
+}
+const curCount = (sums) => Object.keys(sums).filter(c => sums[c]).length;
+/* every currency present, side by side — never silently merged */
+const moneyLine = (sums) => {
+  const parts = Object.keys(sums).filter(c => sums[c]).map(c => money(sums[c], c));
+  return parts.length ? parts.join("  ·  ") : money(0);
+};
+/* A combined figure exists ONLY if you set your own rate, and it always names the rate and the day
+   you set it. The app never fetches a rate and never invents one — a stale number presented as fact
+   is worse than two honest subtotals. */
+function combinedTotal(sums) {
+  const p = (typeof state !== "undefined" && state && state.profile) || {};
+  const rate = +p.fxRate || 0;
+  if (!rate || curCount(sums) < 2) return null;
+  const to = defaultCur();
+  let n = 0;
+  Object.keys(sums).forEach(c => {
+    if (!sums[c]) return;
+    if (c === to) n += sums[c];
+    else if (to === "IRT" && c === "USD") n += sums[c] * rate;
+    else if (to === "USD" && c === "IRT") n += sums[c] / rate;
+    else return;
+  });
+  return { amount: n, cur: to, rate, on: p.fxSetOn || "",
+           note: `at your rate of ${(+rate).toLocaleString()} ${CURRENCIES.IRT.sym} per ${CURRENCIES.USD.sym}1${p.fxSetOn ? `, set ${niceDate(p.fxSetOn, { month: "short", day: "numeric", year: "numeric" })}` : ""}` };
+}
 
 const DAY_MS = 86400000;
 const iso = (d) => {
@@ -165,7 +216,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 18;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 19;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -181,7 +232,8 @@ let loadIssue = null;
 
 function defaultState() {
   return {
-    profile: { name: "", avatar: "🌱", theme: "auto", onboarded: false, apiKey: "", tmdbKey: "", metrics: null },
+    profile: { name: "", avatar: "🌱", theme: "auto", onboarded: false, apiKey: "", tmdbKey: "", metrics: null,
+               currency: "USD", fxRate: 0, fxSetOn: "" },
     xp: 0,
     xpLog: {},                 // {date: xp gained}
     claimed: {},               // {date: {missionId:true}}
@@ -689,6 +741,23 @@ const MIGRATIONS = [
     (s.projects || []).forEach(p => (p.milestones || []).forEach(m => {
       if (m.doneOn == null) m.doneOn = "";
     }));
+  },
+
+  /* 18 → 19 · money stops pretending everything is dollars. `money()` hardcoded a "$", so a class
+     package bought for 18,000,000 toman was displayed as $18,000,000 — the app asserting something
+     plainly false about the user's own spending.
+
+     Existing amounts are backfilled to the profile currency, because that is what they were entered
+     as when there was only one. No conversion happens here: converting would require a rate nobody
+     has supplied, and guessing one would corrupt every past number. */
+  (s) => {
+    s.profile = s.profile || {};
+    if (!CURRENCIES[s.profile.currency]) s.profile.currency = "USD";
+    if (s.profile.fxRate == null) s.profile.fxRate = 0;
+    if (s.profile.fxSetOn == null) s.profile.fxSetOn = "";
+    const def = s.profile.currency;
+    ((s.finance || {}).entries || []).forEach(e => { if (!CURRENCIES[e.cur]) e.cur = def; });
+    ((s.workout || {}).classes || []).forEach(c => { if (!CURRENCIES[c.cur]) c.cur = def; });
   },
 ];
 
@@ -4490,7 +4559,7 @@ function vWorkout() {
           const used = (c.log || []).length, remaining = c.total - used, pct = Math.round(100 * used / c.total), doneAll = remaining <= 0;
           return `<li class="${doneAll ? "spent" : ""}">
             <span class="row-emoji">🎟️</span>
-            <span class="row-txt"><b>${esc(c.name)}</b><small>${used}/${c.total} sessions${c.price ? ` · ${money(c.price)}` : ""}${used ? ` · last ${niceDate((c.log[c.log.length - 1]))}` : ""}</small>${barHtml(pct, doneAll ? "#e5484d" : "#f76b15")}</span>
+            <span class="row-txt"><b>${esc(c.name)}</b><small>${used}/${c.total} sessions${c.price ? ` · ${money(c.price, c.cur)}` : ""}${used ? ` · last ${niceDate((c.log[c.log.length - 1]))}` : ""}</small>${barHtml(pct, doneAll ? "#e5484d" : "#f76b15")}</span>
             <span class="pill-row">
               ${doneAll ? `<button class="btn tiny good" data-action="class-renew" data-id="${c.id}">Renew</button>` : `<button class="btn tiny" data-action="class-attend" data-id="${c.id}">+ Attend</button>`}
               ${used ? `<button class="icon-btn ghost" data-action="class-undo" data-id="${c.id}" aria-label="Undo last">${I.chevL}</button>` : ""}
@@ -4500,7 +4569,7 @@ function vWorkout() {
           </li>`;
         }).join("")}
       </ul>
-      <p class="soft note">${I.spark} Total on classes: <b>${money(state.workout.classes.reduce((a, c) => a + (c.price || 0) * (1 + (c.renewals || 0)), 0))}</b> — this will feed the Finance section later.</p>`
+      <p class="soft note">${I.spark} Total on classes: <b>${moneyTotal(sumByCur(state.workout.classes, c => (c.price || 0) * (1 + (c.renewals || 0)), c => c.cur))}</b> — this feeds the Finance section.</p>`
       : emptyMsg("calendar", "Track class packages (e.g. 8 yoga sessions) so you know when to rebook.", addBtn("Add a package", "class-add"))))}
 
     ${card("span2", cardHead((isToday ? "Today's" : "That day's") + " sessions", addBtn("Log session", "session-add")) + dayNav("workout") + (daySessions.length ? `
@@ -5459,29 +5528,46 @@ function projectFormFields(p) {
     fld("Notes", `<textarea name="note" maxlength="400" placeholder="What is it, and what's next?">${esc(p.note || "")}</textarea>`);
 }
 
+const curSelect = (sel, name = "cur") => `<select name="${name}">${CUR_CODES.map(c =>
+  `<option value="${c}" ${(sel || defaultCur()) === c ? "selected" : ""}>${esc(CURRENCIES[c].name)} (${esc(CURRENCIES[c].sym)})</option>`).join("")}</select>`;
+/* One block that renders a set of per-currency subtotals honestly: each on its own, plus a combined
+   figure ONLY where the user has supplied a rate — always labelled with the rate and its date. */
+function moneyTotal(sums, cls) {
+  const combo = combinedTotal(sums);
+  return `<span class="${cls || ""}">${moneyLine(sums)}</span>` +
+    (combo ? `<small class="soft fx-note"> ≈ ${money(combo.amount, combo.cur)} <i>${esc(combo.note)}</i></small>`
+      : curCount(sums) > 1 ? `<small class="soft fx-note"> Two currencies — set a rate in Profile to see one number.</small>` : "");
+}
+
 /* ---------- finance ---------- */
 const EXPENSE_CATS = ["Food", "Health", "Fitness", "Subscriptions", "Transport", "Bills", "Shopping", "Fun", "Education", "Other"];
 const INCOME_CATS = ["Salary", "Freelance", "Gift", "Refund", "Other"];
+/* Per currency, never one merged number — see sumByCur(). */
 function financeMonth(mk) {
   mk = mk || monthKey();
-  let income = 0, expense = 0;
-  state.finance.entries.forEach(e => {
-    if ((e.date || "").slice(0, 7) !== mk) return;
-    if (e.type === "income") income += +e.amount || 0; else expense += +e.amount || 0;
-  });
-  return { income, expense, net: income - expense };
+  const rows = state.finance.entries.filter(e => (e.date || "").slice(0, 7) === mk);
+  const income = sumByCur(rows.filter(e => e.type === "income"), e => e.amount, e => e.cur);
+  const expense = sumByCur(rows.filter(e => e.type !== "income"), e => e.amount, e => e.cur);
+  const net = {};
+  [...Object.keys(income), ...Object.keys(expense)].forEach(c => { net[c] = (income[c] || 0) - (expense[c] || 0); });
+  return { income, expense, net, rows: rows.length };
 }
-function financeTrend() {
+/* A bar chart mixing dollars and toman would be a picture of nothing, so the trend shows ONE
+   currency and names it. Anything spent in the other is reported separately rather than folded in. */
+function financeTrend(cur) {
+  const c = CURRENCIES[cur] ? cur : defaultCur();
   const out = [];
   const now = new Date();
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const mk = d.toISOString().slice(0, 7);
-    const exp = financeMonth(mk).expense;
-    out.push({ label: d.toLocaleDateString(undefined, { month: "short" }), value: Math.round(exp), tip: `${d.toLocaleDateString(undefined, { month: "long" })}: ${money(exp)} spent` });
+    const exp = financeMonth(mk).expense[c] || 0;
+    out.push({ label: d.toLocaleDateString(undefined, { month: "short" }), value: Math.round(exp), tip: `${d.toLocaleDateString(undefined, { month: "long" })}: ${money(exp, c)} spent` });
   }
   return out;
 }
+/* which currencies this person actually uses — drives whether the UI mentions them at all */
+const usedCurrencies = () => Object.keys(sumByCur(state.finance.entries || [], e => 1, e => e.cur)).filter(Boolean);
 function pendingClassSpend() {
   return (state.workout.classes || []).filter(c => !state.finance.importedClasses.includes(c.id) && (c.price || 0) > 0);
 }
@@ -5489,17 +5575,18 @@ function vFinance() {
   const m = financeMonth();
   const entries = [...state.finance.entries].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).slice(0, 24);
   const pending = pendingClassSpend();
-  const pendingTot = pending.reduce((a, c) => a + (c.price || 0) * (1 + (c.renewals || 0)), 0);
+  const pendingTot = sumByCur(pending, c => (c.price || 0) * (1 + (c.renewals || 0)), c => c.cur);
+  const trendCur = defaultCur(), others = usedCurrencies().filter(c => c !== trendCur);
   return `
   <div class="grid">
     ${card("span2", `
       <div class="goal-row">
-        <div><p class="soft">This month · net</p><h3 class="${m.net < 0 ? "neg" : "pos"}">${money(m.net)}</h3></div>
+        <div><p class="soft">This month · net</p><h3 class="${(m.net[defaultCur()] || 0) < 0 ? "neg" : "pos"}">${moneyLine(m.net)}</h3>${curCount(m.net) > 1 ? `<small class="soft">${esc((combinedTotal(m.net) || {}).note || "Two currencies — set a rate in Profile to see one number.")}</small>` : ""}</div>
         <span class="big-ic" style="--a:#2f9e6f">${I.wallet}</span>
       </div>
       <div class="read-stats">
-        <div><b class="pos">${money(m.income)}</b><small>income</small></div>
-        <div><b class="neg">${money(m.expense)}</b><small>spent</small></div>
+        <div><b class="pos">${moneyLine(m.income)}</b><small>income</small></div>
+        <div><b class="neg">${moneyLine(m.expense)}</b><small>spent</small></div>
         <div><b>${state.finance.entries.length}</b><small>entries</small></div>
       </div>
       <div class="pill-row" style="margin-top:12px">
@@ -5507,10 +5594,11 @@ function vFinance() {
         <button class="btn danger" data-action="fin-expense">${I.plus}Expense</button>
       </div>`)}
 
-    ${card("span2", cardHead("Spending · last 6 months") + `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(financeTrend()))}' data-color="#2f9e6f" data-label="Monthly spending"></div>`)}
+    ${card("span2", cardHead(`Spending · last 6 months <small class="soft">${esc(CURRENCIES[trendCur].name)}</small>`) + `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(financeTrend(trendCur)))}' data-color="#2f9e6f" data-label="Monthly spending"></div>` +
+      (others.length ? `<p class="soft small">${I.spark} You also spend in ${others.map(c => esc(CURRENCIES[c].name)).join(" and ")}. That isn't drawn here — two currencies on one axis would be a picture of nothing.</p>` : ""))}
 
     ${pending.length ? card("span2", cardHead("From your Workout classes") + `
-      <p class="soft">You've got <b>${money(pendingTot)}</b> of class-package spend not yet in Finance.</p>
+      <p class="soft">You've got <b>${moneyLine(pendingTot)}</b> of class-package spend not yet in Finance.</p>
       <div class="pill-row"><button class="btn primary slim" data-action="fin-import-classes">${I.wallet}Import ${pending.length} class ${pending.length > 1 ? "packages" : "package"}</button></div>`) : ""}
 
     ${card("span2", cardHead("Recent activity", addBtn("Add", "fin-expense")) + (entries.length ? `
@@ -5518,7 +5606,7 @@ function vFinance() {
         ${entries.map(e => `<li>
           <span class="fin-ic ${e.type}">${e.type === "income" ? "↑" : "↓"}</span>
           <span class="row-txt"><b>${esc(e.category || (e.type === "income" ? "Income" : "Expense"))}</b><small>${e.note ? esc(e.note) + " · " : ""}${niceDate(e.date)}</small></span>
-          <b class="fin-amt ${e.type === "income" ? "pos" : "neg"}">${e.type === "income" ? "+" : "−"}${money(e.amount)}</b>
+          <b class="fin-amt ${e.type === "income" ? "pos" : "neg"}">${e.type === "income" ? "+" : "−"}${money(e.amount, e.cur)}</b>
           <button class="icon-btn ghost" data-action="fin-edit" data-id="${e.id}" aria-label="Edit entry">${I.edit}</button>
           <button class="icon-btn ghost" data-action="fin-del" data-id="${e.id}" aria-label="Delete entry">${I.trash}</button>
         </li>`).join("")}
@@ -5528,8 +5616,8 @@ function vFinance() {
 function finEntryForm(type, presetAmount, presetNote, presetCat) {
   const cats = type === "income" ? INCOME_CATS : EXPENSE_CATS;
   formModal(type === "income" ? "Add income" : "Add expense",
-    `<div class="fld-row">${fld("Amount", `<input type="number" name="amount" min="0" step="any" value="${presetAmount != null ? presetAmount : ""}" inputmode="decimal" required>`)}${fld("Date", `<input type="date" name="date" value="${todayIso()}">`)}</div>` +
-    fld("Category", `<select name="category">${cats.map(c => `<option ${presetCat === c ? "selected" : ""}>${c}</option>`).join("")}</select>`) +
+    `<div class="fld-row">${fld("Amount", `<input type="number" name="amount" min="0" step="any" value="${presetAmount != null ? presetAmount : ""}" inputmode="decimal" required>`)}${fld("Currency", curSelect())}</div>` +
+    `<div class="fld-row">${fld("Date", `<input type="date" name="date" value="${todayIso()}">`)}${fld("Category", `<select name="category">${cats.map(c => `<option ${presetCat === c ? "selected" : ""}>${c}</option>`).join("")}</select>`)}</div>` +
     fld("Note", txt("note", "optional", presetNote || "", false)) +
     `<input type="hidden" name="type" value="${type}">`, "fin-entry");
 }
@@ -6288,6 +6376,14 @@ function vProfile() {
         <button class="btn danger" data-action="data-reset">${I.trash}Reset everything</button>
       </div>
       <p class="soft note"><b>Start fresh</b> clears all the demo/sample content &amp; uploaded media but keeps your name, theme and keys. <b>Load sample data</b> refills the demo. <b>Reset everything</b> wipes it all, including your profile.</p>`)}
+    ${card("span2", cardHead("Money") + `
+      <label class="fld"><span>Your currency <small class="soft">— what new amounts default to</small></span>
+        ${curSelect(state.profile.currency, "profile-currency").replace('name="profile-currency"', 'data-change="profile-currency"')}</label>
+      <label class="fld"><span>Exchange rate <small class="soft">— optional</small></span>
+        <input type="number" min="0" step="any" inputmode="decimal" data-change="profile-fx"
+          value="${state.profile.fxRate || ""}" placeholder="${esc(CURRENCIES.IRT.sym)} per ${esc(CURRENCIES.USD.sym)}1"></label>
+      <p class="soft note">${I.spark} Every amount remembers the currency it was paid in, and totals are shown per currency. LifeHub <b>never looks up a rate</b> — if you give it one it will show a combined figure, always labelled with your rate and the day you set it${state.profile.fxSetOn ? ` (currently ${esc(niceDate(state.profile.fxSetOn, { month: "long", day: "numeric", year: "numeric" }))})` : ""}. Leave it blank and it simply shows both.</p>`)}
+
     ${card("span2", cardHead("Connections") + `
       <label class="fld"><span>TMDb API key <small class="soft">— powers movie &amp; series search + autofill</small></span>
         <input type="text" data-change="tmdb-key" value="${esc(state.profile.tmdbKey || "")}" placeholder="Paste your free TMDb key" autocomplete="off"></label>
@@ -6646,7 +6742,7 @@ const ACTIONS = {
   "class-add": () => formModal("New class package",
     fld("Class name", txt("name", "e.g. Yoga studio")) +
     `<div class="fld-row">${fld("Total sessions", `<input type="number" name="total" value="8" min="1">`)}${fld("Price paid", `<input type="number" name="price" value="0" min="0" step="any">`)}</div>` +
-    fld("Start date", `<input type="date" name="start" value="${todayIso()}">`), "class-add"),
+    `<div class="fld-row">${fld("Currency", curSelect())}${fld("Start date", `<input type="date" name="start" value="${todayIso()}">`)}</div>`, "class-add"),
   "class-attend": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length < c.total) { c.log = c.log || []; c.log.push(todayIso()); addXp(10, c.name); save(); render(); if ((c.log.length) >= c.total) toast(`Last session of ${c.name} — time to renew 🔁`); } },
   "class-undo": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length) { c.log.pop(); save(); render(); } },
   "class-renew": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c) { c.renewals = (c.renewals || 0) + 1; c.log = []; c.start = todayIso(); save(); render(); toast(`${c.name} renewed`); } },
@@ -6751,8 +6847,8 @@ const ACTIONS = {
     const x = state.finance.entries.find(v => v.id === el.dataset.id); if (!x) return;
     const cats = x.type === "income" ? INCOME_CATS : EXPENSE_CATS;
     formModal(x.type === "income" ? "Edit income" : "Edit expense",
-      `<div class="fld-row">${fld("Amount", `<input type="number" name="amount" min="0" step="any" value="${x.amount}" inputmode="decimal" required>`)}${fld("Date", `<input type="date" name="date" value="${x.date}">`)}</div>` +
-      fld("Category", `<select name="category">${cats.map(c => `<option ${x.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>`) +
+      `<div class="fld-row">${fld("Amount", `<input type="number" name="amount" min="0" step="any" value="${x.amount}" inputmode="decimal" required>`)}${fld("Currency", curSelect(x.cur))}</div>` +
+      `<div class="fld-row">${fld("Date", `<input type="date" name="date" value="${x.date}">`)}${fld("Category", `<select name="category">${cats.map(c => `<option ${x.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>`)}</div>` +
       fld("Note", txt("note", "optional", x.note || "", false)) +
       `<input type="hidden" name="id" value="${x.id}">`, "fin-edit");
   },
@@ -7013,7 +7109,7 @@ const ACTIONS = {
   "fin-import-classes": () => {
     const pending = pendingClassSpend();
     pending.forEach(c => {
-      state.finance.entries.push({ id: uid(), date: c.start || todayIso(), type: "expense", amount: (c.price || 0) * (1 + (c.renewals || 0)), category: "Fitness", note: `${c.name} class package` });
+      state.finance.entries.push({ id: uid(), date: c.start || todayIso(), type: "expense", amount: (c.price || 0) * (1 + (c.renewals || 0)), cur: CURRENCIES[c.cur] ? c.cur : defaultCur(), category: "Fitness", note: `${c.name} class package` });
       state.finance.importedClasses.push(c.id);
     });
     save(); render(); toast(`Imported ${pending.length} class ${pending.length > 1 ? "packages" : "package"} 💸`);
@@ -7205,7 +7301,7 @@ const SUBMITS = {
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
   "workout-add": (f) => { state.workout.plan.push(Object.assign({ id: uid() }, planFromForm(f))); },
   "workout-edit": (f) => { const p = state.workout.plan.find(x => x.id === f.id); if (p) Object.assign(p, planFromForm(f)); },
-  "class-add": (f) => { state.workout.classes.push({ id: uid(), name: f.name, total: Math.max(1, +f.total || 8), price: +f.price || 0, start: f.start || todayIso(), log: [], renewals: 0 }); },
+  "class-add": (f) => { state.workout.classes.push({ id: uid(), name: f.name, total: Math.max(1, +f.total || 8), price: +f.price || 0, cur: CURRENCIES[f.cur] ? f.cur : defaultCur(), start: f.start || todayIso(), log: [], renewals: 0 }); },
   "session-add": (f) => { const d = dayCursor("workout"); const sess = { id: uid(), date: d, category: f.category || "Strength", planId: null, planName: "", note: f.note || "", exercises: [], media: [] }; state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
   "session-note": (f) => { const s = state.workout.sessions.find(x => x.id === f.id); if (s) s.note = f.note; },
   "ex-add": (f) => {
@@ -7249,8 +7345,8 @@ const SUBMITS = {
   },
   "social-edit": (f) => { const x = state.social.items.find(v => v.id === f.id); if (x) { x.title = f.title; x.emoji = f.emoji || x.emoji; x.target = Math.max(1, +f.target || 1); } },
   "memory-edit": (f) => { const x = state.memories.find(v => v.id === f.id); if (x) { x.title = f.title; x.note = f.note || ""; x.emoji = f.emoji || x.emoji; x.date = f.date || x.date; x.tags = parseTags(f.tags); x.felt = f.felt || ""; } },
-  "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
-  "class-edit": (f) => { const x = state.workout.classes.find(v => v.id === f.id); if (x) { x.name = f.name; x.total = Math.max(1, +f.total || x.total); x.price = +f.price || 0; x.start = f.start || x.start; } },
+  "fin-edit": (f) => { const x = state.finance.entries.find(v => v.id === f.id); if (x) { x.amount = Math.max(0, +f.amount || 0); if (CURRENCIES[f.cur]) x.cur = f.cur; x.date = f.date || x.date; x.category = f.category || x.category; x.note = f.note || ""; } },
+  "class-edit": (f) => { const x = state.workout.classes.find(v => v.id === f.id); if (x) { x.name = f.name; x.total = Math.max(1, +f.total || x.total); x.price = +f.price || 0; if (CURRENCIES[f.cur]) x.cur = f.cur; x.start = f.start || x.start; } },
   "sup-add": (f) => { state.nutrition.supplements.push({ id: uid(), name: f.name, emoji: f.emoji || "💊", dose: f.dose || "", every: ["day", "week", "month"].includes(f.every) ? f.every : "day" }); },
   "skills-goal": (f) => { state.skills.monthlyHours = +f.hours; },
   "uni-goal": (f) => { state.university.weeklyHours = +f.hours; },
@@ -7327,7 +7423,7 @@ const SUBMITS = {
   "fin-entry": (f) => {
     const amt = +f.amount || 0; if (amt <= 0) return;
     const type = f.type === "income" ? "income" : "expense";
-    state.finance.entries.push({ id: uid(), date: f.date || todayIso(), type, amount: amt, category: f.category || "Other", note: f.note || "" });
+    state.finance.entries.push({ id: uid(), date: f.date || todayIso(), type, amount: amt, cur: CURRENCIES[f.cur] ? f.cur : defaultCur(), category: f.category || "Other", note: f.note || "" });
     addXp(3, type === "income" ? "Income logged" : "Expense logged");
   },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
@@ -7499,6 +7595,15 @@ const CHANGES = {
       touch("project", p.id, "File added");
       save(); render(); openProjectDetail(p.id); toast("File added 📎");
     });
+  },
+  "profile-currency": (el) => { if (CURRENCIES[el.value]) { state.profile.currency = el.value; save(); render(); } },
+  /* the date is stamped alongside the rate, because a rate without a date is a number pretending
+     not to go stale */
+  "profile-fx": (el) => {
+    const v = Math.max(0, +el.value || 0);
+    state.profile.fxRate = v;
+    state.profile.fxSetOn = v ? todayIso() : "";
+    save(); render();
   },
   "tmdb-key": (el) => { state.profile.tmdbKey = el.value.trim(); save(); },
 
