@@ -1932,3 +1932,61 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
    user typed and the app has no way to keep fresh. */
 .fx-note { display: block; margin-top: 3px; font-size: 11px; line-height: 1.45; }
 .fx-note i { font-style: normal; opacity: .8; }
+
+/* ---------- athletic skills ---------- */
+.skill-list { display: flex; flex-direction: column; gap: 9px; }
+.skl {
+  display: flex; align-items: center; gap: 11px; padding: 11px 12px;
+  border-radius: 15px; background: var(--surface-2); border: 1px solid var(--line);
+  border-left: 3px solid var(--a); cursor: pointer;
+  transition: transform .18s var(--ease-out), box-shadow .18s;
+}
+.skl:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.skl-emoji { font-size: 23px; line-height: 1; flex: 0 0 auto; }
+.skl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.skl-top { display: flex; align-items: baseline; gap: 8px; }
+.skl-top b { font-size: 14.5px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skl-stage {
+  flex: none; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; color: var(--a);
+  background: color-mix(in srgb, var(--a) 14%, transparent);
+}
+.skl .bar { height: 7px; }
+.skl-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11.5px; color: var(--ink-3); }
+.skl-meta > span { display: inline-flex; align-items: center; gap: 4px; }
+.skl-meta svg { width: 12px; height: 12px; flex: none; }
+.skl-go { flex: none; color: var(--ink-3); display: flex; }
+.skl-go svg { width: 18px; height: 18px; }
+
+/* the stage picker — a judgement the user makes, so it reads as a choice, not a readout */
+.stage-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.stage-chip {
+  flex: 1 1 auto; padding: 8px 10px; border-radius: 12px; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--ink-2); cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s, transform .15s var(--ease-out);
+}
+.stage-chip:hover { transform: translateY(-1px); }
+.stage-chip.on {
+  border-color: var(--a); color: var(--a); transform: none;
+  background: color-mix(in srgb, var(--a) 13%, transparent);
+}
+
+.skl-log { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+.skl-log li { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.sl-when { flex: 0 0 auto; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.sl-what { flex: 1; min-width: 0; }
+
+/* what a session turned out to be about */
+.sess-meta { margin-top: 7px; font-size: 12px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 3px 6px; align-items: center; }
+.sess-meta svg { width: 12px; height: 12px; }
+.sess-coach, .sess-learn, .sess-next {
+  display: flex; align-items: flex-start; gap: 6px; margin-top: 6px;
+  font-size: 12.5px; line-height: 1.45;
+}
+.sess-coach svg, .sess-learn svg, .sess-next svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.sess-coach { color: var(--ink-2); font-style: italic; }
+.sess-coach svg { color: #8e4ec6; }
+.sess-learn svg { color: #30a46c; }
+.sess-next { color: var(--ink-3); }
+.sess-next svg { color: #f76b15; }
+.coach-log .hl-what i { font-style: normal; }

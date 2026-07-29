@@ -216,7 +216,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 19;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 20;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -262,7 +262,11 @@ function defaultState() {
     focusLog: {},              // {date: [{id,taskId,title,mins,goalId,projectId,at}]}
     habits: [],                // {id,name,emoji,kind,goalId,milestones,log:{date:{done,note,workoutId}}}
     health: { goals: { steps: 10000, water: 2, sleep: 8 }, log: {} }, // log[date]={steps,water,sleep,mood}
-    workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
+    /* skills: the ATHLETE's skills (handstand, muscle-up, back wheel) — deliberately under
+       `workout`, because `state.skills` is already Education courses and one name for two
+       unrelated things is how a codebase starts lying to you.
+       {id,name,emoji,category,level,target,status,why,pbUnit,media:[],notes:[],log:[],created,updated} */
+    workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [], skills: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
     nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70, fiber: 30 }, meals: [], log: {}, photos: {}, supplements: [], supTaken: {}, shopping: [] },
     skills: { monthlyHours: 10, courses: [] },
     study: { log: {} },        // log[date]={skills:mins, university:mins} — ONE ledger, split by source
@@ -758,6 +762,30 @@ const MIGRATIONS = [
     const def = s.profile.currency;
     ((s.finance || {}).entries || []).forEach(e => { if (!CURRENCIES[e.cur]) e.cur = def; });
     ((s.workout || {}).classes || []).forEach(c => { if (!CURRENCIES[c.cur]) c.cur = def; });
+  },
+
+  /* 19 → 20 · Training gets the two things the spec says turn logging into a journal: the skills a
+     session was actually for, and what the session taught you.
+
+     A session's new fields all start empty. `attendance` defaults to "present" because a session
+     only exists at all because you logged one — an absence is something you'd have to say. */
+  (s) => {
+    s.workout = s.workout || {};
+    if (!Array.isArray(s.workout.skills)) s.workout.skills = [];
+    (s.workout.sessions || []).forEach(x => {
+      if (!Array.isArray(x.skills)) x.skills = [];
+      if (x.coach == null) x.coach = "";
+      if (x.location == null) x.location = "";
+      if (x.duration == null) x.duration = 0;
+      if (x.attendance == null) x.attendance = "present";
+      if (x.energy == null) x.energy = 0;
+      if (x.difficulty == null) x.difficulty = 0;
+      if (x.enjoyed == null) x.enjoyed = 0;
+      if (x.feedback == null) x.feedback = "";
+      if (x.learned == null) x.learned = "";
+      if (x.reflection == null) x.reflection = "";
+      if (x.nextGoal == null) x.nextGoal = "";
+    });
   },
 ];
 
@@ -1879,6 +1907,7 @@ const OBJECTS = {
   txn:     { label: "Money",   list: () => state.finance.entries,  title: o => o.note || o.category, emoji: () => "\u{1F4B6}", open: "" },
   uni:     { label: "Coursework", list: () => state.university.tasks, title: o => o.title, emoji: () => "\u{1F3DB}\uFE0F", open: "" },
   work:    { label: "Career",  list: () => state.work.items,       title: o => o.title, emoji: () => "\u{1F4BC}",           open: "" },
+  skill:   { label: "Skill",   list: () => skillsAll(),               title: o => o.name,  emoji: o => o.emoji || "\u{1F938}", open: "skill-open" },
   event:   { label: "Event",   list: () => state.events,           title: o => o.title, emoji: o => o.icon || "\u{1F4C5}", open: "event-open" },
 };
 const ref = (type, id) => `${type}:${id}`;
@@ -4413,6 +4442,7 @@ function removeSession(id) {
   const s = state.workout.sessions.find(x => x.id === id);
   if (!s) return;
   (s.media || []).forEach(dropMedia);
+  dropSessionSkills(id);        // the practice entries this session created go with it
   state.workout.sessions = state.workout.sessions.filter(x => x.id !== id);
   Object.keys(state.workout.log).forEach(d => {
     state.workout.log[d] = (state.workout.log[d] || []).filter(x => x !== id);
@@ -4420,6 +4450,76 @@ function removeSession(id) {
   });
   state.habits.forEach(h => Object.values(h.log).forEach(e => { if (e && typeof e === "object" && e.workoutId === id) delete e.workoutId; }));
 }
+/* ===== athletic skills — "am I improving?" =====
+   A skill is not a percentage. "Back wheel" is somewhere between can't and can, and the honest
+   description of where you are is a stage you pick, not a number the app computes. The four stages
+   come straight from the spec; the app supplies the evidence (when you last practised, how often,
+   your best) and leaves the judgement to you. It will never decide you have Mastered something. */
+const SKILL_STAGES = [
+  { id: "learning",   label: "Learning",   pct: 25,  hue: "#e5484d", hint: "mostly failing — which is what learning looks like" },
+  { id: "practicing", label: "Practicing", pct: 50,  hue: "#f76b15", hint: "it happens sometimes" },
+  { id: "consistent", label: "Consistent", pct: 75,  hue: "#3e63dd", hint: "it happens most times you try" },
+  { id: "mastered",   label: "Mastered",   pct: 100, hue: "#30a46c", hint: "on demand, cold" },
+];
+const SKILL_CATS = ["Calisthenics", "Gymnastics", "Mobility", "Balance", "Other"];
+const skillsAll = () => (state.workout.skills = state.workout.skills || []);
+const skillById = (id) => skillsAll().find(x => x.id === id) || null;
+const skillStage = (sk) => SKILL_STAGES.find(x => x.id === sk.status) || SKILL_STAGES[0];
+const skillLog = (sk) => (sk.log = sk.log || []);
+const skillLastPracticed = (sk) => skillLog(sk).map(r => r.date).sort().pop() || "";
+/* Best is DERIVED from the practice log, never stored beside it — a stored personal best is a second
+   number that can quietly disagree with the entries it was supposed to summarise. */
+function skillBest(sk) {
+  const vals = skillLog(sk).map(r => +r.best || 0).filter(v => v > 0);
+  return vals.length ? Math.max(...vals) : 0;
+}
+function skillTrend(sk) {
+  return skillLog(sk).filter(r => +r.best > 0).sort((a, b) => a.date.localeCompare(b.date))
+    .map(r => ({ label: +r.date.slice(-2), value: +r.best,
+                 tip: `${niceDate(r.date)} · ${r.best}${sk.pbUnit ? " " + sk.pbUnit : ""}` }));
+}
+/* A session names the skills it was for; those entries live in the skill's own log so a skill can
+   also be practised outside a session. This reconciles the two directions in one pass and is
+   idempotent, so editing a session's skill list adds and removes exactly what changed. */
+function syncSessionSkills(sess) {
+  skillsAll().forEach(sk => {
+    const log = skillLog(sk);
+    const has = log.some(r => r.sessionId === sess.id);
+    const want = (sess.skills || []).includes(sk.id);
+    if (want && !has) log.push({ id: uid(), date: sess.date, note: "", best: 0, sessionId: sess.id });
+    else if (want && has) log.forEach(r => { if (r.sessionId === sess.id) r.date = sess.date; });
+    else if (!want && has) sk.log = log.filter(r => r.sessionId !== sess.id);
+  });
+}
+/* deleting a session must take its practice entries with it, exactly as removeSession already
+   strips the session id out of habit logs */
+const dropSessionSkills = (id) => skillsAll().forEach(sk => { sk.log = skillLog(sk).filter(r => r.sessionId !== id); });
+/* skills nobody has touched lately — evidence for the user, not a verdict from the app */
+function staleSkills(days = 14) {
+  return skillsAll().filter(sk => {
+    if (sk.status === "mastered") return false;
+    const last = skillLastPracticed(sk);
+    return !last || daysLeft(last) < -days;
+  });
+}
+/* Every coach correction ever received, newest first — no new storage at all, just the feedback
+   already sitting on sessions. */
+function coachNotes(coach) {
+  const out = [];
+  (state.workout.sessions || []).forEach(s => {
+    if (s.feedback && (!coach || normName(s.coach) === normName(coach))) {
+      out.push({ date: s.date, coach: s.coach || "", text: s.feedback, id: s.id });
+    }
+  });
+  skillsAll().forEach(sk => (sk.notes || []).forEach(n => {
+    if (!coach || normName(n.coach) === normName(coach)) {
+      out.push({ date: (n.at || "").slice(0, 10), coach: n.coach || "", text: n.text, skill: sk.name });
+    }
+  }));
+  return out.sort((a, b) => b.date.localeCompare(a.date));
+}
+const coachesSeen = () => [...new Set((state.workout.sessions || []).map(s => s.coach).filter(Boolean))];
+
 /* ----- exercise / PR helpers ----- */
 function setLabel(ex, set) {
   if (ex.kind === "time") return `${set.seconds || 0}s`;
@@ -4473,16 +4573,37 @@ function totalsFor(sessions) {
   }, { sets: 0, reps: 0, volume: 0, seconds: 0, distance: 0, exercises: 0, unit: "km" });
 }
 function exerciseKind(name) { for (const s of state.workout.sessions) for (const e of (s.exercises || [])) if (e.name === name) return e.kind; return "reps"; }
+/* Is every weighted set on this exercise bodyweight? Pull-ups and push-ups are logged as
+   `0 kg × 12`, so measuring them by weight gives 0 and the app proudly announced "PR 0 kg" — while
+   "Maximum Pull Ups" is the very first line of the spec's Personal Records. For an exercise that
+   has never carried load, the record IS the rep count. */
+function isBodyweight(name) {
+  let any = false;
+  for (const s of state.workout.sessions)
+    for (const e of (s.exercises || []))
+      if (e.name === name && e.kind === "reps")
+        for (const set of (e.sets || [])) { any = true; if ((+set.weight || 0) > 0) return false; }
+  return any;
+}
+const setMetric = (kind, set, bw) =>
+  kind === "reps" ? (bw ? (+set.reps || 0) : (+set.weight || 0))
+  : kind === "time" ? (+set.seconds || 0) : (+set.distance || 0);
 function prPrimary(name, kind) {
+  const bw = kind === "reps" && isBodyweight(name);
   let best = 0;
-  state.workout.sessions.forEach(s => (s.exercises || []).forEach(e => { if (e.name !== name) return; (e.sets || []).forEach(set => { best = Math.max(best, kind === "reps" ? (set.weight || 0) : kind === "time" ? (set.seconds || 0) : (set.distance || 0)); }); }));
+  state.workout.sessions.forEach(s => (s.exercises || []).forEach(e => { if (e.name !== name) return; (e.sets || []).forEach(set => { best = Math.max(best, setMetric(kind, set, bw)); }); }));
   return best;
 }
-function prLabel(kind, v) { return kind === "reps" ? `${v} kg` : kind === "time" ? `${v}s` : `${v} km`; }
+function prLabel(kind, v, name) {
+  if (kind === "time") return `${v}s`;
+  if (kind === "distance") return `${v} km`;
+  return (name && isBodyweight(name)) ? `${v} reps` : `${v} kg`;
+}
 function exerciseSessionBest(name, kind) {
+  const bw = kind === "reps" && isBodyweight(name);
   const rows = [];
   state.workout.sessions.forEach(s => {
-    let v = 0; (s.exercises || []).forEach(e => { if (e.name !== name) return; (e.sets || []).forEach(set => { v = Math.max(v, kind === "reps" ? (set.weight || 0) : kind === "time" ? (set.seconds || 0) : (set.distance || 0)); }); });
+    let v = 0; (s.exercises || []).forEach(e => { if (e.name !== name) return; (e.sets || []).forEach(set => { v = Math.max(v, setMetric(kind, set, bw)); }); });
     if (v > 0) rows.push({ date: s.date, value: v });
   });
   return rows.sort((a, b) => a.date < b.date ? -1 : 1);
@@ -4494,6 +4615,15 @@ function exerciseCard(s, ex) {
     <button class="btn tiny ghost" data-action="set-add" data-s="${s.id}" data-e="${ex.id}">${I.plus}Add set</button>
   </div>`;
 }
+/* One shape for a session, in one place. Three call sites used to build this object literal by hand,
+   which is how two of them end up missing a field a migration added. */
+const bornSession = (o) => Object.assign({
+  id: uid(), date: todayIso(), category: "Strength", planId: null, planName: "", note: "",
+  exercises: [], media: [], skills: [],
+  coach: "", location: "", duration: 0, attendance: "present",
+  energy: 0, difficulty: 0, enjoyed: 0, feedback: "", learned: "", reflection: "", nextGoal: "",
+}, o);
+const sessionReported = (s) => !!(s.coach || s.duration || s.energy || s.difficulty || s.enjoyed || s.feedback || s.learned || s.reflection || s.nextGoal || (s.skills || []).length);
 function sessionCard(s) {
   const c = cssVar(Object.prototype.hasOwnProperty.call(CAT_COLORS, s.category) ? CAT_COLORS[s.category] : "", "#f76b15");
   return `<li class="session">
@@ -4508,8 +4638,21 @@ function sessionCard(s) {
     ${s.note ? `<p class="session-note">${esc(s.note)}</p>` : ""}
     ${(s.exercises && s.exercises.length) ? `<div class="ex-list">${s.exercises.map(ex => exerciseCard(s, ex)).join("")}</div>` : ""}
     ${(() => { const t = sessionTotals(s); return t.sets ? `<p class="sess-sum">${I.chart} ${esc(totalsLabel(t))}</p>` : ""; })()}
+    ${(() => {
+      const bits = [];
+      if (s.coach) bits.push(`${I.user}${esc(s.coach)}`);
+      if (s.duration) bits.push(`${I.clock}${s.duration} min`);
+      if (s.energy) bits.push(`energy ${s.energy}/5`);
+      if (s.difficulty) bits.push(`hard ${s.difficulty}/5`);
+      (s.skills || []).forEach(id => { const sk = skillById(id); if (sk) bits.push(`${esc(sk.emoji || "\u{1F938}")} ${esc(sk.name)}`); });
+      return bits.length ? `<p class="sess-meta">${bits.join(" · ")}</p>` : "";
+    })()}
+    ${s.feedback ? `<p class="sess-coach">${I.pen}${esc(s.feedback)}</p>` : ""}
+    ${s.learned ? `<p class="sess-learn">${I.spark}${esc(s.learned)}</p>` : ""}
+    ${s.nextGoal ? `<p class="sess-next">${I.target}Next: ${esc(s.nextGoal)}</p>` : ""}
     <div class="pill-row">
       <button class="btn tiny ghost" data-action="ex-add" data-id="${s.id}">${I.plus}Add exercise</button>
+      <button class="btn tiny ghost" data-action="session-report" data-id="${s.id}">${I.pen}${sessionReported(s) ? "Edit reflection" : "How did it go?"}</button>
       ${!(s.exercises || []).length && lastSessionLike(s) ? `<button class="btn tiny ghost" data-action="session-repeat" data-id="${s.id}">${I.chevL}Same as last time</button>` : ""}
     </div>
     ${(s.media && s.media.length) ? `<div class="media-grid">
@@ -4521,6 +4664,187 @@ function sessionCard(s) {
     <label class="btn tiny ghost upload-btn"><input type="file" accept="image/*,video/*" hidden data-change="session-media" data-id="${s.id}"><span>${I.upload}Add photo / video</span></label>
   </li>`;
 }
+/* the session report — the spec's questions, in one editable sheet.
+   Deliberately NOT a start/finish timer: the focus timer already exists, and a second clock in the
+   same app is a second answer to "how long was that". A session is logged after the fact anyway,
+   and coach feedback often arrives the next day, so this stays editable — unlike a project
+   reflection, which is written in the moment. */
+const rateRow = (name, val, n, lo, hi) => `<div class="rate-row" role="radiogroup">
+  ${[...Array(n)].map((_, i) => i + 1).map(v => `<label class="rate-chip">
+    <input type="radio" name="${name}" value="${v}" ${+val === v ? "checked" : ""}><span>${v}${v === 1 ? `<i>${esc(lo)}</i>` : v === n ? `<i>${esc(hi)}</i>` : ""}</span>
+  </label>`).join("")}</div>`;
+
+function openSessionReport(id) {
+  const s = state.workout.sessions.find(x => x.id === id);
+  if (!s) { closeModal(); return; }
+  const skills = skillsAll();
+  openModal(`<form data-submit="session-report">
+    <header class="modal-head"><h3>How did it go?</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="soft small">${esc(s.category || "Session")} · ${esc(niceDate(s.date, { weekday: "long", month: "long", day: "numeric" }))}</p>
+      <div class="fld-row">
+        ${fld("Coach <small class=\"soft\">— optional</small>", `<input type="text" name="coach" list="people-list" value="${esc(s.coach || "")}" placeholder="who taught it" autocomplete="off">`)}
+        ${fld("Where", txt("location", "studio, park, home", s.location || "", false))}
+      </div>
+      ${peopleDatalist()}
+      <div class="fld-row">
+        ${fld("Minutes", `<input type="number" name="duration" min="0" step="5" value="${s.duration || ""}" inputmode="numeric" placeholder="90">`)}
+        ${fld("Attendance", `<select name="attendance">
+          <option value="present" ${s.attendance !== "missed" ? "selected" : ""}>Present</option>
+          <option value="missed" ${s.attendance === "missed" ? "selected" : ""}>Missed it</option>
+        </select>`)}
+      </div>
+
+      ${skills.length ? `<div class="fld"><span>Which skills did you practise?</span>
+        <ul class="link-list">${skills.map(sk => `<li><label class="check-inline">
+          <input type="checkbox" name="skill_${sk.id}" ${(s.skills || []).includes(sk.id) ? "checked" : ""}>
+          <span>${esc(sk.emoji || "\u{1F938}")} ${esc(sk.name)}</span></label></li>`).join("")}</ul>
+        <p class="soft small">Ticking one records a practice against that skill — you never log it twice.</p>
+      </div>` : ""}
+
+      <div class="fld"><span>Energy</span>${rateRow("energy", s.energy, 5, "empty", "buzzing")}</div>
+      <div class="fld"><span>How hard was it?</span>${rateRow("difficulty", s.difficulty, 5, "easy", "brutal")}</div>
+      <div class="fld"><span>Did you enjoy it?</span>${rateRow("enjoyed", s.enjoyed, 5, "not really", "loved it")}</div>
+
+      ${fld("What did your coach correct?", `<textarea name="feedback" rows="2" maxlength="400" placeholder="e.g. Open your shoulders more">${esc(s.feedback || "")}</textarea>`)}
+      ${fld("What improved, or what did you learn?", `<textarea name="learned" rows="2" maxlength="400" placeholder="e.g. The back wheel felt much smoother">${esc(s.learned || "")}</textarea>`)}
+      ${fld("Anything else <small class=\"soft\">— optional</small>", `<textarea name="reflection" rows="2" maxlength="600" placeholder="how it felt">${esc(s.reflection || "")}</textarea>`)}
+      ${fld("What should you focus on next time?", txt("nextGoal", "e.g. bridge kick-over", s.nextGoal || "", false))}
+
+      <p class="soft note">${I.spark} Every part of this is optional, and all of it can be changed later — coach feedback often only makes sense the next day.</p>
+      <input type="hidden" name="id" value="${s.id}">
+    </div>
+    <footer class="modal-foot">
+      <button type="button" class="btn ghost" data-action="modal-close">Cancel</button>
+      <button type="submit" class="btn primary">${I.check}Save</button>
+    </footer></form>`);
+}
+
+function coachNotebookCard() {
+  const rows = coachNotes();
+  if (!rows.length) return "";
+  const who = coachesSeen();
+  return card("span2", cardHead(`Coach notebook <small class="soft">${rows.length}</small>`) + `
+    <ul class="hist-log coach-log">${rows.slice(0, 12).map(r => `<li>
+      <span class="hl-when">${esc(niceDate(r.date, { month: "short", day: "numeric" }))}</span>
+      <span class="hl-what">${esc(r.text)}${r.coach ? ` <i class="soft">— ${esc(r.coach)}</i>` : ""}${r.skill ? ` <i class="soft">· ${esc(r.skill)}</i>` : ""}</span>
+    </li>`).join("")}</ul>
+    ${rows.length > 12 ? `<p class="soft small">${rows.length - 12} older note${rows.length - 12 === 1 ? "" : "s"} not shown.</p>` : ""}
+    <p class="soft note">${I.spark} Every correction you've written down${who.length ? `, from ${who.map(x => esc(x)).join(", ")}` : ""}. Nothing here is stored twice — it's the feedback already on your sessions.</p>`);
+}
+
+function skillTile(sk) {
+  const st = skillStage(sk), last = skillLastPracticed(sk), best = skillBest(sk);
+  return `<li class="skl" data-action="skill-open" data-id="${sk.id}" style="--a:${cssVar(st.hue)}">
+    <span class="skl-emoji" aria-hidden="true">${esc(sk.emoji || "\u{1F938}")}</span>
+    <span class="skl-body">
+      <span class="skl-top"><b>${esc(sk.name)}</b><span class="skl-stage">${esc(st.label)}</span></span>
+      ${barHtml(st.pct, st.hue)}
+      <span class="skl-meta">
+        ${best ? `<span>${I.trophy}${best}${sk.pbUnit ? " " + esc(sk.pbUnit) : ""}</span>` : ""}
+        <span>${last ? esc(agoLabel(last)) : `<i class="soft">not practised yet</i>`}</span>
+      </span>
+    </span>
+    <span class="skl-go" aria-hidden="true">${I.chevR}</span>
+  </li>`;
+}
+function skillsCard() {
+  const all = skillsAll();
+  const head = cardHead(`Skills${all.length ? ` <small class="soft">${all.length}</small>` : ""}`, addBtn("New skill", "skill-add"));
+  if (!all.length) return card("span2", head + emptyMsg("target",
+    "A handstand, a muscle-up, a back wheel. Name the ones you're chasing and every session can say which of them it was for.",
+    addBtn("Add your first skill", "skill-add")));
+  const order = SKILL_STAGES.map(x => x.id);
+  const sorted = [...all].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || a.name.localeCompare(b.name));
+  const stale = staleSkills();
+  return card("span2", head + `<ul class="skill-list">${sorted.map(skillTile).join("")}</ul>` +
+    (stale.length ? `<p class="soft note">${I.clock} ${stale.length === 1
+      ? `<b>${esc(stale[0].name)}</b> hasn't been practised in a fortnight.`
+      : `${stale.length} skills haven't been practised in a fortnight: ${stale.slice(0, 3).map(x => esc(x.name)).join(", ")}${stale.length > 3 ? "…" : ""}`}</p>` : ""));
+}
+
+function openSkillDetail(id) {
+  const sk = skillById(id);
+  if (!sk) { closeModal(); return; }
+  const st = skillStage(sk), last = skillLastPracticed(sk), best = skillBest(sk);
+  const log = [...skillLog(sk)].sort((a, b) => b.date.localeCompare(a.date));
+  const trend = skillTrend(sk);
+  openModal(`
+    <header class="modal-head"><h3>${esc(sk.emoji || "\u{1F938}")} ${esc(sk.name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      ${sk.why ? `<p class="habit-why">“${esc(sk.why)}”</p>` : ""}
+      <div class="progress-line"><span>${esc(st.label)}</span>${barHtml(st.pct, st.hue)}<b>${st.pct}%</b></div>
+
+      <div class="fld"><span>Where are you with it?</span>
+        <div class="stage-row">
+          ${SKILL_STAGES.map(x => `<button class="stage-chip ${x.id === sk.status ? "on" : ""}" style="--a:${cssVar(x.hue)}"
+            data-action="skill-stage" data-id="${sk.id}" data-s="${x.id}">${esc(x.label)}</button>`).join("")}
+        </div>
+        <p class="soft small">${esc(st.hint)}. <b>You decide this</b> — LifeHub won't declare a skill mastered on your behalf. It only shows you when you last practised and how you've been doing.</p>
+      </div>
+
+      ${(sk.level || sk.target) ? `<div class="fld"><span>Now → next</span>
+        <p class="soft small">${sk.level ? `<b>Now:</b> ${esc(sk.level)}` : ""}${sk.level && sk.target ? "<br>" : ""}${sk.target ? `<b>Next:</b> ${esc(sk.target)}` : ""}</p></div>` : ""}
+
+      <div class="fld"><span>Practice</span>
+        <p class="soft small">${log.length
+          ? `${I.check} ${log.length} session${log.length === 1 ? "" : "s"}${last ? ` · last ${esc(agoLabel(last))}` : ""}${best ? ` · best <b>${best}${sk.pbUnit ? " " + esc(sk.pbUnit) : ""}</b>` : ""}`
+          : "Not practised yet. Tick it on a session, or log a practice below."}</p>
+        ${trend.length > 1 ? `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(trend))}' data-color="${cssVar(st.hue)}" data-h="110" data-label="${esc(sk.name)} best"></div>` : ""}
+        <button class="btn tiny ghost" data-action="skill-practice" data-id="${sk.id}">${I.plus}Log a practice</button>
+        ${log.length ? `<ul class="skl-log">${log.slice(0, 10).map(r => `<li>
+          <span class="sl-when">${esc(niceDate(r.date, { month: "short", day: "numeric" }))}</span>
+          <span class="sl-what">${r.best ? `<b>${r.best}${sk.pbUnit ? " " + esc(sk.pbUnit) : ""}</b> ` : ""}${esc(r.note || (r.sessionId ? "in a session" : "practised"))}</span>
+          ${!r.sessionId ? `<button class="icon-btn ghost" data-action="skill-practice-del" data-id="${sk.id}" data-r="${r.id}" aria-label="Remove">${I.x}</button>` : ""}
+        </li>`).join("")}</ul>` : ""}
+      </div>
+
+      <div class="fld"><span>Coach notes</span>
+        ${(sk.notes || []).length ? `<ul class="hist-log">${[...sk.notes].reverse().map(n => `<li>
+          <span class="hl-when">${esc(niceDate((n.at || "").slice(0, 10), { month: "short", day: "numeric" }))}</span>
+          <span class="hl-what">${esc(n.text)}${n.coach ? ` — ${esc(n.coach)}` : ""}</span>
+          <button class="icon-btn ghost" data-action="skill-note-del" data-id="${sk.id}" data-n="${n.id}" aria-label="Remove">${I.x}</button>
+        </li>`).join("")}</ul>` : `<p class="soft small">Nothing yet. Corrections you write on a session show up in the Coach Notebook too.</p>`}
+        <button class="btn tiny ghost" data-action="skill-note" data-id="${sk.id}">${I.plus}Add a correction</button>
+      </div>
+
+      <div class="fld"><span>Photos &amp; video</span>
+        <div class="mem-gallery">
+          ${(sk.media || []).map(m => `<span class="mem-shot">
+            <span class="media-host" data-media="${m.id}" data-media-kind="${m.kind}"><span class="media-missing">…</span></span>
+            <button class="photo-x" data-action="skill-media-del" data-id="${sk.id}" data-ref="${m.id}" aria-label="Remove">${I.x}</button>
+          </span>`).join("")}
+          <label class="mem-add" aria-label="Add a photo or video of this skill">
+            <input type="file" accept="image/*,video/*" hidden data-change="skill-media" data-id="${sk.id}">
+            ${I.camera}<span>Add clip<br>or photo</span>
+          </label>
+        </div>
+        <p class="soft small">A clip from today next to one from three months ago is the most honest progress report there is.</p>
+      </div>
+
+      ${relatedCard("skill", sk.id)}
+      ${historyCard("skill", sk.id)}
+      <div class="pill-row">
+        <button class="btn ghost" data-action="skill-edit" data-id="${sk.id}">${I.edit}Edit</button>
+        <button class="btn danger" data-action="skill-del" data-id="${sk.id}">${I.trash}Delete</button>
+      </div>
+    </div>`);
+  drawCharts();
+}
+
+function skillFormFields(sk) {
+  sk = sk || {};
+  return `<div class="fld-row">${fld("Skill", txt("name", "e.g. Muscle up", sk.name || ""))}${fld("Emoji", txt("emoji", "\u{1F938}", sk.emoji || "\u{1F938}", false))}</div>` +
+    `<div class="fld-row">${
+      fld("Category", `<select name="category">${SKILL_CATS.map(c => `<option ${sk.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>`)}${
+      fld("Stage", `<select name="status">${SKILL_STAGES.map(x => `<option value="${x.id}" ${(sk.status || "learning") === x.id ? "selected" : ""}>${x.label}</option>`).join("")}</select>`)
+    }</div>` +
+    fld("Where you are now <small class=\"soft\">— optional</small>", txt("level", "e.g. kick-over with the wall", sk.level || "", false)) +
+    fld("What's next <small class=\"soft\">— optional</small>", txt("target", "e.g. unassisted, both sides", sk.target || "", false)) +
+    fld("Measured in <small class=\"soft\">— optional, e.g. seconds or reps</small>", txt("pbUnit", "seconds", sk.pbUnit || "", false)) +
+    fld("Why this one?", txt("why", "what having it would mean", sk.why || "", false));
+}
+
 function vWorkout() {
   const d = dayCursor("workout"), isToday = d === todayIso();
   const wk = workoutsThisWeek();
@@ -4536,6 +4860,8 @@ function vWorkout() {
       <div class="week-strip small">
         ${weekDates().map((wd, i) => `<button class="wday ${wd === d ? "today" : ""} ${wd > todayIso() ? "future" : ""}" data-action="workout-day" data-d="${wd}"><small>${WD_SHORT[i]}</small><span class="wdot ${(state.workout.log[wd] || []).length ? "full" : ""}"></span></button>`).join("")}
       </div>`)}
+
+    ${skillsCard()}
 
     ${card("span2", cardHead("Workout plan", `<button class="btn ghost tiny" data-action="workout-library">${I.grid}Routines</button>${addBtn("Add to plan", "workout-add")}`) + (state.workout.plan.length ? `
       <ul class="check-list plan-list">
@@ -4581,25 +4907,27 @@ function vWorkout() {
         ${exerciseNames().map(name => {
           const kind = exerciseKind(name);
           const rows = exerciseSessionBest(name, kind).slice(-12);
-          const chartData = rows.map(r => ({ label: +r.date.slice(-2), value: r.value, tip: `${niceDate(r.date)} · ${prLabel(kind, r.value)}` }));
+          const chartData = rows.map(r => ({ label: +r.date.slice(-2), value: r.value, tip: `${niceDate(r.date)} · ${prLabel(kind, r.value, name)}` }));
           return `<li data-action="ex-history" data-name="${esc(name)}">
-            <div class="ex-pr-head"><b>${esc(name)}</b><span class="pr-badge">${I.trophy} PR ${prLabel(kind, prPrimary(name, kind))}</span></div>
+            <div class="ex-pr-head"><b>${esc(name)}</b><span class="pr-badge">${I.trophy} PR ${prLabel(kind, prPrimary(name, kind), name)}</span></div>
             ${chartData.length ? `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(chartData))}' data-color="#f76b15" data-h="86" data-label="${esc(name)} progress"></div>` : `<p class="soft small">Log a set to start tracking.</p>`}
           </li>`;
         }).join("")}
       </ul>
       <p class="chart-note">${I.chart} Tap an exercise for its full history. Bars show your best set per session.</p>`) : ""}
+
+    ${coachNotebookCard()}
   </div>`;
 }
 
 function openExerciseHistory(name) {
   const kind = exerciseKind(name);
   const rows = exerciseSessionBest(name, kind);
-  const chartData = rows.map(r => ({ label: +r.date.slice(-2), value: r.value, tip: `${niceDate(r.date)} · ${prLabel(kind, r.value)}` }));
+  const chartData = rows.map(r => ({ label: +r.date.slice(-2), value: r.value, tip: `${niceDate(r.date)} · ${prLabel(kind, r.value, name)}` }));
   openModal(`
     <header class="modal-head"><h3>${esc(name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body">
-      <div class="pill-row"><span class="pr-badge">${I.trophy} Best ${prLabel(kind, prPrimary(name, kind))}</span><span class="soft small">${rows.length} session${rows.length !== 1 ? "s" : ""} logged</span></div>
+      <div class="pill-row"><span class="pr-badge">${I.trophy} Best ${prLabel(kind, prPrimary(name, kind), name)}</span><span class="soft small">${rows.length} session${rows.length !== 1 ? "s" : ""} logged</span></div>
       ${chartData.length ? `<div data-chart-type="bar" data-chart='${esc(JSON.stringify(chartData))}' data-color="#f76b15" data-h="150" data-label="${esc(name)} progress"></div>` : `<p class="soft">No sets logged yet.</p>`}
       <div class="fld"><span>Session history</span>
         <ul class="ex-hist-list">
@@ -6613,7 +6941,7 @@ const ACTIONS = {
   "workout-tmpl": (el) => {
     const t = WORKOUT_TEMPLATES[+el.dataset.i]; if (!t) return;
     const d = dayCursor("workout");
-    const sess = { id: uid(), date: d, category: t.category || "Strength", planId: null, planName: t.name, note: "", exercises: t.ex.map(n => ({ id: uid(), name: n, kind: "reps", sets: [] })), media: [] };
+    const sess = bornSession({ date: d, category: t.category || "Strength", planName: t.name, exercises: t.ex.map(n => ({ id: uid(), name: n, kind: "reps", sets: [] })) });
     state.workout.sessions.push(sess);
     (state.workout.log[d] = state.workout.log[d] || []).push(sess.id);
     if (d === todayIso()) addXp(20, "Workout");
@@ -6730,7 +7058,7 @@ const ACTIONS = {
     const existing = state.workout.sessions.find(s => s.date === d && s.planId === p.id);
     if (existing) { removeSession(existing.id); }
     else {
-      const sess = { id: uid(), date: d, category: p.category || "Strength", planId: p.id, planName: p.name, note: p.focus || "", exercises: (p.exercises || []).map(e => ({ id: uid(), name: e.name, kind: e.kind || "reps", sets: [] })), media: [] };
+      const sess = bornSession({ date: d, category: p.category || "Strength", planId: p.id, planName: p.name, note: p.focus || "", exercises: (p.exercises || []).map(e => ({ id: uid(), name: e.name, kind: e.kind || "reps", sets: [] })) });
       state.workout.sessions.push(sess);
       (state.workout.log[d] = state.workout.log[d] || []).push(sess.id);
       if (d === todayIso()) addXp(20, "Workout");
@@ -6752,6 +7080,73 @@ const ACTIONS = {
     fld("What did you do?", `<textarea name="note" placeholder="Sets, reps, how it felt…" maxlength="600"></textarea>`), "session-add"),
   "session-note": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (s) formModal("Session note", fld("Notes", `<textarea name="note" maxlength="600">${esc(s.note || "")}</textarea>`) + `<input type="hidden" name="id" value="${s.id}">`, "session-note"); },
   "session-del": (el) => { removeSession(el.dataset.id); save(); render(); },
+  "session-report": (el) => openSessionReport(el.dataset.id),
+
+  /* skills */
+  "skill-add": () => formModal("New skill", skillFormFields(), "skill-add", "Add"),
+  "skill-open": (el) => openSkillDetail(el.dataset.id),
+  "skill-edit": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    formModal("Edit skill", skillFormFields(sk) + `<input type="hidden" name="id" value="${sk.id}">`, "skill-edit");
+  },
+  "skill-stage": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    const st = SKILL_STAGES.find(x => x.id === el.dataset.s); if (!st) return;
+    if (sk.status !== st.id) {
+      sk.status = st.id; sk.updated = todayIso();
+      touch("skill", sk.id, `Now ${st.label}`);
+      if (st.id === "mastered") { addXp(60, `${sk.name} mastered`); celebrate && celebrate(); }
+    }
+    save(); render(); openSkillDetail(sk.id);
+  },
+  "skill-practice": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    formModal(`Practised ${sk.name}`,
+      `<div class="fld-row">${fld("Date", `<input type="date" name="date" value="${todayIso()}">`)}${
+        fld(`Best${sk.pbUnit ? ` <small class="soft">— ${esc(sk.pbUnit)}</small>` : ""} <small class="soft">— optional</small>`,
+          `<input type="number" name="best" min="0" step="any" inputmode="decimal" placeholder="e.g. 12">`)}</div>` +
+      fld("How did it go?", txt("note", "what you tried, what happened", "", false)) +
+      `<input type="hidden" name="sid" value="${sk.id}">`, "skill-practice", "Log it");
+  },
+  "skill-practice-del": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    sk.log = skillLog(sk).filter(r => r.id !== el.dataset.r);
+    save(); render(); openSkillDetail(sk.id);
+  },
+  "skill-note": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    formModal("Coach correction",
+      fld("What were you told?", `<textarea name="text" rows="2" maxlength="300" placeholder="e.g. Keep your core tighter"></textarea>`) +
+      fld("Who said it <small class=\"soft\">— optional</small>", `<input type="text" name="coach" list="people-list" autocomplete="off">`) + peopleDatalist() +
+      `<input type="hidden" name="sid" value="${sk.id}">`, "skill-note", "Save");
+  },
+  "skill-note-del": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    sk.notes = (sk.notes || []).filter(n => n.id !== el.dataset.n);
+    save(); render(); openSkillDetail(sk.id);
+  },
+  "skill-media-del": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    dropMedia((sk.media || []).find(m => m.id === el.dataset.ref));
+    sk.media = (sk.media || []).filter(m => m.id !== el.dataset.ref);
+    save(); render(); openSkillDetail(sk.id);
+  },
+  "skill-del": (el) => {
+    const sk = skillById(el.dataset.id);
+    const refs = ((sk && sk.media) || []).slice();
+    /* a deleted skill must also stop being ticked on sessions, or the session keeps a reference to
+       something that no longer exists — and undo has to put that back too */
+    const onSessions = (state.workout.sessions || []).filter(x => (x.skills || []).includes(el.dataset.id)).map(x => x.id);
+    closeModal();
+    deleteWithUndo(() => skillsAll(), el.dataset.id, "Skill deleted",
+      () => refs.forEach(dropMedia),
+      () => onSessions.forEach(sid => {
+        const sess = state.workout.sessions.find(x => x.id === sid);
+        if (sess && !(sess.skills || []).includes(el.dataset.id)) sess.skills.push(el.dataset.id);
+      }));
+    (state.workout.sessions || []).forEach(x => { x.skills = (x.skills || []).filter(i => i !== el.dataset.id); });
+    save(); render();
+  },
   "session-media-del": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.s); if (s) { dropMedia((s.media || []).find(m => m.id === el.dataset.m)); s.media = (s.media || []).filter(m => m.id !== el.dataset.m); save(); render(); } },
   "ex-add": (el) => formModal("Add exercise",
     fld("Exercise", `<input type="text" name="name" placeholder="e.g. Bench press" list="ex-names" autocomplete="off" required maxlength="60">`) + exerciseDatalist() +
@@ -7302,8 +7697,65 @@ const SUBMITS = {
   "workout-add": (f) => { state.workout.plan.push(Object.assign({ id: uid() }, planFromForm(f))); },
   "workout-edit": (f) => { const p = state.workout.plan.find(x => x.id === f.id); if (p) Object.assign(p, planFromForm(f)); },
   "class-add": (f) => { state.workout.classes.push({ id: uid(), name: f.name, total: Math.max(1, +f.total || 8), price: +f.price || 0, cur: CURRENCIES[f.cur] ? f.cur : defaultCur(), start: f.start || todayIso(), log: [], renewals: 0 }); },
-  "session-add": (f) => { const d = dayCursor("workout"); const sess = { id: uid(), date: d, category: f.category || "Strength", planId: null, planName: "", note: f.note || "", exercises: [], media: [] }; state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
+  "session-add": (f) => { const d = dayCursor("workout"); const sess = bornSession({ date: d, category: f.category || "Strength", note: f.note || "" }); state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
   "session-note": (f) => { const s = state.workout.sessions.find(x => x.id === f.id); if (s) s.note = f.note; },
+  "session-report": (f) => {
+    const s = state.workout.sessions.find(x => x.id === f.id); if (!s) return;
+    /* typing a coach's name is how you meet them — Social should already know who they are */
+    const coach = String(f.coach || "").trim();
+    if (coach && normName(coach) !== normName(s.coach)) ensurePerson(coach);
+    s.coach = coach;
+    s.location = String(f.location || "").trim();
+    s.duration = Math.max(0, +f.duration || 0);
+    s.attendance = f.attendance === "missed" ? "missed" : "present";
+    s.energy = clamp(+f.energy || 0, 0, 5);
+    s.difficulty = clamp(+f.difficulty || 0, 0, 5);
+    s.enjoyed = clamp(+f.enjoyed || 0, 0, 5);
+    s.feedback = String(f.feedback || "").slice(0, 400);
+    s.learned = String(f.learned || "").slice(0, 400);
+    s.reflection = String(f.reflection || "").slice(0, 600);
+    s.nextGoal = String(f.nextGoal || "").slice(0, 200);
+    s.skills = skillsAll().filter(sk => f["skill_" + sk.id]).map(sk => sk.id);
+    syncSessionSkills(s);       // one pass, both directions, idempotent
+    if (s.feedback) touch("session", s.id, `Coach: ${s.feedback.slice(0, 60)}`);
+  },
+  "skill-add": (f) => {
+    if (!String(f.name || "").trim()) return;
+    const sk = born({ id: uid(), name: f.name.trim(), emoji: f.emoji || "🤸",
+      category: f.category || "Calisthenics", status: f.status || "learning",
+      level: (f.level || "").slice(0, 120), target: (f.target || "").slice(0, 120),
+      pbUnit: (f.pbUnit || "").slice(0, 20), why: (f.why || "").slice(0, 200),
+      media: [], notes: [], log: [] });
+    skillsAll().push(sk);
+    touch("skill", sk.id, "Skill added");
+  },
+  "skill-edit": (f) => {
+    const sk = skillById(f.id); if (!sk) return;
+    sk.name = f.name || sk.name; sk.emoji = f.emoji || sk.emoji;
+    sk.category = f.category || sk.category;
+    if (SKILL_STAGES.some(x => x.id === f.status)) sk.status = f.status;
+    sk.level = (f.level || "").slice(0, 120); sk.target = (f.target || "").slice(0, 120);
+    sk.pbUnit = (f.pbUnit || "").slice(0, 20); sk.why = (f.why || "").slice(0, 200);
+    sk.updated = todayIso();
+    touch("skill", sk.id, "Updated");
+    setTimeout(() => openSkillDetail(sk.id), 0);
+  },
+  "skill-practice": (f) => {
+    const sk = skillById(f.sid); if (!sk) return;
+    skillLog(sk).push({ id: uid(), date: f.date || todayIso(), note: (f.note || "").slice(0, 200),
+      best: Math.max(0, +f.best || 0), sessionId: "" });
+    addXp(5, `${sk.name} practised`);
+    touch("skill", sk.id, f.best ? `Practised · ${f.best}${sk.pbUnit ? " " + sk.pbUnit : ""}` : "Practised");
+    setTimeout(() => openSkillDetail(sk.id), 0);
+  },
+  "skill-note": (f) => {
+    const sk = skillById(f.sid); if (!sk || !String(f.text || "").trim()) return;
+    const coach = String(f.coach || "").trim();
+    if (coach) ensurePerson(coach);
+    sk.notes = sk.notes || [];
+    sk.notes.push({ id: uid(), at: new Date().toISOString(), text: f.text.trim().slice(0, 300), coach });
+    setTimeout(() => openSkillDetail(sk.id), 0);
+  },
   "ex-add": (f) => {
     const s = state.workout.sessions.find(x => x.id === f.sid); if (!s || !f.name) return;
     /* reuse the spelling already on record, so one exercise can't split its PR history across
@@ -7323,7 +7775,7 @@ const SUBMITS = {
     else set = { weight: +f.weight || 0, reps: +f.reps || 0 };
     ex.sets.push(set);
     const after = prPrimary(ex.name, ex.kind);
-    if (after > before && before > 0) toast(`New PR on ${ex.name} — ${prLabel(ex.kind, after)} 🏆`, "badge");
+    if (after > before && before > 0) toast(`New PR on ${ex.name} — ${prLabel(ex.kind, after, ex.name)} 🏆`, "badge");
     addXp(5, "Set logged");
   },
   "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, time: f.time || "", kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }); },
@@ -7587,6 +8039,14 @@ const CHANGES = {
   "memory-photo-add": (el) => {
     const m = state.memories.find(x => x.id === el.dataset.id); if (!m) return;
     storeMediaFile(el.files[0], (ref) => { m.photos = m.photos || []; m.photos.push(ref); save(); render(); openMemoryDetail(m.id); toast("Photo added 📸"); });
+  },
+  "skill-media": (el) => {
+    const sk = skillById(el.dataset.id); if (!sk) return;
+    storeMediaFile(el.files[0], (ref) => {
+      sk.media = sk.media || []; sk.media.push(ref);
+      touch("skill", sk.id, "Clip added");
+      save(); render(); openSkillDetail(sk.id); toast("Saved 🎬");
+    });
   },
   "project-file-add": (el) => {
     const p = state.projects.find(x => x.id === el.dataset.id); if (!p) return;
