@@ -1882,3 +1882,47 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 .pj-next span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pj-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 4px; }
 .pj-status .gb-status { margin-left: 0; }
+
+/* ---------- work sessions — the reflection, and reading it back ---------- */
+/* Collapsed by default: a session that just wants its minutes logged should still be one tap. */
+.reflect { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.reflect > summary {
+  cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink-2);
+  list-style: none; padding: 4px 0;
+}
+.reflect > summary::-webkit-details-marker { display: none; }
+.reflect > summary::before { content: "＋ "; color: var(--brand); font-weight: 800; }
+.reflect[open] > summary::before { content: "− "; }
+.reflect-body { padding-top: 6px; }
+.reflect-body textarea { resize: vertical; }
+
+.rate-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.rate-chip { flex: 1 1 60px; }
+.rate-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+.rate-chip span {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 7px 4px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface-2); cursor: pointer; font-weight: 800; font-size: 14px;
+  transition: border-color .15s, background .15s, transform .15s var(--ease-out);
+}
+.rate-chip span i { font-style: normal; font-size: 9.5px; font-weight: 600; color: var(--ink-3); letter-spacing: .01em; }
+.rate-chip input:checked + span {
+  border-color: var(--brand); background: color-mix(in srgb, var(--brand) 12%, transparent); transform: translateY(-1px);
+}
+.rate-chip input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.ws-list { display: flex; flex-direction: column; gap: 8px; }
+.ws {
+  padding: 10px 12px; border-radius: 13px; background: var(--surface-2);
+  border: 1px solid var(--line); border-left: 3px solid #12a594;
+}
+.ws.bare { border-left-color: var(--line); }
+.ws-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.ws-top > b { font-size: 13px; }
+.ws-mins { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ws-rate { margin-left: auto; color: var(--brand); font-size: 10.5px; letter-spacing: .5px; }
+.ws-rate i { font-style: normal; color: var(--line); }
+.ws-out, .ws-obs, .ws-next { margin-top: 5px; font-size: 12.5px; line-height: 1.45; }
+.ws-obs, .ws-next { display: flex; align-items: flex-start; gap: 5px; color: var(--ink-3); font-size: 12px; }
+.ws-obs svg, .ws-next svg { width: 12px; height: 12px; flex: none; margin-top: 2px; }
+.ws-next svg { color: #12a594; }
