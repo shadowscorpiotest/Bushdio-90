@@ -72,6 +72,15 @@ zero is a mark you earned, "not graded yet" is not the same thing.
 without naming one stays in your totals but appears on no course — because before this existed
 nothing recorded which course an hour belonged to, and LifeHub won't guess.
 
+## 🪶 Starting something should be typing its name
+
+A new project asks for a **name**. That's it. Everything else — purpose, priority, dates, tags, the
+next step — is folded behind *More details*, one tap away, and skipping it costs nothing: sensible
+defaults fill in and you add the rest later, in the sheet you open when you actually have something
+to say. New courses work the same way.
+
+**Editing** shows everything at once, because by then you already know what you meant.
+
 ## 🙈 Hiding something never deletes it
 
 Health & Food has eight switches — steps, water, sleep, mood, calories, macros, meals, supplements —
@@ -81,6 +90,11 @@ ring you ignore.
 Turn one off and it leaves the page *and* stops counting toward that area's score, so a steps ring you
 can't fill isn't dragging your number down forever. **Nothing is deleted.** Switch it back on and the
 whole history is exactly where you left it.
+
+**Whole areas work the same way.** Profile has a switch for each one; untick the areas you don't use
+and they leave the menu — and stop dragging your weekly number down. Everything they hold stays, keeps
+syncing, and is still reachable from any link that points at it. A menu group with nothing left in it
+disappears rather than sitting there as an empty heading.
 
 ## ⏳ "Am I actually making progress?" — and when LifeHub refuses to answer
 
