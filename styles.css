@@ -2041,3 +2041,6 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 /* the honest note about why a pill reminder never arrived */
 .push-warn { border-left: 3px solid #f76b15; padding-left: 10px; }
 .push-warn .btn { margin-left: 6px; }
+
+/* the "More details" fold on a create form — same shape as the session report's */
+.more-block { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }

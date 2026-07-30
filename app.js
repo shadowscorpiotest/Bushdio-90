@@ -194,6 +194,11 @@ const AREAS = [
   { id: "journal",    name: "Journal",            icon: "pen",       hue: "#7c66dc" },
 ];
 const areaOf = (id) => AREAS.find(a => a.id === id);
+/* Hidden is a navigation preference, never a data one: everything a hidden area holds is still
+   there, still synced, and still reachable by a direct link. */
+const hiddenAreas = () => ((state.profile && state.profile.hiddenAreas) || []);
+const areaHidden = (id) => hiddenAreas().includes(id);
+const visibleAreas = () => AREAS.filter(a => !areaHidden(a.id));
 
 const NAV_GROUPS = [
   { label: "Overview", items: [
@@ -213,7 +218,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 22;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 23;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -862,6 +867,15 @@ const MIGRATIONS = [
                             kcal: true, macros: true, meals: true, supplements: true };
     }
     (s.todos || []).forEach(td => { if (td.areaId === "nutrition") td.areaId = "health"; });
+  },
+
+  /* 22 → 23 · areas you don't use can leave the navigation. Ten areas is a lot to scroll past when
+     four of them are the ones you live in. Nothing is deleted and nothing stops working — a hidden
+     area still holds every record, still syncs, and is still reachable by a direct link from
+     anywhere else in the app. It simply stops asking for attention it hasn't earned. */
+  (s) => {
+    s.profile = s.profile || {};
+    if (!Array.isArray(s.profile.hiddenAreas)) s.profile.hiddenAreas = [];
   },
 ];
 
@@ -2203,8 +2217,9 @@ function areaProgressToday(id) {
   }
 }
 function weeklyProgress() {
-  const keys = ["habits", "health", "workout", "journal"];
-  return Math.round(keys.reduce((a, k) => a + areaProgressToday(k), 0) / keys.length);
+  /* same rule as the Health metrics: an area you've put away shouldn't drag your week down */
+  const keys = ["habits", "health", "workout", "journal"].filter(k => !areaHidden(k));
+  return keys.length ? Math.round(keys.reduce((a, k) => a + areaProgressToday(k), 0) / keys.length) : 0;
 }
 
 /* ----- missions ----- */
@@ -2311,9 +2326,12 @@ function navItemHtml(item) {
   </button>`;
 }
 function renderNav() {
-  $("#sideNav").innerHTML = NAV_GROUPS.map(g =>
-    `<div class="nav-group"><span class="nav-label">${g.label}</span>${g.items.map(navItemHtml).join("")}</div>`
-  ).join("");
+  /* a hidden area leaves the menu; a group with nothing left in it leaves too, rather than sitting
+     there as an empty heading */
+  $("#sideNav").innerHTML = NAV_GROUPS.map(g => {
+    const items = g.items.filter(x => x && !areaHidden(x.id));
+    return items.length ? `<div class="nav-group"><span class="nav-label">${g.label}</span>${items.map(navItemHtml).join("")}</div>` : "";
+  }).join("");
   const li = levelInfo();
   $("#sideFoot").innerHTML = `
     <div class="side-level">
@@ -3413,6 +3431,14 @@ function focusReflectFields(pr) {
     </div>
   </details>`;
 }
+/* Everything past the essentials, folded away. The session report proved this works: depth is
+   there when you want it and costs nothing when you don't. Creating a thing should be typing its
+   name — the rest belongs to the sheet you open afterwards, when you actually have something to say. */
+const moreBlock = (html, label) => `<details class="reflect more-block">
+  <summary>${esc(label || "More details")} <small class="soft">— all optional</small></summary>
+  <div class="reflect-body">${html}</div>
+</details>`;
+
 function openFocusFinish() {
   const f = state.focus;
   if (!f) return;
@@ -5391,10 +5417,11 @@ function courseFromForm(f) {
     link: (f.link || "").slice(0, 300), notes: (f.notes || "").slice(0, 400),
   };
 }
-function courseFormFields(c) {
+function courseFormFields(c, compact) {
   c = c || {};
-  return `<div class="fld-row">${fld("Course", txt("name", "e.g. Linear Algebra", c.name || ""))}${fld("Emoji", txt("emoji", "📘", c.emoji || "📘", false))}</div>` +
-    fld("What kind?", `<select name="kind">${COURSE_KINDS.map(k => `<option value="${k.id}" ${(c.kind || "self") === k.id ? "selected" : ""}>${k.emoji} ${k.label}</option>`).join("")}</select>`) +
+  const head = `<div class="fld-row">${fld("Course", txt("name", "e.g. Linear Algebra", c.name || ""))}${fld("Emoji", txt("emoji", "📘", c.emoji || "📘", false))}</div>` +
+    fld("What kind?", `<select name="kind">${COURSE_KINDS.map(k => `<option value="${k.id}" ${(c.kind || "self") === k.id ? "selected" : ""}>${k.emoji} ${k.label}</option>`).join("")}</select>`);
+  const rest =
     `<div class="fld-row">${
       fld("Where <small class=\"soft\">— optional</small>", txt("institution", "university, Coursera…", c.institution || "", false))}${
       fld("Who teaches it <small class=\"soft\">— optional</small>", `<input type="text" name="instructor" list="people-list" value="${esc(c.instructor || "")}" autocomplete="off">`)
@@ -5412,6 +5439,7 @@ function courseFormFields(c) {
     fld("Progress %", `<input type="number" name="progress" min="0" max="100" value="${c.progress || 0}" inputmode="numeric">`) +
     fld("Link <small class=\"soft\">— optional</small>", txt("link", "https://…", c.link || "", false)) +
     fld("Notes", `<textarea name="notes" maxlength="400" placeholder="syllabus, what to revise…">${esc(c.notes || "")}</textarea>`);
+  return compact ? head + moreBlock(rest) : head + rest;
 }
 
 function learnTaskFormFields(k) {
@@ -6116,9 +6144,10 @@ function openProjectDetail(id) {
   drawCharts();          // the sessions-per-week host is injected outside the render cycle
 }
 
-function projectFormFields(p) {
+function projectFormFields(p, compact) {
   p = p || {};
-  return `<div class="fld-row">${fld("Name", txt("name", "e.g. Portfolio site", p.name || ""))}${fld("Emoji", txt("emoji", "\u{1F680}", p.emoji || "\u{1F680}", false))}</div>` +
+  const head = `<div class="fld-row">${fld("Name", txt("name", "e.g. Portfolio site", p.name || ""))}${fld("Emoji", txt("emoji", "\u{1F680}", p.emoji || "\u{1F680}", false))}</div>`;
+  const rest =
     fld("Why does it exist? <small class=\"soft\">— optional</small>",
       txt("purpose", "the point of building this at all…", p.purpose || "", false)) +
     `<div class="fld-row">${
@@ -6134,6 +6163,9 @@ function projectFormFields(p) {
       txt("nextMilestone", "e.g. ship the migration", p.nextMilestone || "", false)) +
     fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "code, side project", (p.tags || []).join(", "), false)) +
     fld("Notes", `<textarea name="note" maxlength="400" placeholder="What is it, and what's next?">${esc(p.note || "")}</textarea>`);
+  /* Starting a project should be typing its name. Nine fields to begin was friction I added in
+     P1, and the user felt it at once: "the project section is too complex to begin with". */
+  return compact ? head + moreBlock(rest) : head + rest;
 }
 
 const curSelect = (sel, name = "cur") => `<select name="${name}">${CUR_CODES.map(c =>
@@ -6982,6 +7014,14 @@ function vProfile() {
         <button class="btn danger" data-action="data-reset">${I.trash}Reset everything</button>
       </div>
       <p class="soft note"><b>Start fresh</b> clears all the demo/sample content &amp; uploaded media but keeps your name, theme and keys. <b>Load sample data</b> refills the demo. <b>Reset everything</b> wipes it all, including your profile.</p>`)}
+    ${card("span2", cardHead("Areas in your menu") + `
+      <div class="metric-row">
+        ${AREAS.map(a => `<label class="metric-chip ${areaHidden(a.id) ? "" : "on"}">
+          <input type="checkbox" data-change="area-toggle" data-id="${a.id}" ${areaHidden(a.id) ? "" : "checked"}>
+          <span>${esc(a.name)}</span></label>`).join("")}
+      </div>
+      <p class="soft note">${I.spark} Unticking one takes it out of the menu — <b>nothing is deleted</b>. Everything it holds stays, keeps syncing, and is still reachable from anywhere that links to it. Ten areas is a lot to scroll past when four are the ones you actually live in.</p>`)}
+
     ${card("span2", cardHead("Money") + `
       <label class="fld"><span>Your currency <small class="soft">— what new amounts default to</small></span>
         ${curSelect(state.profile.currency, "profile-currency").replace('name="profile-currency"', 'data-change="profile-currency"')}</label>
@@ -7569,7 +7609,7 @@ const ACTIONS = {
       `<p class="soft note">${I.spark} These minutes go into your monthly totals <b>and</b> onto this course.</p>` +
       `<input type="hidden" name="cid" value="${c.id}">`, "course-study", "Log it");
   },
-  "course-add": () => formModal("New course", courseFormFields(), "course-add", "Add"),
+  "course-add": () => formModal("New course", courseFormFields(null, true), "course-add", "Add"),
   "course-edit": (el) => {
     const c = courseById(el.dataset.id); if (!c) return;
     formModal("Edit course", courseFormFields(c) + `<input type="hidden" name="id" value="${c.id}">`, "course-edit");
@@ -7717,7 +7757,7 @@ const ACTIONS = {
   "media-del": (el) => { deleteWithUndo(() => state.media, el.dataset.id, "Removed from your list"); },
 
   /* work / projects / social / memories */
-  "project-add": () => formModal("New project", projectFormFields(), "project-add"),
+  "project-add": () => formModal("New project", projectFormFields(null, true), "project-add", "Start it"),
   "project-open": (el) => openProjectDetail(el.dataset.id),
   /* only reachable while a project has no milestones — once it has some, progress is counted from
      them and this button is not rendered rather than being rendered and ignored */
@@ -8364,6 +8404,13 @@ const CHANGES = {
     state.profile.fxRate = v;
     state.profile.fxSetOn = v ? todayIso() : "";
     save(); render();
+  },
+  "area-toggle": (el) => {
+    const id = el.dataset.id, list = (state.profile.hiddenAreas = state.profile.hiddenAreas || []);
+    const i = list.indexOf(id);
+    if (el.checked) { if (i >= 0) list.splice(i, 1); }
+    else if (i < 0) list.push(id);
+    save(); render();      // render() redraws the nav
   },
   "metric-toggle": (el) => {
     state.profile.metrics = state.profile.metrics || {};
