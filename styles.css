@@ -2021,3 +2021,23 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 
 .career-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .career-row > p { flex: 1 1 180px; font-size: 12.5px; line-height: 1.5; }
+
+/* ---------- Health & Food: showing only what you use ---------- */
+.metric-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.metric-chip { position: relative; }
+.metric-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
+.metric-chip span {
+  display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--ink-3); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s, transform .15s var(--ease-out);
+}
+.metric-chip span::before { content: "＋"; font-weight: 800; opacity: .6; }
+.metric-chip.on span { border-color: var(--brand); color: var(--brand); background: color-mix(in srgb, var(--brand) 12%, transparent); }
+.metric-chip.on span::before { content: "✓"; opacity: 1; }
+.metric-chip span:hover { transform: translateY(-1px); }
+.metric-chip input:focus-visible + span { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* the honest note about why a pill reminder never arrived */
+.push-warn { border-left: 3px solid #f76b15; padding-left: 10px; }
+.push-warn .btn { margin-left: 6px; }
