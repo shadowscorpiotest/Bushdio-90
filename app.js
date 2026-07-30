@@ -182,9 +182,8 @@ const I = (() => {
 /* ================= life areas registry ================= */
 const AREAS = [
   { id: "habits",     name: "Habit Tracker",      icon: "target",    hue: "#6a5ae0" },
-  { id: "health",     name: "Health",             icon: "heart",     hue: "#e5484d" },
+  { id: "health",     name: "Health & Food",      icon: "heart",     hue: "#e5484d" },
   { id: "workout",    name: "Workout",            icon: "dumbbell",  hue: "#f76b15" },
-  { id: "nutrition",  name: "Nutrition",          icon: "apple",     hue: "#30a46c" },
   { id: "learning",   name: "Learning",           icon: "gradcap",   hue: "#8e4ec6" },
   { id: "reading",    name: "Reading",            icon: "book",      hue: "#0091ff" },
   { id: "media",      name: "Movies & Series",    icon: "film",      hue: "#d6409f" },
@@ -202,7 +201,7 @@ const NAV_GROUPS = [
     { id: "goals",     name: "Goals",     icon: "target" },
     { id: "progress",  name: "Progress",  icon: "chart" },
   ]},
-  { label: "Daily", items: ["habits", "health", "workout", "nutrition", "journal"].map(areaOf) },
+  { label: "Daily", items: ["habits", "health", "workout", "journal"].map(areaOf) },
   { label: "Growth", items: ["learning", "reading", "projects"].map(areaOf) },
   { label: "Life", items: ["finance", "media", "social", "memories"].map(areaOf) },
   { label: "System", items: [
@@ -214,7 +213,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 21;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 22;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -844,6 +843,25 @@ const MIGRATIONS = [
     (s.todos || []).forEach(td => {
       if (td.areaId === "skills" || td.areaId === "university" || td.areaId === "work") td.areaId = "learning";
     });
+  },
+
+  /* 21 → 22 · Health and Nutrition become one area. The user's words: "I'm not using health as much
+     as I thought", "the steps are not that much of a use for me", "I forget to track my meals".
+     Two half-used pages that are really one subject — what goes in, and how the body is doing.
+
+     Unlike the Learning merge, **no data moves**: `state.health` and `state.nutrition` stay exactly
+     where they are and the merged page reads both. Only the registries change, so there is nothing
+     here that can lose a meal, a photo or a night's sleep. */
+  (s) => {
+    s.profile = s.profile || {};
+    /* `metrics` has existed as a dead `null` since the early days. It becomes real here — and every
+       metric defaults to ON, because silently hiding data somebody already logged is worse than
+       showing one ring they ignore. Turning steps off is one tap; guessing for them is not offered. */
+    if (!s.profile.metrics || typeof s.profile.metrics !== "object") {
+      s.profile.metrics = { steps: true, water: true, sleep: true, mood: true,
+                            kcal: true, macros: true, meals: true, supplements: true };
+    }
+    (s.todos || []).forEach(td => { if (td.areaId === "nutrition") td.areaId = "health"; });
   },
 ];
 
@@ -2147,11 +2165,19 @@ function areaProgressToday(id) {
   const t = todayIso();
   switch (id) {
     case "habits":  { const due = state.habits.filter(h => isScheduled(h, t) && !isSkipped(h, t)); return due.length ? Math.round(100 * due.filter(h => habitMet(h, t)).length / due.length) : 0; }
-    case "health":  { const g = state.health.goals, l = healthToday();
-      return Math.round(100 * clamp(((l.steps || 0) / g.steps + (l.water || 0) / g.water + (l.sleep || 0) / g.sleep) / 3, 0, 1)); }
+    /* one page now, so one score — and it only averages the metrics that are actually switched on.
+       Counting a steps ring the user has turned off would drag the number down forever. */
+    case "health": {
+      const g = state.health.goals, l = healthToday(), m = metricsOn();
+      const parts = [];
+      if (m.steps) parts.push(clamp((l.steps || 0) / g.steps, 0, 1));
+      if (m.water) parts.push(clamp((l.water || 0) / g.water, 0, 1));
+      if (m.sleep) parts.push(clamp((l.sleep || 0) / g.sleep, 0, 1));
+      if (m.meals) { const n = state.nutrition.meals.length, c = state.nutrition.log[t] || {};
+        if (n) parts.push(Object.keys(c).filter(k => c[k]).length / n); }
+      return parts.length ? Math.round(100 * parts.reduce((a, x) => a + x, 0) / parts.length) : 0; }
     case "workout": return Math.round(100 * clamp(workoutsThisWeek() / state.workout.weeklyGoal, 0, 1));
-    case "nutrition": { const n = state.nutrition.meals.length, c = state.nutrition.log[t] || {};
-      return n ? Math.round(100 * Object.keys(c).filter(k => c[k]).length / n) : 0; }
+
     /* one area now, so one score: this month's self-directed hours against the target, plus how
        much of the open coursework is actually done */
     case "learning": {
@@ -2177,7 +2203,7 @@ function areaProgressToday(id) {
   }
 }
 function weeklyProgress() {
-  const keys = ["habits", "health", "workout", "nutrition", "journal"];
+  const keys = ["habits", "health", "workout", "journal"];
   return Math.round(keys.reduce((a, k) => a + areaProgressToday(k), 0) / keys.length);
 }
 
@@ -2938,7 +2964,7 @@ function timelineOn(d) {
 
   (state.nutrition.meals || []).filter(m => hhmm(m.time)).forEach(m => add({ kind: "meal", id: m.id,
     time: m.time, title: m.name || m.slot, sub: m.slot || "meal", icon: "\u{1F37D}\uFE0F", hue: "#30a46c",
-    done: !!(state.nutrition.log[d] || {})[m.id], nav: "nutrition" }));
+    done: !!(state.nutrition.log[d] || {})[m.id], nav: "health" }));
 
   /* a plan item is scheduled by weekday, so "is it on today" is a cadence question, not a date one */
   (state.workout.plan || []).filter(pl => hhmm(pl.time) && (pl.days || []).includes(WEEKDAY_MON0(d)))
@@ -3048,7 +3074,7 @@ function completeHabitToday(habitId) {
 /* ---------- cross-linking: one check syncs task ⇄ habit / supplement ---------- */
 const AREA_RULES = [
   [/\b(pay|paid|bill|billed|tuition|rent|buy|bought|purchase|subscription|invoice|expense|budget|salary|refund|deposit|spent|cost|fee)\b/, "finance"],
-  [/\b(eat|ate|meal|breakfast|lunch|dinner|snack|cook|cooked|groceries|grocery|recipe)\b/, "nutrition"],
+  [/\b(eat|ate|meal|breakfast|lunch|dinner|snack|cook|cooked|groceries|grocery|recipe)\b/, "health"],
   [/\b(project|ship|shipped|launch|deploy|prototype|feature)\b/, "projects"],
   [/\b(study|studying|studied|course|lecture|revise|homework|assignment|exam|lesson|resume|portfolio|interview)\b/, "learning"],
   [/\b(workout|gym|train|training|exercise|run|running|lift|calisthen|yoga)\b/, "workout"],
@@ -3675,7 +3701,7 @@ function supplementsDueCard() {
         <button class="btn tiny good" data-action="sup-take" data-id="${s.id}">${I.check}Take</button>
       </li>`).join("")}</ul>`
     : `<p class="soft small">${I.check} All supplements taken — nice.</p>`;
-  return card("", cardHead(`Supplements due${due.length ? ` · ${due.length}` : ""}`, `<button class="btn ghost tiny" data-nav="nutrition">Nutrition</button>`) + body);
+  return card("", cardHead(`Supplements due${due.length ? ` · ${due.length}` : ""}`, `<button class="btn ghost tiny" data-nav="health">Health</button>`) + body);
 }
 /* ---------- the four above-the-fold cards ----------
    Order is fixed and deliberate: who you are today, what you are building, what you'll do about it,
@@ -4438,41 +4464,64 @@ function openGoalHabits(id) {
 }
 
 /* ---------- health ---------- */
+/* which numbers this person actually wants to see. Every metric defaults to on; nothing is ever
+   deleted by switching one off, and switching it back on shows the whole history again. */
+const METRICS = [
+  { id: "steps", label: "Steps", hint: "needs a tracker to be worth anything" },
+  { id: "water", label: "Water" }, { id: "sleep", label: "Sleep" }, { id: "mood", label: "Mood" },
+  { id: "kcal", label: "Calories" }, { id: "macros", label: "Macros" },
+  { id: "meals", label: "Meals" }, { id: "supplements", label: "Supplements" },
+];
+function metricsOn() {
+  const m = (state.profile && state.profile.metrics) || {};
+  const out = {};
+  METRICS.forEach(x => { out[x.id] = m[x.id] !== false; });
+  return out;
+}
+
 function vHealth() {
   const d = dayCursor("health"), isToday = d === todayIso();
-  const g = state.health.goals, l = healthOn(d);
+  const g = state.health.goals, l = healthOn(d), m = metricsOn();
   const week = weekOfDate(d);
+  const moods = ["😄", "🙂", "😌", "😐", "🥱", "😔", "😤"];
   const stepsData = week.map((x, i) => {
     const v = (state.health.log[x] || {}).steps || 0;
     return { label: WD_SHORT[i], value: v, tip: `${WD_SHORT[i]} · ${v.toLocaleString()} steps` };
   });
-  const moods = ["😄", "🙂", "😌", "😐", "🥱", "😔", "😤"];
+  /* the quick-log rows, each only if you asked for it */
+  const rows = [];
+  if (m.water) rows.push(`<li><span class="tile-ic" style="--a:#00a2c7">${I.drop}</span><span class="row-txt"><b>Water</b><small>${(l.water || 0).toFixed(2)} / ${g.water} L</small></span>
+    <span class="pill-row"><button class="btn tiny" data-action="water-add" data-n="0.25">+0.25</button><button class="btn tiny" data-action="water-add" data-n="0.5">+0.5</button></span></li>`);
+  if (m.sleep) rows.push(`<li><span class="tile-ic" style="--a:#7c66dc">${I.moon}</span><span class="row-txt"><b>Sleep</b><small>${l.sleep ? l.sleep + " h" : "not logged"}</small></span>
+    <span class="pill-row"><input class="num-input" type="number" min="0" max="24" step="0.5" value="${l.sleep || ""}" placeholder="h" data-change="sleep-set" aria-label="Hours slept"></span></li>`);
+  if (m.mood) rows.push(`<li><span class="tile-ic" style="--a:#e5484d">${I.heart}</span><span class="row-txt"><b>Mood</b><small>${l.mood ? "Feeling " + l.mood : "how do you feel?"}</small></span>
+    <span class="mood-row">${moods.map(x => `<button class="mood ${l.mood === x ? "on" : ""}" data-action="mood-set" data-m="${x}">${x}</button>`).join("")}</span></li>`);
+
   return `
   <div class="grid">
     ${card("span2 daynav-card", dayNav("health"))}
-    ${card("center", `
+
+    ${m.steps ? card("center", `
       ${ring(100 * (l.steps || 0) / g.steps, { size: 130, sw: 10, color: "#30a46c", center: (l.steps || 0).toLocaleString(), sub: `/ ${g.steps.toLocaleString()} steps`, label: isToday ? "steps today" : "steps that day" })}
       <div class="pill-row">
         <button class="btn ghost" data-action="steps-add" data-n="500">+500</button>
         <button class="btn ghost" data-action="steps-add" data-n="2000">+2,000</button>
         <button class="btn ghost" data-action="health-goals">${I.sliders}Goals</button>
-      </div>`)}
+      </div>`) : ""}
 
-    ${card("", cardHead((isToday ? "Today's" : niceDate(d, { weekday: "long" }) + "'s") + " log") + `
-      <ul class="log-list">
-        <li><span class="tile-ic" style="--a:#00a2c7">${I.drop}</span><span class="row-txt"><b>Water</b><small>${(l.water || 0).toFixed(2)} / ${g.water} L</small></span>
-          <span class="pill-row"><button class="btn tiny" data-action="water-add" data-n="0.25">+0.25</button><button class="btn tiny" data-action="water-add" data-n="0.5">+0.5</button></span></li>
-        <li><span class="tile-ic" style="--a:#7c66dc">${I.moon}</span><span class="row-txt"><b>Sleep</b><small>${l.sleep ? l.sleep + " h" : "not logged"}</small></span>
-          <span class="pill-row"><input class="num-input" type="number" min="0" max="24" step="0.5" value="${l.sleep || ""}" placeholder="h" data-change="sleep-set" aria-label="Hours slept"></span></li>
-        <li><span class="tile-ic" style="--a:#e5484d">${I.heart}</span><span class="row-txt"><b>Mood</b><small>${l.mood ? "Feeling " + l.mood : "how do you feel?"}</small></span>
-          <span class="mood-row">${moods.map(m => `<button class="mood ${l.mood === m ? "on" : ""}" data-action="mood-set" data-m="${m}">${m}</button>`).join("")}</span></li>
-      </ul>`)}
+    ${rows.length ? card(m.steps ? "" : "span2", cardHead((isToday ? "Today's" : niceDate(d, { weekday: "long" }) + "'s") + " log",
+      m.steps ? "" : `<button class="btn ghost tiny" data-action="health-goals">${I.sliders}Goals</button>`) +
+      `<ul class="log-list">${rows.join("")}</ul>`) : ""}
 
-    ${card("span2", cardHead("Steps this week") + `
+    ${foodCards(d, isToday)}
+    ${m.meals ? mealsCard(d) : ""}
+    ${m.supplements ? supplementsCard() : ""}
+
+    ${m.steps ? card("span2", cardHead("Steps this week") + `
       <div data-chart-type="bar" data-chart='${esc(JSON.stringify(stepsData))}' data-goal="${g.steps}" data-color="#30a46c" data-h="160" data-label="Steps that week"></div>
-      <p class="chart-note">${I.target} goal line at ${g.steps.toLocaleString()} steps</p>`)}
+      <p class="chart-note">${I.target} goal line at ${g.steps.toLocaleString()} steps</p>`) : ""}
 
-    ${card("span2", cardHead("Mood · last 14 days") + (() => {
+    ${m.mood ? card("span2", cardHead("Mood · last 14 days") + (() => {
       const days = [...Array(14)].map((_, i) => addDays(d, i - 13));
       const logged = days.filter(x => moodOn(x)).length;
       return `<div class="mood-strip">${days.map(x => `
@@ -4481,7 +4530,15 @@ function vHealth() {
           <small>${niceDate(x, { day: "numeric" })}</small>
         </button>`).join("")}</div>
       <p class="chart-note">${I.heart} ${logged} of 14 days logged${logged ? " — tap a day to jump to it" : ""}. Journal and Health share one mood.</p>`;
-    })())}
+    })()) : ""}
+
+    ${card("span2", cardHead("Show me only what I use") + `
+      <div class="metric-row">
+        ${METRICS.map(x => `<label class="metric-chip ${m[x.id] ? "on" : ""}">
+          <input type="checkbox" data-change="metric-toggle" data-id="${x.id}" ${m[x.id] ? "checked" : ""}>
+          <span>${esc(x.label)}${x.hint && !m[x.id] ? "" : ""}</span></label>`).join("")}
+      </div>
+      <p class="soft note">${I.spark} Turning one off only hides it — <b>nothing is deleted</b>, and switching it back on brings every number with it. No step tracker? Turn Steps off and the ring and its chart go with it.</p>`)}
   </div>`;
 }
 
@@ -5014,31 +5071,32 @@ function macroBar(label, value, goal, color) {
     ${barHtml(pct, color)}
   </div>`;
 }
-function vNutrition() {
-  const t = dayCursor("nutrition"), isToday = t === todayIso();
-  const g = state.nutrition.goals, tot = nutritionOn(t);
-  const checked = state.nutrition.log[t] || {};
+/* ---- the food half of Health ----
+   Extracted from the old vNutrition so the merged page can compose it. Reads state.nutrition
+   exactly as before: this merge moved pages, not data. */
+function foodCards(t, isToday) {
+  const g = state.nutrition.goals, tot = nutritionOn(t), m = metricsOn();
   const kcalPct = g.kcal ? Math.round(100 * tot.kcal / g.kcal) : 0;
-  const meals = [...state.nutrition.meals].sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : 1);
-  const sups = state.nutrition.supplements;
-  const dueCount = sups.filter(s => supStatus(s).due).length;
-  return `
-  <div class="grid">
-    ${card("span2 daynav-card", dayNav("nutrition"))}
-    ${card("", `
+  const out = [];
+  if (m.kcal) out.push(card("", `
       <div class="goal-row">
         <div><p class="soft">Calories ${isToday ? "today" : "that day"}</p><h3>${tot.kcal.toLocaleString()} / ${g.kcal.toLocaleString()}</h3><small class="soft">kcal · ${kcalPct}%</small></div>
         <span class="big-ic" style="--a:#30a46c">${I.apple}</span>
       </div>
       ${barHtml(kcalPct, "#30a46c")}
-      <div class="pill-row" style="margin-top:12px"><button class="btn ghost" data-action="nutrition-goals">${I.sliders}Edit goals</button></div>`)}
-    ${card("", cardHead("Macros " + (isToday ? "today" : "that day")) + `<div class="macro-bars">
+      <div class="pill-row" style="margin-top:12px"><button class="btn ghost" data-action="nutrition-goals">${I.sliders}Edit goals</button></div>`));
+  if (m.macros) out.push(card("", cardHead("Macros " + (isToday ? "today" : "that day")) + `<div class="macro-bars">
       ${macroBar("Protein", tot.protein, g.protein, "#e5484d")}
       ${macroBar("Carbs", tot.carbs, g.carbs, "#f5a623")}
       ${macroBar("Fats", tot.fats, g.fats, "#7c66dc")}
       ${macroBar("Fiber", tot.fiber, g.fiber, "#30a46c")}
-    </div>`)}
-    ${card("span2", cardHead("Meal schedule", addBtn("Add meal", "meal-add")) + (meals.length ? `
+    </div>`));
+  return out.join("");
+}
+function mealsCard(t) {
+  const checked = state.nutrition.log[t] || {};
+  const meals = [...state.nutrition.meals].sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : 1);
+  return card("span2", cardHead("Meal schedule", addBtn("Add meal", "meal-add")) + (meals.length ? `
       <ul class="meal-sched">
         ${meals.map(m => {
           const done = !!checked[m.id];
@@ -5060,9 +5118,9 @@ function vNutrition() {
                 <span class="mm">${m.protein}P</span><span class="mm">${m.carbs}C</span><span class="mm">${m.fats}F</span>${m.fiber ? `<span class="mm">${m.fiber}Fi</span>` : ""}
               </div>
               <div class="meal-photos">
-                ${photos.map(p => `<span class="meal-photo">
-                  <span class="media-host" data-media="${p.id}" data-media-kind="${p.kind}"><span class="media-missing">…</span></span>
-                  <button class="photo-x" data-action="meal-photo-del" data-id="${m.id}" data-ref="${p.id}" aria-label="Remove photo">${I.x}</button>
+                ${photos.map(ph => `<span class="meal-photo">
+                  <span class="media-host" data-media="${ph.id}" data-media-kind="${ph.kind}"><span class="media-missing">…</span></span>
+                  <button class="photo-x" data-action="meal-photo-del" data-id="${m.id}" data-ref="${ph.id}" aria-label="Remove photo">${I.x}</button>
                 </span>`).join("")}
                 <label class="meal-photo-add" aria-label="Add a photo of this meal">
                   <input type="file" accept="image/*" data-change="meal-photo-add" data-id="${m.id}" hidden>
@@ -5072,8 +5130,12 @@ function vNutrition() {
             </div>
           </li>`;
         }).join("")}
-      </ul>` : emptyMsg("apple", "Plan your meals for the day.", addBtn("Add a meal", "meal-add"))))}
-    ${card("span2", cardHead(`Supplements${dueCount ? ` · ${dueCount} due` : ""}`, addBtn("Add", "sup-add")) + (sups.length ? `
+      </ul>` : emptyMsg("apple", "Plan your meals for the day.", addBtn("Add a meal", "meal-add"))));
+}
+function supplementsCard() {
+  const sups = state.nutrition.supplements;
+  const dueCount = sups.filter(s => supStatus(s).due).length;
+  return card("span2", cardHead(`Supplements${dueCount ? ` · ${dueCount} due` : ""}`, addBtn("Add", "sup-add")) + (sups.length ? `
       <ul class="sup-list">
         ${sups.map(s => {
           const st = supStatus(s);
@@ -5091,8 +5153,9 @@ function vNutrition() {
             <button class="icon-btn ghost" data-action="sup-del" data-id="${s.id}" aria-label="Delete supplement">${I.trash}</button>
           </li>`;
         }).join("")}
-      </ul>` : emptyMsg("apple", "Track vitamins & supplements with reminders.", addBtn("Add a supplement", "sup-add"))))}
-  </div>`;
+      </ul>
+      ${!pushOn() ? `<p class="soft note push-warn">${I.bell || I.spark} <b>These reminders only reach you while the app is open.</b> Closed-app alerts are built but not switched on — that's why a dose can pass unnoticed. <button class="btn tiny ghost" data-nav="profile">Set it up in Profile</button></p>` : ""}`
+      : emptyMsg("apple", "Track vitamins & supplements with reminders.", addBtn("Add a supplement", "sup-add"))));
 }
 
 /* ---------- learning ---------- */
@@ -6573,7 +6636,7 @@ function dueNudges(now) {
 
   if (k.supplements) state.nutrition.supplements.filter(s => supStatus(s).due).forEach(s =>
     out.push({ key: `sup:${s.id}:${t}`, title: `${s.name} is due`,
-      body: s.dose ? `${s.dose} · ${SUP_LABEL[s.every] || "daily"}` : "Tap to mark it taken", nav: "nutrition" }));
+      body: s.dose ? `${s.dose} · ${SUP_LABEL[s.every] || "daily"}` : "Tap to mark it taken", nav: "health" }));
 
   if (k.deadlines) {
     learnTasks().filter(x => !x.done && x.due === t).forEach(x =>
@@ -6937,7 +7000,7 @@ function vProfile() {
 /* ================= render ================= */
 const VIEWS = {
   dashboard: vDashboard, goals: vGoals, habits: vHabits, health: vHealth, workout: vWorkout,
-  nutrition: vNutrition, learning: vLearning, reading: vReading, media: vMedia,
+  learning: vLearning, reading: vReading, media: vMedia,
   projects: vProjects, finance: vFinance, social: vSocial,
   memories: vMemories, journal: vJournal, progress: vProgress,
   integrations: vIntegrations, profile: vProfile,
@@ -7395,7 +7458,7 @@ const ACTIONS = {
       `<input type="hidden" name="id" value="${m.id}">`, "meal-edit");
   },
   "meal-toggle": (el) => {
-    const t = dayCursor("nutrition"); const l = state.nutrition.log[t] = state.nutrition.log[t] || {};
+    const t = dayCursor("health"); const l = state.nutrition.log[t] = state.nutrition.log[t] || {};
     l[el.dataset.id] = !l[el.dataset.id];
     if (l[el.dataset.id]) addXp(5, "Meal logged");
     save(); render();
@@ -8300,6 +8363,11 @@ const CHANGES = {
     const v = Math.max(0, +el.value || 0);
     state.profile.fxRate = v;
     state.profile.fxSetOn = v ? todayIso() : "";
+    save(); render();
+  },
+  "metric-toggle": (el) => {
+    state.profile.metrics = state.profile.metrics || {};
+    state.profile.metrics[el.dataset.id] = !!el.checked;
     save(); render();
   },
   "tmdb-key": (el) => { state.profile.tmdbKey = el.value.trim(); save(); },
