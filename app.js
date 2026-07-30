@@ -1225,7 +1225,7 @@ const SUPABASE_ANON = "sb_publishable_phHHeh4YTbPyxxfHpVIXSA_q6RyfNce";
 /* Web-push public key (safe to ship — it's the public half). Generate a pair and paste the public
    one here; see supabase/README.md. Empty means closed-app push simply isn't offered, so a
    deployment that was never configured for it can't send anything. */
-const VAPID_PUBLIC = "";
+const VAPID_PUBLIC = "BLw8TUoS0rsKozF-4zVZJl5nfRGtofzWItI-4gIAw0kmsaR9QFQUrdYXTQQoUqwJfPmpInh37pxQu6ttbiqSe1A";
 const SESSION_KEY  = "lifehub-session";   // {access_token,refresh_token,expires_at,email,user_id,salt,keyRaw}
 const SYNCMETA_KEY = "lifehub-sync";      // {userId,version,updatedAt}
 
