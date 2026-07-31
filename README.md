@@ -72,6 +72,53 @@ zero is a mark you earned, "not graded yet" is not the same thing.
 without naming one stays in your totals but appears on no course — because before this existed
 nothing recorded which course an hour belonged to, and LifeHub won't guess.
 
+## 📖 A study session is what you did, not how long
+
+Logging "100 minutes" tells you nothing in a week's time. A **session** records the rest of it:
+
+- **what kind of work** — vocabulary, grammar, a lesson, listening, speaking, review…
+- **which material**, chosen from the ones you've used before, so *Menschen A2 Kursbuch* can't split
+  into three spellings, each with its own half-history;
+- **which chapter and pages** — free text, because *Kapitel 4*, *112–118* and *Lektion 7B* are all
+  real answers and a number field would reject two of them;
+- **a link**, for the podcast episode or video you actually used;
+- **what you learned**, your notes, and **photos of your notebook**;
+- and an **error log** — everything you got wrong.
+
+One course can have many materials. Studying German A2 from a grammar book, a vocabulary book and a
+lesson book is **one course with three materials**, not three courses.
+
+### Two ways to log time, and they add up
+
+The quick **+30 min** buttons still record just a number. A session carries its own minutes. Your
+totals are the **sum of both**, computed every time they're read rather than kept as a running
+figure — so editing a session's minutes moves the total by exactly the difference, and deleting one
+removes exactly its own minutes and nothing else. There is no stored total to drift out of step.
+
+### The error log, and what LifeHub will never do to it
+
+Every mistake you write down appears in **To review** on the Learning page, gathered from every
+session, until you tick it off. **Nothing is ever marked reviewed for you** — not by time passing,
+not by studying the same chapter again. A mistake stops being one when *you* say so.
+
+Any review item, or a whole session, can become **tomorrow's task** in one tap. It lands in your
+daily tasks dated tomorrow, filed under Learning.
+
+## 📆 The dashboard walks back through your week
+
+You can step the Dashboard back a day at a time — *"so I can know why I did and didn't do."*
+
+What **travels with the day**: its tasks (still tickable), its timeline, its habits (still tickable —
+back-filling Tuesday marks Tuesday), and its reflection. Adding a task while looking at Tuesday files
+it under **Tuesday**, not today.
+
+What **stays behind on today**: *Today's focus* picking and pinning, the hard thing, supplements due,
+*Start focus session*, and "N things left today". Those decide about the day you're living. A focus
+session started on Tuesday is not a thing that can exist, and a button offering one would be lying.
+
+Back-filling a past day earns **no XP** — the streak system stays honest. Navigating into the
+Dashboard from anywhere else returns you to today.
+
 ## 🪶 Starting something should be typing its name
 
 A new project asks for a **name**. That's it. Everything else — purpose, priority, dates, tags, the

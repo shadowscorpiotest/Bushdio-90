@@ -218,7 +218,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 23;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 24;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -274,8 +274,8 @@ function defaultState() {
        courses {id,name,emoji,kind,category,institution,instructor,start,targetEnd,credits,grade,
                 gradeMax,progress,link,notes}
        tasks   {id,title,kind:"university"|"career",tag,due,done} */
-    learning: { monthlyHours: 10, weeklyHours: 20, courses: [], tasks: [] },
-    study: { log: {} },        // log[date]={skills:mins, university:mins} — ONE ledger, split by source
+    learning: { monthlyHours: 10, weeklyHours: 20, courses: [], tasks: [], resources: [], sessions: [] },
+    study: { log: {} },        // log[date]={skills:mins, university:mins} — quick logs only; sessions carry their own mins
     reflections: {},           // {date: text}
     reading: { yearlyGoal: 12, books: [], log: {} },
     media: [],                 // {id,title,type,status,rating}
@@ -876,6 +876,18 @@ const MIGRATIONS = [
   (s) => {
     s.profile = s.profile || {};
     if (!Array.isArray(s.profile.hiddenAreas)) s.profile.hiddenAreas = [];
+  },
+
+  /* 23 → 24 · a study session is a thing that happened, not a number. Until now two 50-minute German
+     sessions — one vocabulary, one grammar — became the integer 100 in study.log, with nowhere to
+     record which book, which chapter, what was learned, or what went wrong. Sessions and the
+     materials they used start EMPTY and nothing is back-filled: the app has no idea what any past
+     hour was spent on, and inventing a chapter number would be a lie in the one place a student
+     actually checks. The old ledger keeps every minute it already holds. */
+  (s) => {
+    s.learning = s.learning || {};
+    if (!Array.isArray(s.learning.resources)) s.learning.resources = [];
+    if (!Array.isArray(s.learning.sessions)) s.learning.sessions = [];
   },
 ];
 
@@ -1938,7 +1950,34 @@ function workoutsThisWeek() {
 }
 /* one study ledger; pass a kind for just that source, omit it for the combined total */
 const studyOn = (d) => state.study.log[d] || {};
-const studyMins = (d, kind) => { const x = studyOn(d); return kind ? (x[kind] || 0) : ((x.skills || 0) + (x.university || 0)); };
+/* Study minutes come from TWO places and are SUMMED on read, never accumulated into a stored total:
+   the quick +30 min / +1 h buttons still write study.log, and a logged session carries its own
+   `mins`. Because nothing is ever added to or subtracted from a running figure, editing a session's
+   minutes or deleting it outright can't leave a phantom hour behind — the failure stateful
+   arithmetic always eventually produces. Reads state directly rather than through the accessors
+   defined further down, so it is safe to call from anywhere. */
+function sessionMinsOn(d, kind) {
+  const st = state.learning || {};
+  const list = st.sessions || [], courses = st.courses || [];
+  let n = 0;
+  for (const s of list) {
+    if (s.date !== d) continue;
+    if (kind) {
+      const c = s.courseId ? courses.find(x => x.id === s.courseId) : null;
+      if ((c && c.kind === "university" ? "university" : "skills") !== kind) continue;
+    }
+    n += +s.mins || 0;
+  }
+  return n;
+}
+const studyMins = (d, kind) => { const x = studyOn(d); return (kind ? (x[kind] || 0) : ((x.skills || 0) + (x.university || 0))) + sessionMinsOn(d, kind); };
+/* Every day that has study on it, from EITHER source. Anything totalling a month or a lifetime has
+   to enumerate through here: walking `study.log`'s keys alone would silently skip a day whose only
+   record is a logged session, which is exactly the day the user cared most about. */
+const studyDays = () => [...new Set([
+  ...Object.keys((state.study && state.study.log) || {}),
+  ...(((state.learning || {}).sessions) || []).map(s => s.date),
+])];
 const studyRange = (days, kind) => days.reduce((a, d) => a + studyMins(d, kind), 0);
 function studyMinutesToday() { return studyMins(todayIso()); }
 /* one mood per day, owned by Health and shared with Journal */
@@ -2195,7 +2234,7 @@ function areaProgressToday(id) {
     /* one area now, so one score: this month's self-directed hours against the target, plus how
        much of the open coursework is actually done */
     case "learning": {
-      const mins = Object.keys(state.study.log).filter(d => d.startsWith(monthKey())).reduce((a, d) => a + studyMins(d), 0);
+      const mins = studyDays().filter(d => d.startsWith(monthKey())).reduce((a, d) => a + studyMins(d), 0);
       const hrs = clamp(mins / 60 / Math.max(1, state.learning.monthlyHours + state.learning.weeklyHours * 4), 0, 1);
       const tasks = state.learning.tasks || [];
       const done = tasks.length ? tasks.filter(k => k.done).length / tasks.length : hrs;
@@ -2273,7 +2312,7 @@ const BADGES = [
   { id: "librarian",   name: "Librarian",        desc: "Finish 5 books",                 emoji: "📚", test: () => state.reading.books.filter(b => b.status === "done").length >= 5 },
   { id: "athlete",     name: "Athlete",          desc: "Log 10 workouts",                emoji: "🏋️", test: () => Object.values(state.workout.log).reduce((a, v) => a + v.length, 0) >= 10 },
   { id: "hydrated",    name: "Hydro homie",      desc: "Hit your water goal 7 times",    emoji: "💧", test: () => Object.values(state.health.log).filter(l => (l.water || 0) >= state.health.goals.water).length >= 7 },
-  { id: "scholar",     name: "Scholar",          desc: "Log 10 hours of study",          emoji: "🎓", test: () => Object.keys(state.study.log).reduce((a, d) => a + studyMins(d), 0) >= 600 },
+  { id: "scholar",     name: "Scholar",          desc: "Log 10 hours of study",          emoji: "🎓", test: () => studyDays().reduce((a, d) => a + studyMins(d), 0) >= 600 },
   { id: "journalist",  name: "Dear diary",       desc: "Write 7 journal entries",        emoji: "✒️", test: () => state.journal.length >= 7 },
   { id: "keeper",      name: "Memory keeper",    desc: "Save 5 memories",                emoji: "📸", test: () => state.memories.length >= 5 },
   { id: "shipper",     name: "Shipped it",       desc: "Complete a project",             emoji: "🚢", test: () => state.projects.some(projectDone) },
@@ -2369,6 +2408,10 @@ function renderTopbar() {
 
 function go(viewId) {
   if (viewId === "_areas") { openDrawer(); return; }
+  /* The dashboard is where you land to decide about TODAY. Walking back through it is deliberate,
+     but ARRIVING from somewhere else is not — so navigating in resets the day. Stepping back is one
+     tap; being quietly shown Tuesday as though it were now would be a bug. */
+  if (viewId === "dashboard" && currentView !== "dashboard") setCursor("dashboard", todayIso());
   currentView = viewId;
   /* only write the first time an area is visited — re-navigating is a read, not a change */
   if (areaOf(viewId) && !state.visited[viewId]) { state.visited[viewId] = true; checkBadges(); save(); }
@@ -3007,10 +3050,10 @@ function timelineCard(d) {
   const { timed, anytime } = timelineOn(d);
   const isToday = d === todayIso();
   const now = new Date().toTimeString().slice(0, 5);
-  const head = cardHead("Today's timeline", `<button class="btn ghost tiny" data-action="event-add">${I.plus}Add</button>`);
+  const head = cardHead(isToday ? "Today's timeline" : "That day's timeline", `<button class="btn ghost tiny" data-action="event-add">${I.plus}Add</button>`);
   if (!timed.length && !anytime.length) {
     return card("span2 timeline-card", head +
-      `<p class="soft small">Nothing scheduled today. That is a rest day, not a broken page \u{1F324}\uFE0F</p>` +
+      `<p class="soft small">${isToday ? "Nothing scheduled today. That is a rest day, not a broken page \u{1F324}\uFE0F" : "Nothing was scheduled on this day."}</p>` +
       `<p class="soft note">${I.spark} Times come from your own tasks, meals, workout plan and habit reminders \u2014 add an event for anything else.</p>`);
   }
   /* the "now" line goes between the last item that has passed and the next that hasn't */
@@ -3028,7 +3071,7 @@ function timelineCard(d) {
     + (isToday && nextIdx === -1 && timed.length ? nowLine : "");
   return card("span2 timeline-card", head +
     (rows ? `<ul class="timeline">${rows}</ul>` : "") +
-    (anytime.length ? `<p class="tl-anytime">Any time today</p><ul class="timeline">${anytime.map(row).join("")}</ul>` : "") +
+    (anytime.length ? `<p class="tl-anytime">Any time ${isToday ? "today" : "that day"}</p><ul class="timeline">${anytime.map(row).join("")}</ul>` : "") +
     `<p class="soft note">${I.spark} This is your own schedule \u2014 LifeHub does not sync with Google or Apple Calendar. That needs a sign-in and a server, and this app deliberately has neither.</p>`);
 }
 
@@ -3157,6 +3200,26 @@ function taskDueOn(rep, d) {
 const taskSort = (a, b) => (a.order - b.order) || (a.time || "99:99").localeCompare(b.time || "99:99");
 const tasksOn = (d) => state.todos.filter(td => (td.date || d) === d).sort(taskSort);
 const nextTaskOrder = () => state.todos.reduce((m, td) => Math.max(m, td.order || 0), 0) + 1;
+/* ONE path that creates a dated task. Everything that spawns a task for a day other than today —
+   "practise this tomorrow" from a study session or from a single mistake — goes through here, so
+   there is exactly one definition of what a new task is. */
+function addTaskOn(text, date, opts) {
+  const clean = String(text || "").trim().slice(0, 120);
+  if (!clean) return null;
+  const o = opts || {};
+  let habitId = "", supId = "", areaId = o.areaId || "";
+  if (!areaId) {
+    if (o.habitId === "none") { /* explicitly unlinked */ }
+    else if (o.habitId) habitId = o.habitId;
+    else { const link = suggestLinkForText(clean); if (link.type === "sup") supId = link.id; else if (link.type === "area") areaId = link.id; else habitId = link.id; }
+  }
+  const td = born({ id: uid(), text: clean, done: false, date: date || todayIso(), time: o.time || "",
+    habitId, supId, areaId, order: nextTaskOrder(), repeat: null, seriesId: "", from: "",
+    priority: o.priority || "med", estMin: Math.max(0, +o.estMin || 0), linkGoalId: o.linkGoalId || "",
+    projectId: o.projectId || "", focus: false, hard: false });
+  state.todos.push(td);
+  return td;
+}
 /* unfinished and dated before today — the ones that used to disappear */
 const strandedTasks = () => state.todos.filter(td => !td.done && td.date && td.date < todayIso())
   .sort((a, b) => a.date < b.date ? -1 : 1);
@@ -3613,9 +3676,10 @@ function openTaskDetail(id) {
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
     </div>`);
 }
-function taskAddForm() {
+function taskAddForm(d) {
+  const past = d && d !== todayIso();
   return `<form data-submit="todo-add" class="task-add">
-    <input name="text" placeholder="Add a task…" autocomplete="off" required maxlength="120">
+    <input name="text" placeholder="${past ? `Add a task to ${esc(niceDate(d, { month: "short", day: "numeric" }))}…` : "Add a task…"}" autocomplete="off" required maxlength="120">
     <input name="time" type="time" class="task-time-in" aria-label="Time (optional)">
     <button class="btn primary" type="submit" aria-label="Add task">${I.plus}</button>
   </form>`;
@@ -3628,9 +3692,10 @@ function taskAddForm() {
 function habitsTodayCard(d) {
   const due = liveHabits().filter(h => isScheduled(h, d) && !isSkipped(h, d));
   const done = due.filter(h => habitMet(h, d)).length;
-  const head = cardHead(`Today's habits${due.length ? ` <small class="soft">${done}/${due.length}</small>` : ""}`,
+  const isToday = d === todayIso();
+  const head = cardHead(`${isToday ? "Today's habits" : "Habits that day"}${due.length ? ` <small class="soft">${done}/${due.length}</small>` : ""}`,
     `<button class="btn ghost tiny" data-nav="habits">Open habits</button>`);
-  if (!due.length) return card("span2", head + `<p class="soft small">Nothing scheduled today — enjoy the rest \u{1F324}\uFE0F</p>`);
+  if (!due.length) return card("span2", head + `<p class="soft small">${isToday ? "Nothing scheduled today — enjoy the rest \u{1F324}\uFE0F" : "Nothing was scheduled on this day."}</p>`);
   const rows = due.map(h => {
     const met = habitMet(h, d), g = groupById(h.groupId);
     const src = habitSource(h);
@@ -3833,16 +3898,39 @@ const MOTIVATION = [
 const quotePool = () => MOTIVATION.concat((state.quotes || []).filter(q => String(q || "").trim()));
 const motivationOfDay = () => { const p = quotePool(); return p[Math.floor(Date.now() / DAY_MS) % p.length]; };
 
-function welcomeCard(remaining) {
+/* On a past day the big line becomes what that day WAS, not what is left of it: "3 things left" is a
+   call to action, and a call to action about Tuesday is meaningless. */
+function welcomeCard(remaining, d) {
   const ch = challengeDay();
-  return card("welcome span2", `
-    <p class="wel-hi">${greeting()}, ${esc(state.profile.name || "friend")}</p>
-    <h2 class="wel-big">${remaining ? `${remaining} thing${remaining > 1 ? "s" : ""} left today` : "Today is clear \u{1F33F}"}</h2>
+  const isToday = d === todayIso();
+  const todos = tasksOn(d), done = todos.filter(td => td.done).length;
+  const due = liveHabits().filter(h => isScheduled(h, d) && !isSkipped(h, d));
+  const hDone = due.filter(h => habitMet(h, d)).length;
+  return card("welcome span2" + (isToday ? "" : " looking-back"), `
+    <p class="wel-hi">${isToday ? `${greeting()}, ${esc(state.profile.name || "friend")}` : `Looking back · ${esc(agoLabel(d))}`}</p>
+    <h2 class="wel-big">${isToday
+      ? (remaining ? `${remaining} thing${remaining > 1 ? "s" : ""} left today` : "Today is clear \u{1F33F}")
+      : (todos.length || due.length
+        ? `${done} of ${todos.length} task${todos.length === 1 ? "" : "s"} · ${hDone} of ${due.length} habit${due.length === 1 ? "" : "s"}`
+        : "Nothing was tracked that day")}</h2>
     <p class="wel-meta">
-      <span>${esc(niceDate(todayIso(), { weekday: "long", month: "long", day: "numeric" }))}</span>
-      ${ch ? `<span class="wel-ch">${esc(ch.name)} · day ${ch.n}${ch.of ? ` of ${ch.of}` : ""}</span>` : ""}
+      <span>${esc(niceDate(d, { weekday: "long", month: "long", day: "numeric" }))}</span>
+      ${isToday && ch ? `<span class="wel-ch">${esc(ch.name)} · day ${ch.n}${ch.of ? ` of ${ch.of}` : ""}</span>` : ""}
     </p>
-    <p class="wel-line">${esc(motivationOfDay())}</p>`);
+    ${isToday ? `<p class="wel-line">${esc(motivationOfDay())}</p>` : ""}`);
+}
+
+/* A past day's tasks, plainly. No pinning, no auto-fill, no "start a focus session" — a session
+   begun on Tuesday is not a thing that can exist, and offering it would be a button that lies. */
+function pastTasksCard(d, undone, done) {
+  const all = [...undone, ...done];
+  const head = cardHead(`Tasks that day <small class="soft">${done.length} of ${all.length} done</small>`);
+  if (!all.length) return card("focus-card span2", head +
+    `<p class="soft small" style="padding:6px 2px">No tasks were on this day.</p>` + taskAddForm(d));
+  return card("focus-card span2", head +
+    `<ul class="todo-list">${all.map(td => taskRow(td)).join("")}</ul>` +
+    taskAddForm(d) +
+    `<p class="soft note">${I.spark} You can still tick these off and still add one — it files under <b>${esc(niceDate(d, { month: "long", day: "numeric" }))}</b>, the day you are looking at, not today.</p>`);
 }
 
 /* The largest block on the page, on purpose: if you only read one thing here, read what you are
@@ -3934,8 +4022,20 @@ function hardTaskCard() {
            <button class="btn ghost slim" data-action="todo-open" data-id="${td.id}">Open task</button>`}`);
 }
 
+/* ===== the Dashboard, and what a past day may honestly show =====
+   The user's words: "in the Dashboard I can not go back and see the tasks I've done the last three
+   days — so I can not know why I did and didn't do." Looking back was genuinely impossible: this
+   function hardcoded todayIso().
+
+   The interesting part is not the cursor, it's the discipline about what survives the trip. Things
+   that RECORD a day travel with it — its tasks, its timeline, its habits, its reflection, all still
+   editable, because remembering on Thursday what you did on Tuesday is the whole point. Things that
+   DECIDE about today do not: focus picks, the hard thing, supplements due, a focus session, "N
+   things left". Those are about the day you are living, and rendering them over Tuesday would make
+   the page quietly claim something false. */
 function vDashboard() {
-  const t = todayIso();
+  const t = dayCursor("dashboard");
+  const isToday = t === todayIso();
   const todos = tasksOn(t);
   const undone = todos.filter(td => !td.done);
   const done = todos.filter(td => td.done);
@@ -3959,23 +4059,24 @@ function vDashboard() {
   const remaining = undone.length + uniDue.length + dueHabits.filter(h => !habitMet(h, t)).length;
   return `
   <div class="grid dash">
-    ${welcomeCard(remaining)}
-    ${goalsCard()}
-    ${focusCard(uniDue, undone, done, stranded)}
-    ${hardTaskCard()}
+    ${card("span2 daynav-card", dayNav("dashboard"))}
+    ${welcomeCard(remaining, t)}
+    ${isToday ? goalsCard() : ""}
+    ${isToday ? focusCard(uniDue, undone, done, stranded) : pastTasksCard(t, undone, done)}
+    ${isToday ? hardTaskCard() : ""}
 
     ${timelineCard(t)}
     ${habitsTodayCard(t)}
-    ${currentlyReadingCard()}
-    ${supplementsDueCard()}
-    ${activeProjectsCard()}
+    ${isToday ? currentlyReadingCard() : ""}
+    ${isToday ? supplementsDueCard() : ""}
+    ${isToday ? activeProjectsCard() : ""}
 
-    ${deadlines.length ? card("", cardHead("What's next") + `
+    ${isToday && deadlines.length ? card("", cardHead("What's next") + `
       <ul class="mini-agenda">${deadlines.map(k => { const a = areaOf(k.area); return `<li data-nav="${k.nav}"><span class="a-ic" style="--a:${cssVar(a.hue)}">${I[a.icon]}</span><span class="row-txt"><b>${esc(k.title)}</b><small>${esc(a.name.toLowerCase())}</small></span><span class="a-when ${k.due < t ? "over" : ""}">${daysUntil(k.due)}</span></li>`; }).join("")}</ul>`) : ""}
 
-    ${card("", cardHead("Reflection") + `
+    ${card("", cardHead(isToday ? "Reflection" : `Reflection · ${esc(niceDate(t, { month: "long", day: "numeric" }))}`) + `
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
+      <textarea class="reflect-input" data-change="reflection" data-date="${t}" placeholder="${isToday ? "A sentence or two…" : "Nothing written that day — you can still add it."}" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
 
   </div>`;
 }
@@ -5227,9 +5328,236 @@ const openCourses = () => coursesAll().filter(c => (c.progress || 0) < 100);
 function courseMins(id) {
   let n = 0;
   Object.keys(state.study.log || {}).forEach(d => { n += +((state.study.log[d].courses || {})[id]) || 0; });
+  studySessions().forEach(s => { if (s.courseId === id) n += +s.mins || 0; });
   return n;
 }
 const attributedMins = () => coursesAll().reduce((a, c) => a + courseMins(c.id), 0);
+
+/* ===== study sessions — what you actually did, not just how long =====
+   The app has already built this object twice: a workout session (coach, duration, what got
+   corrected, what to work on next) and a project work session (duration, focus, outcome, next
+   action). A study session is the same shape, so it reuses the same patterns rather than inventing
+   a third. */
+
+/* Materials you name once. The name IS the join key — the same rule as ensurePerson and the
+   exercise datalist — so "Menschen A2 Kursbuch" can't quietly split into three spellings, each with
+   its own history. */
+const RES_TYPES = [
+  { id: "book",    label: "Book",    emoji: "\u{1F4D8}" },
+  { id: "podcast", label: "Podcast", emoji: "\u{1F3A7}" },
+  { id: "video",   label: "Video",   emoji: "\u{1F3AC}" },
+  { id: "app",     label: "App",     emoji: "\u{1F4F1}" },
+  { id: "article", label: "Article", emoji: "\u{1F4F0}" },
+  { id: "other",   label: "Other",   emoji: "\u{1F516}" },
+];
+const resType = (r) => RES_TYPES.find(x => x.id === (r && r.type)) || RES_TYPES[0];
+const resourcesAll = () => (state.learning.resources = state.learning.resources || []);
+const resourceById = (id) => resourcesAll().find(r => r.id === id) || null;
+const resourceByName = (n) => resourcesAll().find(r => normName(r.name) === normName(n)) || null;
+const resourcesOfCourse = (cid) => resourcesAll().filter(r => r.courseId === cid);
+function ensureResource(name, type, courseId) {
+  const clean = String(name || "").trim().slice(0, 90);
+  if (!clean) return null;
+  const found = resourceByName(clean);
+  if (found) {
+    /* Filling a blank is not the same as overwriting an answer: a resource first named without a
+       course can learn its course later, but nothing you already set is silently replaced. */
+    if (!found.courseId && courseId) { found.courseId = courseId; found.updated = todayIso(); }
+    return found;
+  }
+  const r = born({ id: uid(), name: clean, type: RES_TYPES.some(t => t.id === type) ? type : "book",
+    link: "", courseId: courseId || "" });
+  resourcesAll().push(r);
+  return r;
+}
+function resourceDatalist() {
+  const list = resourcesAll();
+  return list.length ? `<datalist id="res-names">${list.map(r => `<option value="${esc(r.name)}"></option>`).join("")}</datalist>` : "";
+}
+
+/* What kind of work the session was. A language learner's day is not one undifferentiated "study" —
+   an hour of vocabulary and an hour of speaking are different things and get reviewed differently. */
+const STUDY_KINDS = [
+  { id: "vocabulary", label: "Vocabulary", emoji: "\u{1F524}" },
+  { id: "grammar",    label: "Grammar",    emoji: "\u{1F9E9}" },
+  { id: "lesson",     label: "Lesson",     emoji: "\u{1F4D6}" },
+  { id: "listening",  label: "Listening",  emoji: "\u{1F3A7}" },
+  { id: "reading",    label: "Reading",    emoji: "\u{1F4DA}" },
+  { id: "speaking",   label: "Speaking",   emoji: "\u{1F5E3}️" },
+  { id: "writing",    label: "Writing",    emoji: "✍️" },
+  { id: "review",     label: "Review",     emoji: "\u{1F501}" },
+  { id: "practice",   label: "Practice",   emoji: "\u{1F3AF}" },
+  { id: "other",      label: "Other",      emoji: "\u{1F4DD}" },
+];
+const studyKind = (s) => STUDY_KINDS.find(x => x.id === (s && s.kind)) || STUDY_KINDS[STUDY_KINDS.length - 1];
+const studySessions = () => (state.learning.sessions = state.learning.sessions || []);
+const studySessionById = (id) => studySessions().find(s => s.id === id) || null;
+/* No sort: `created` is a DATE, so every session logged on the same day carries the same stamp and
+   sorting by it would shuffle them into an arbitrary order that changes nothing but looks
+   deliberate. Array order IS the order you logged them, which is the only ordering the app actually
+   knows. */
+const studySessionsOn = (d) => studySessions().filter(s => s.date === d);
+const sessionsOfCourse = (cid) => studySessions().filter(s => s.courseId === cid)
+  .sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+
+/* The error log. A mistake lives on the session where it happened — that is the only place that
+   knows the context — and the "To review" list is a VIEW across all of them, not a second store.
+   Nothing is ever auto-fixed: a mistake stops being one when you say so, not when time passes. */
+const openMistakes = () => {
+  const out = [];
+  studySessions().forEach(s => (s.mistakes || []).forEach(m => { if (!m.fixed) out.push({ m, s }); }));
+  return out.sort((a, b) => a.s.date < b.s.date ? 1 : a.s.date > b.s.date ? -1 : 0);
+};
+const openMistakesOf = (cid) => openMistakes().filter(x => x.s.courseId === cid);
+const mistakeHome = (mid) => {
+  for (const s of studySessions()) { const m = (s.mistakes || []).find(x => x.id === mid); if (m) return { s, m }; }
+  return null;
+};
+
+/* A one-line summary of a session for a list row: the material and where in it you were. Says only
+   what was actually entered — no "Chapter —" placeholders for a podcast that has no chapters. */
+function sessionWhere(s) {
+  const r = s.resourceId ? resourceById(s.resourceId) : null;
+  return [r ? r.name : "", s.chapter, s.pages ? `p. ${s.pages}` : ""].filter(Boolean).join(" · ");
+}
+
+function studySessionRow(s) {
+  const k = studyKind(s), c = s.courseId ? courseById(s.courseId) : null;
+  const where = sessionWhere(s), open = (s.mistakes || []).filter(m => !m.fixed).length;
+  return `<li class="ss" data-action="study-open" data-id="${s.id}">
+    <span class="ss-emoji" aria-hidden="true">${esc(k.emoji)}</span>
+    <span class="ss-body">
+      <span class="ss-top"><b>${esc(k.label)}</b><b class="ss-min">${estLabel(s.mins) || "—"}</b></span>
+      ${where ? `<small class="ss-where">${esc(where)}</small>` : ""}
+      ${s.learned ? `<small class="ss-learn">${I.spark}${esc(s.learned)}</small>` : ""}
+      <span class="ss-meta">
+        ${c ? `<span class="ss-course">${esc(c.emoji || "\u{1F4D8}")} ${esc(c.name)}</span>` : ""}
+        ${open ? `<span class="ss-errs">${open} to review</span>` : ""}
+        ${(s.media || []).length ? `<span>${I.upload}${s.media.length}</span>` : ""}
+      </span>
+    </span>
+    <span class="ss-go" aria-hidden="true">${I.chevR}</span>
+  </li>`;
+}
+
+/* one place that reads the session form, so add and edit can never drift apart */
+function sessionFromForm(f) {
+  const r = ensureResource(f.resource, f.resType, f.courseId || "");
+  return {
+    date: f.date || todayIso(),
+    mins: Math.max(0, +f.mins || 0),
+    courseId: (f.courseId && courseById(f.courseId)) ? f.courseId : "",
+    kind: STUDY_KINDS.some(x => x.id === f.kind) ? f.kind : "other",
+    resourceId: r ? r.id : "",
+    /* free text on purpose: "Kapitel 4", "112–118" and "Lektion 7B" are all real answers, and a
+       number field would reject two of them */
+    chapter: String(f.chapter || "").trim().slice(0, 60),
+    pages: String(f.pages || "").trim().slice(0, 40),
+    link: String(f.link || "").slice(0, 300),
+    learned: String(f.learned || "").slice(0, 600),
+    notes: String(f.notes || "").slice(0, 1000),
+  };
+}
+function studySessionFormFields(s, date) {
+  s = s || {};
+  const r = s.resourceId ? resourceById(s.resourceId) : null;
+  const courses = coursesAll();
+  const head =
+    `<div class="fld-row">${
+      fld("Minutes", `<input type="number" name="mins" min="0" step="5" value="${s.mins || 50}" inputmode="numeric" required>`)}${
+      fld("Date", `<input type="date" name="date" value="${esc(s.date || date || todayIso())}">`)
+    }</div>` +
+    `<div class="fld-row">${
+      fld("What kind of work?", `<select name="kind">${STUDY_KINDS.map(k => `<option value="${k.id}" ${(s.kind || "lesson") === k.id ? "selected" : ""}>${k.emoji} ${k.label}</option>`).join("")}</select>`)}${
+      fld("Course <small class=\"soft\">— optional</small>", `<select name="courseId"><option value="">Not on a course</option>${courses.map(c => `<option value="${c.id}" ${s.courseId === c.id ? "selected" : ""}>${esc(c.emoji || "\u{1F4D8}")} ${esc(c.name)}</option>`).join("")}</select>`)
+    }</div>`;
+  const rest =
+    `<div class="fld-row">${
+      fld("What did you use?", `<input type="text" name="resource" list="res-names" value="${esc(r ? r.name : "")}" placeholder="e.g. Menschen A2 Kursbuch" autocomplete="off" maxlength="90">`)}${
+      fld("Kind", `<select name="resType">${RES_TYPES.map(t => `<option value="${t.id}" ${(r ? r.type : "book") === t.id ? "selected" : ""}>${t.emoji} ${t.label}</option>`).join("")}</select>`)
+    }</div>` + resourceDatalist() +
+    `<p class="soft note">${I.spark} Type the same name again next time and it's the <b>same</b> material — LifeHub remembers it and offers it back, so one book can't split into three spellings.</p>` +
+    `<div class="fld-row">${
+      fld("Chapter or lesson <small class=\"soft\">— optional</small>", txt("chapter", "Kapitel 4 / Lektion 7B", s.chapter || "", false))}${
+      fld("Pages <small class=\"soft\">— optional</small>", txt("pages", "112–118", s.pages || "", false))
+    }</div>` +
+    fld("Link <small class=\"soft\">— optional</small>", txt("link", "the episode, video or page you used", s.link || "", false)) +
+    fld("What did you learn?", `<textarea name="learned" rows="2" maxlength="600" placeholder="e.g. Dative after 'mit', 'nach', 'aus'">${esc(s.learned || "")}</textarea>`) +
+    fld("Notes <small class=\"soft\">— optional</small>", `<textarea name="notes" rows="2" maxlength="1000" placeholder="anything worth keeping">${esc(s.notes || "")}</textarea>`);
+  return head + moreBlock(rest, "What you studied");
+}
+
+/* The session sheet: the record, its photos, and its error log. Mistakes are added and closed HERE
+   rather than in the edit form, so re-saving a session can never silently wipe the ones you already
+   marked fixed. */
+function openStudySession(id) {
+  const s = studySessionById(id);
+  if (!s) { closeModal(); return; }
+  const k = studyKind(s), c = s.courseId ? courseById(s.courseId) : null;
+  const r = s.resourceId ? resourceById(s.resourceId) : null;
+  const where = sessionWhere(s);
+  const mist = s.mistakes || [];
+  return openModal(`
+    <header class="modal-head"><h3>${esc(k.emoji)} ${esc(k.label)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="soft small">${esc(niceDate(s.date, { weekday: "long", month: "long", day: "numeric" }))}${s.mins ? ` · ${estLabel(s.mins)}` : ""}${c ? ` · ${esc(c.name)}` : ""}</p>
+      ${where ? `<p class="ss-where-big">${r ? esc(resType(r).emoji) : ""} ${esc(where)}</p>` : ""}
+      ${s.link ? `<p class="soft small"><a href="${esc(safeUrl(s.link))}" target="_blank" rel="noopener">${esc(s.link)}</a></p>` : ""}
+      ${s.learned ? `<div class="fld"><span>What you learned</span><p class="habit-why">${esc(s.learned)}</p></div>` : ""}
+      ${s.notes ? `<div class="fld"><span>Notes</span><p class="soft small">${esc(s.notes)}</p></div>` : ""}
+
+      <div class="fld"><span>Error log ${mist.length ? `<small class="soft">${mist.filter(m => !m.fixed).length} open of ${mist.length}</small>` : ""}</span>
+        ${mist.length ? `<ul class="mistake-list">${mist.map(m => `<li class="${m.fixed ? "fixed" : ""}">
+          <button class="checkbox" data-action="mistake-fix" data-id="${m.id}" aria-label="${m.fixed ? "Reopen" : "Mark reviewed"}">${I.check}</button>
+          <span class="row-txt"><b>${esc(m.text)}</b>${m.note ? `<small>→ ${esc(m.note)}</small>` : ""}${m.fixed && m.fixedOn ? `<small class="soft">reviewed ${esc(niceDate(m.fixedOn, { month: "short", day: "numeric" }))}</small>` : ""}</span>
+          ${!m.fixed ? `<button class="icon-btn ghost" data-action="mistake-task" data-id="${m.id}" aria-label="Practise this tomorrow" title="Practise tomorrow">${I.plus}</button>` : ""}
+          <button class="icon-btn ghost" data-action="mistake-del" data-id="${m.id}" aria-label="Delete">${I.trash}</button>
+        </li>`).join("")}</ul>` : `<p class="soft small">Nothing logged. Write down what you got wrong and it appears in <b>To review</b> on the Learning page until you tick it off.</p>`}
+        <form data-submit="mistake-add" class="mistake-add">
+          <input name="text" placeholder="What went wrong?" autocomplete="off" required maxlength="160">
+          <input name="note" placeholder="The correction — optional" autocomplete="off" maxlength="200">
+          <input type="hidden" name="sid" value="${s.id}">
+          <button class="btn primary" type="submit" aria-label="Add mistake">${I.plus}</button>
+        </form>
+      </div>
+
+      <div class="fld"><span>Notebook photos</span>
+        ${(s.media || []).length ? `<div class="media-grid">
+          ${s.media.map(m => `<div class="media-item">
+            <span class="media-host" data-media="${m.id}" data-media-kind="${m.kind}"><span class="media-missing">loading…</span></span>
+            <button class="icon-btn ghost media-thumb-del" data-action="study-media-del" data-s="${s.id}" data-m="${m.id}" aria-label="Remove">${I.x}</button>
+          </div>`).join("")}
+        </div>` : `<p class="soft small">Photograph the page or your notes and they stay with this session.</p>`}
+        <label class="btn tiny ghost upload-btn"><input type="file" accept="image/*,video/*" hidden data-change="study-media" data-id="${s.id}"><span>${I.upload}Add a photo</span></label>
+      </div>
+
+      <div class="pill-row">
+        <button class="btn ghost" data-action="study-task" data-id="${s.id}">${I.target}Practise tomorrow</button>
+        <button class="btn ghost" data-action="study-edit" data-id="${s.id}">${I.edit}Edit</button>
+        <button class="btn danger" data-action="study-del" data-id="${s.id}">${I.trash}Delete</button>
+      </div>
+    </div>`);
+}
+
+/* Every open mistake, across every session, newest first. A view — not a second store — so ticking
+   one here and ticking it on its session are the same act. */
+function toReviewCard() {
+  const rows = openMistakes();
+  const head = cardHead(`To review${rows.length ? ` <small class="soft">${rows.length}</small>` : ""}`);
+  if (!rows.length) return card("span2", head +
+    `<p class="soft small">${I.check} Nothing outstanding. Anything you write in a session's <b>error log</b> waits here until you've reviewed it.</p>`);
+  return card("span2 review-card", head + `
+    <ul class="mistake-list">${rows.slice(0, 20).map(({ m, s }) => {
+      const c = s.courseId ? courseById(s.courseId) : null;
+      return `<li>
+        <button class="checkbox" data-action="mistake-fix" data-id="${m.id}" aria-label="Mark ${esc(m.text)} reviewed">${I.check}</button>
+        <span class="row-txt" data-action="study-open" data-id="${s.id}"><b>${esc(m.text)}</b>${m.note ? `<small>→ ${esc(m.note)}</small>` : ""}<small class="soft">${c ? `${esc(c.name)} · ` : ""}${esc(studyKind(s).label.toLowerCase())} · ${esc(agoLabel(s.date))}</small></span>
+        <button class="icon-btn ghost" data-action="mistake-task" data-id="${m.id}" aria-label="Practise this tomorrow" title="Practise tomorrow">${I.plus}</button>
+      </li>`;
+    }).join("")}</ul>
+    ${rows.length > 20 ? `<p class="soft small">${rows.length - 20} more — open a session to see the rest.</p>` : ""}
+    <p class="soft note">${I.spark} Nothing here is ever ticked off for you. A mistake stops being one when <b>you</b> say so — tap ${I.plus} to make it tomorrow's task.</p>`);
+}
 
 /* Weighted by credits where they exist, and it counts ONLY graded courses — an average that
    quietly includes ungraded ones is not an average of anything. It says how many it left out. */
@@ -5272,8 +5600,9 @@ function courseCard(c) {
 
 function vLearning() {
   const cur = dayCursor("learning"), curMonth = cur.slice(0, 7);
-  const self = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "skills"), 0);
-  const uni = Object.keys(state.study.log).filter(d => d.startsWith(curMonth)).reduce((a, d) => a + studyMins(d, "university"), 0);
+  const month = studyDays().filter(d => d.startsWith(curMonth));
+  const self = month.reduce((a, d) => a + studyMins(d, "skills"), 0);
+  const uni = month.reduce((a, d) => a + studyMins(d, "university"), 0);
   const hrs = (m) => Math.round(m / 6) / 10;
   const target = state.learning.monthlyHours;
   const courses = [...coursesAll()].sort((a, b) => ((a.progress || 0) >= 100 ? 1 : 0) - ((b.progress || 0) >= 100 ? 1 : 0)
@@ -5286,9 +5615,26 @@ function vLearning() {
   const career = tasks.filter(k => k.kind === "career");
   const careerPct = career.length ? Math.round(100 * career.filter(k => k.done).length / career.length) : 0;
 
+  const daySess = studySessionsOn(cur);
+  const dayMins = studyMins(cur);
+  const isToday = cur === todayIso();
   return `
   <div class="grid">
     ${card("span2 daynav-card", dayNav("learning"))}
+
+    ${card("span2", cardHead(`${isToday ? "Today" : esc(niceDate(cur, { weekday: "long", month: "long", day: "numeric" }))}${dayMins ? ` <small class="soft">${estLabel(dayMins)}</small>` : ""}`,
+      `<button class="btn primary tiny" data-action="study-add">${I.plus}Log a session</button>`) + (daySess.length
+      ? `<ul class="study-sessions">${daySess.map(studySessionRow).join("")}</ul>`
+        + (dayMins > daySess.reduce((a, s) => a + (+s.mins || 0), 0)
+          ? `<p class="soft small">Plus ${estLabel(dayMins - daySess.reduce((a, s) => a + (+s.mins || 0), 0))} logged with the quick buttons below, which don't say what you studied.</p>` : "")
+      : (dayMins
+        ? `<p class="soft small">${estLabel(dayMins)} logged ${isToday ? "today" : "that day"} with the quick buttons — but nothing recorded about <i>what</i> you studied. Log a session to keep the chapter, what you learned and what you got wrong.</p>`
+        : emptyMsg("gradcap", isToday
+            ? "Nothing logged yet. A session keeps the material, the chapter, what you learned — and what you got wrong."
+            : "Nothing logged on this day.",
+          `<button class="btn primary" data-action="study-add">${I.plus}Log a session</button>`))))}
+
+    ${toReviewCard()}
 
     ${card("span2 goals-hero learn-hero", `
       <p class="gh-q">What am I learning?</p>
@@ -5344,6 +5690,7 @@ function vLearning() {
 
     ${card("span2", cardHead("How Learning works here") + `
       <p class="soft small">Self-directed study, university coursework and career prep used to be three separate pages with almost nothing in them. They're one area now — courses on top, everything with a date underneath.</p>
+      <p class="soft small"><b>Two ways to log time, and they add up together.</b> The quick <b>+30 min</b> buttons record only a number. A <b>session</b> records the material, the chapter, what you learned and what you got wrong — and its minutes count in exactly the same totals. Nothing is double-counted, and deleting a session removes only its own minutes.</p>
       <p class="soft note">${I.spark} <b>Hours per course</b> only count study you logged <i>against that course</i>. Time logged before this existed, or logged without naming one, is in your totals but not on any course — it was never recorded which course it belonged to, and LifeHub won't guess.</p>`)}
   </div>`;
 }
@@ -5380,8 +5727,37 @@ function openCourseDetail(id) {
       <div class="fld"><span>Time on this course</span>
         ${mins ? `<p class="soft small">${I.clock} <b>${estLabel(mins)}</b> logged against this course.</p>`
           : `<p class="soft small">Nothing logged against this course yet. Use <b>Log study</b> below and it starts counting — study logged without naming a course stays in your totals but not here.</p>`}
-        <button class="btn tiny ghost" data-action="course-study" data-id="${c.id}">${I.plus}Log study</button>
+        <div class="pill-row">
+          <button class="btn tiny ghost" data-action="course-study" data-id="${c.id}">${I.plus}Log study</button>
+          <button class="btn tiny ghost" data-action="study-add" data-course="${c.id}">${I.pen}Log a session</button>
+        </div>
       </div>
+
+      ${(() => {
+        const res = resourcesOfCourse(c.id);
+        return `<div class="fld"><span>Materials</span>
+          ${res.length ? `<ul class="res-list">${res.map(r => `<li>
+            <span class="res-ic" aria-hidden="true">${esc(resType(r).emoji)}</span>
+            <span class="row-txt"><b>${esc(r.name)}</b><small>${esc(resType(r).label)}${r.link ? ` · <a href="${esc(safeUrl(r.link))}" target="_blank" rel="noopener">link</a>` : ""}</small></span>
+            <button class="icon-btn ghost" data-action="res-edit" data-id="${r.id}" aria-label="Edit ${esc(r.name)}">${I.edit}</button>
+          </li>`).join("")}</ul>`
+          : `<p class="soft small">The books, podcasts and apps you name when logging a session collect here. One course can have as many as you like — a grammar book, a vocabulary book and a lesson book are three materials, not three courses.</p>`}
+        </div>`;
+      })()}
+
+      ${(() => {
+        const sess = sessionsOfCourse(c.id), errs = openMistakesOf(c.id);
+        return (sess.length ? `<div class="fld"><span>Recent sessions <small class="soft">${sess.length}</small></span>
+          <ul class="study-sessions">${sess.slice(0, 6).map(studySessionRow).join("")}</ul>
+          ${sess.length > 6 ? `<p class="soft small">${sess.length - 6} older — walk back through the days on the Learning page.</p>` : ""}
+        </div>` : "")
+        + (errs.length ? `<div class="fld"><span>Still to review <small class="soft">${errs.length}</small></span>
+          <ul class="mistake-list">${errs.slice(0, 8).map(({ m, s }) => `<li>
+            <button class="checkbox" data-action="mistake-fix" data-id="${m.id}" aria-label="Mark reviewed">${I.check}</button>
+            <span class="row-txt"><b>${esc(m.text)}</b>${m.note ? `<small>→ ${esc(m.note)}</small>` : ""}<small class="soft">${esc(agoLabel(s.date))}</small></span>
+          </li>`).join("")}</ul>
+        </div>` : "");
+      })()}
 
       ${linked.length ? `<div class="fld"><span>Open deadlines tagged "${esc(c.name)}"</span>
         <ul class="hist-log">${linked.map(k => `<li>
@@ -7148,10 +7524,13 @@ const ACTIONS = {
   },
 
   /* Today agenda + tasks */
+  /* ticks the day the DASHBOARD is showing, not today — toggleHabit reads the habits cursor, and
+     it already withholds XP for any day but today */
   "ag-habit": (el) => {
+    const d = dayCursor("dashboard");
     const h = state.habits.find(x => x.id === el.dataset.id);
-    if (h && h.kind === "workout") { setCursor("workout", todayIso()); go("workout"); toast("Log your workout here — it ticks the habit 💪"); return; }
-    setCursor("habits", todayIso()); toggleHabit(el.dataset.id); syncHabitToTask(el.dataset.id); render();
+    if (h && h.kind === "workout") { setCursor("workout", d); go("workout"); toast("Log your workout here — it ticks the habit 💪"); return; }
+    setCursor("habits", d); toggleHabit(el.dataset.id); if (d === todayIso()) syncHabitToTask(el.dataset.id); render();
   },
   "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
   "ag-uni": (el) => {
@@ -7608,6 +7987,65 @@ const ACTIONS = {
       `<div class="fld-row">${fld("Minutes", num("mins", 60, 1))}${fld("Date", `<input type="date" name="date" value="${todayIso()}">`)}</div>` +
       `<p class="soft note">${I.spark} These minutes go into your monthly totals <b>and</b> onto this course.</p>` +
       `<input type="hidden" name="cid" value="${c.id}">`, "course-study", "Log it");
+  },
+  /* ----- study sessions, materials and the error log ----- */
+  "study-add": (el) => {
+    const d = dayCursor("learning");
+    formModal(`Log a session${d === todayIso() ? "" : ` · ${niceDate(d, { month: "short", day: "numeric" })}`}`,
+      studySessionFormFields({ courseId: el.dataset.course || "" }, d), "study-add", "Log it");
+  },
+  "study-open": (el) => openStudySession(el.dataset.id),
+  "study-edit": (el) => {
+    const s = studySessionById(el.dataset.id); if (!s) return;
+    formModal("Edit session", studySessionFormFields(s) + `<input type="hidden" name="id" value="${s.id}">`, "study-edit");
+  },
+  "study-del": (el) => {
+    const id = el.dataset.id, s = studySessionById(id); if (!s) return;
+    const media = (s.media || []).slice();
+    closeModal();
+    /* the blobs only go once undo has expired for good — the same rule memories and books follow */
+    deleteWithUndo(() => studySessions(), id, "Session deleted", () => media.forEach(dropMedia));
+  },
+  "study-media-del": (el) => {
+    const s = studySessionById(el.dataset.s); if (!s) return;
+    dropMedia((s.media || []).find(m => m.id === el.dataset.m));
+    s.media = (s.media || []).filter(m => m.id !== el.dataset.m);
+    save(); render(); openStudySession(s.id);
+  },
+  /* "practise this tomorrow" — from a whole session, or from one mistake. Both go through
+     addTaskOn so there is exactly one definition of a dated task. */
+  "study-task": (el) => {
+    const s = studySessionById(el.dataset.id); if (!s) return;
+    const what = s.learned || sessionWhere(s) || studyKind(s).label;
+    const td = addTaskOn(`Practise: ${what}`, addDays(todayIso(), 1), { areaId: "learning" });
+    if (td) { addLink(ref("task", td.id), ref("course", s.courseId), "serves"); save(); render(); toast("Added to tomorrow's tasks \u{1F5D3}️"); }
+  },
+  "mistake-task": (el) => {
+    const hit = mistakeHome(el.dataset.id); if (!hit) return;
+    const td = addTaskOn(`Review: ${hit.m.text}`, addDays(todayIso(), 1), { areaId: "learning" });
+    if (td) { save(); render(); toast("Added to tomorrow's tasks \u{1F5D3}️"); }
+  },
+  "mistake-fix": (el) => {
+    const hit = mistakeHome(el.dataset.id); if (!hit) return;
+    hit.m.fixed = !hit.m.fixed;
+    hit.m.fixedOn = hit.m.fixed ? todayIso() : "";
+    if (hit.m.fixed) addXp(5, "Reviewed a mistake");
+    save(); render();
+    if (!$("#modalBackdrop").hidden) openStudySession(hit.s.id);
+  },
+  "mistake-del": (el) => {
+    const hit = mistakeHome(el.dataset.id); if (!hit) return;
+    hit.s.mistakes = (hit.s.mistakes || []).filter(m => m.id !== el.dataset.id);
+    save(); render(); openStudySession(hit.s.id);
+  },
+  "res-edit": (el) => {
+    const r = resourceById(el.dataset.id); if (!r) return;
+    formModal("Edit material",
+      `<div class="fld-row">${fld("Name", txt("name", "", r.name))}${
+        fld("Kind", `<select name="type">${RES_TYPES.map(t => `<option value="${t.id}" ${r.type === t.id ? "selected" : ""}>${t.emoji} ${t.label}</option>`).join("")}</select>`)}</div>` +
+      fld("Link <small class=\"soft\">— optional</small>", txt("link", "https://…", r.link || "", false)) +
+      `<p class="soft note">${I.spark} Renaming this renames it on every session that used it — the name is how they're joined.</p>` +
+      `<input type="hidden" name="id" value="${r.id}">`, "res-edit");
   },
   "course-add": () => formModal("New course", courseFormFields(null, true), "course-add", "Add"),
   "course-edit": (el) => {
@@ -8137,6 +8575,40 @@ const SUBMITS = {
     touch("course", c.id, `Studied ${n} min`);
     setTimeout(() => openCourseDetail(c.id), 0);
   },
+  "study-add": (f) => {
+    const s = born(Object.assign({ id: uid(), media: [], mistakes: [] }, sessionFromForm(f)));
+    studySessions().push(s);
+    if (s.mins) addXp(Math.round(s.mins / 6), "Study session");
+    if (s.courseId) touch("course", s.courseId, `Studied ${s.mins} min · ${studyKind(s).label}`);
+    /* straight into the sheet, because the error log is the point and it lives there */
+    setTimeout(() => openStudySession(s.id), 0);
+  },
+  "study-edit": (f) => {
+    const s = studySessionById(f.id); if (!s) return;
+    Object.assign(s, sessionFromForm(f), { updated: todayIso() });
+    setTimeout(() => openStudySession(s.id), 0);
+  },
+  "mistake-add": (f) => {
+    const s = studySessionById(f.sid); if (!s) return;
+    const text = String(f.text || "").trim().slice(0, 160);
+    if (!text) return;
+    s.mistakes = s.mistakes || [];
+    s.mistakes.push({ id: uid(), text, note: String(f.note || "").trim().slice(0, 200), fixed: false, fixedOn: "" });
+    s.updated = todayIso();
+    setTimeout(() => openStudySession(s.id), 0);
+  },
+  "res-edit": (f) => {
+    const r = resourceById(f.id); if (!r) return;
+    const name = String(f.name || "").trim().slice(0, 90);
+    /* refuse a rename that would collide with another material — silently merging two histories is
+       worse than saying no */
+    const clash = name && resourceByName(name);
+    if (clash && clash.id !== r.id) { toast("Another material already has that name"); return; }
+    if (name) r.name = name;
+    if (RES_TYPES.some(t => t.id === f.type)) r.type = f.type;
+    r.link = String(f.link || "").slice(0, 300);
+    r.updated = todayIso();
+  },
   "learn-task-add": (f) => {
     if (!String(f.title || "").trim()) return;
     learnTasks().push(born({ id: uid(), title: f.title.trim(), kind: TASK_KINDS.some(x => x.id === f.kind) ? f.kind : "university",
@@ -8220,16 +8692,10 @@ const SUBMITS = {
   },
   "social-add": (f) => { state.social.items.push({ id: uid(), title: f.title, emoji: f.emoji || "🤝", target: Math.max(1, +f.target) }); },
   "memory-add": (f) => { state.memories.push({ id: uid(), date: f.date, title: f.title, note: f.note || "", emoji: f.emoji || "📸", hue: Math.floor(Math.random() * 360), photos: [], tags: parseTags(f.tags), felt: f.felt || "", people: parseTags(f.people), starred: false }); addXp(10, "Memory saved"); },
-  "todo-add": (f) => {
-    if (!f.text) return;
-    let habitId = "", supId = "", areaId = "";
-    if (f.habitId === "none") { /* explicitly unlinked */ }
-    else if (f.habitId) { habitId = f.habitId; }
-    else { const link = suggestLinkForText(f.text); if (link.type === "sup") supId = link.id; else if (link.type === "area") areaId = link.id; else habitId = link.id; }
-    state.todos.push(born({ id: uid(), text: f.text, done: false, date: todayIso(), time: f.time || "",
-      habitId, supId, areaId, order: nextTaskOrder(), repeat: null, seriesId: "", from: "",
-      priority: "med", estMin: 0, linkGoalId: "", projectId: "", focus: false, hard: false }));
-  },
+  /* dated to the day you are LOOKING at, not to today — the dashboard can walk backwards now, and a
+     form that silently files your entry under a different date than the one on screen is the exact
+     defect the study-log day cursor already had once. */
+  "todo-add": (f) => { addTaskOn(f.text, dayCursor("dashboard"), { habitId: f.habitId, time: f.time }); },
   "focus-start": (f) => { startFocus(state.todos.find(x => x.id === f.id), f.mins); },
   "focus-log": (f) => { finishFocus(!!f.markDone, f); },
   "profile-save": (f) => { state.profile.name = f.name; state.profile.avatar = f.avatar || state.profile.avatar; state.profile.onboarded = true; },
@@ -8259,10 +8725,16 @@ const CHANGES = {
   "habit-goal-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "goal-habit-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "habit-amount": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const was = habitMet(h, dayCursor("habits")); const e = ensureHabitEntry(h, dayCursor("habits")); e.amount = Math.max(0, +el.value || 0); if (!was && habitMet(h, dayCursor("habits")) && dayCursor("habits") === todayIso()) addXp(10, h.name); save(); render(); openHabitDetail(h.id); } },
+  /* the date rides on the element, because this same textarea appears on the dashboard (which can
+     now be showing a past day), in the Journal and in the reflect modal */
   "reflection": (el) => {
+    const d = el.dataset.date || todayIso();
     const v = el.value.trim();
-    if (v) { state.reflections[todayIso()] = v.slice(0, 1000); const jid = suggestHabitForText("reflection journal"); if (jid) completeHabitToday(jid); }
-    else delete state.reflections[todayIso()];
+    if (v) {
+      state.reflections[d] = v.slice(0, 1000);
+      /* writing about Tuesday on Thursday is not doing Thursday's journalling habit */
+      if (d === todayIso()) { const jid = suggestHabitForText("reflection journal"); if (jid) completeHabitToday(jid); }
+    } else delete state.reflections[d];
     save();
   },
   "task-text": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.text = el.value.slice(0, 120); save(); } },
@@ -8313,6 +8785,10 @@ const CHANGES = {
   "session-media": (el) => {
     const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (!s) return;
     storeMediaFile(el.files[0], (ref) => { s.media = s.media || []; s.media.push(ref); save(); render(); toast(`${ref.kind === "video" ? "Video" : "Photo"} added 📎`); });
+  },
+  "study-media": (el) => {
+    const s = studySessionById(el.dataset.id); if (!s) return;
+    storeMediaFile(el.files[0], (r) => { s.media = s.media || []; s.media.push(r); save(); render(); openStudySession(s.id); toast("Added to this session 📎"); });
   },
   "meal-photo-add": (el) => {
     const t = todayIso(), id = el.dataset.id;
