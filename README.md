@@ -131,6 +131,30 @@ to say. New courses work the same way.
 
 **Editing** shows everything at once, because by then you already know what you meant.
 
+## 🍽️ A different meal every day, and your usuals kept
+
+Meals used to be **one fixed schedule** you ticked off. Every day was the same four rows, and the
+only thing that varied was whether you'd checked them. That isn't how eating works.
+
+Now there are two halves:
+
+- **Your usuals** — the meals you eat often, saved once with their calories and macros.
+- **The day itself** — what you actually ate, built by picking from your usuals or adding something
+  new. Every day can be completely different.
+
+**A day's meal is a copy, not a link.** Editing one of your usuals never rewrites a day you've
+already recorded, and removing one from your usuals leaves every day that used it exactly as it was.
+Each day keeps the numbers it had.
+
+### Goals for one day only
+
+Your standing calorie and macro targets stay where they are, and any single day can be given **its
+own**. A day with its own target says so; a day without one follows your standing goals — including
+when you change them later, which is why an override is only stored when you actually set one.
+
+Meals, their photos and their notes all belong to **the day on screen**, not to today. Step back a
+day and everything you log there lands there.
+
 ## 🙈 Hiding something never deletes it
 
 Health & Food has eight switches — steps, water, sleep, mood, calories, macros, meals, supplements —
