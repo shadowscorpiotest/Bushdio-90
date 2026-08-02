@@ -218,7 +218,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 24;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 25;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -269,7 +269,13 @@ function defaultState() {
        unrelated things is how a codebase starts lying to you.
        {id,name,emoji,category,level,target,status,why,pbUnit,media:[],notes:[],log:[],created,updated} */
     workout: { weeklyGoal: 5, plan: [], log: {}, sessions: [], classes: [], skills: [] },  // plan:{id,name,category,minutes,sets,reps,days,time,focus,exercises}; classes: packages
-    nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70, fiber: 30 }, meals: [], log: {}, photos: {}, supplements: [], supTaken: {}, shopping: [] },
+    /* meals are a LIBRARY you build plus a real record per day, not one fixed schedule you tick.
+       library {id,name,slot,time,kcal,protein,carbs,fats,fiber,note} — the things you eat often
+       days[d] = { meals: [dayMeal], goals: null | {kcal,protein,carbs,fats,fiber} }
+       dayMeal  {id,libId,slot,name,time,kcal,protein,carbs,fats,fiber,note,eaten}
+       A dayMeal SNAPSHOTS its numbers, so editing a library entry never rewrites what you ate
+       last Tuesday. `goals` is null unless that day needed its own target. */
+    nutrition: { goals: { kcal: 2200, protein: 150, carbs: 250, fats: 70, fiber: 30 }, library: [], days: {}, photos: {}, supplements: [], supTaken: {} },
     /* learning: Skills & Education + University + Work Preparation, merged (schema 21)
        courses {id,name,emoji,kind,category,institution,instructor,start,targetEnd,credits,grade,
                 gradeMax,progress,link,notes}
@@ -339,12 +345,22 @@ function seedState(s) {
   s.workout.classes = [
     { id: uid(), name: "Yoga studio", total: 8, price: 120, start: addDays(t, -20), log: [addDays(t, -18), addDays(t, -14), addDays(t, -9), addDays(t, -4)], renewals: 0 },
   ];
-  s.nutrition.meals = [
-    { id: uid(), slot: "Breakfast", name: "Oatmeal, banana & nuts",       time: "08:00", kcal: 420, protein: 16, carbs: 62, fats: 13, fiber: 8 },
-    { id: uid(), slot: "Lunch",     name: "Grilled chicken, rice, salad", time: "13:00", kcal: 650, protein: 48, carbs: 70, fats: 16, fiber: 9 },
-    { id: uid(), slot: "Snacks",    name: "Greek yogurt & berries",       time: "16:30", kcal: 220, protein: 18, carbs: 24, fats: 6,  fiber: 4 },
-    { id: uid(), slot: "Dinner",    name: "Salmon, quinoa & veggies",     time: "19:30", kcal: 580, protein: 40, carbs: 48, fats: 22, fiber: 7 },
+  /* the library — things eaten often — and today built from a few of them, so the sample shows both
+     halves of how meals now work */
+  s.nutrition.library = [
+    { id: uid(), slot: "Breakfast", name: "Oatmeal, banana & nuts",       time: "08:00", kcal: 420, protein: 16, carbs: 62, fats: 13, fiber: 8, note: "" },
+    { id: uid(), slot: "Lunch",     name: "Grilled chicken, rice, salad", time: "13:00", kcal: 650, protein: 48, carbs: 70, fats: 16, fiber: 9, note: "" },
+    { id: uid(), slot: "Snacks",    name: "Greek yogurt & berries",       time: "16:30", kcal: 220, protein: 18, carbs: 24, fats: 6,  fiber: 4, note: "" },
+    { id: uid(), slot: "Dinner",    name: "Salmon, quinoa & veggies",     time: "19:30", kcal: 580, protein: 40, carbs: 48, fats: 22, fiber: 7, note: "" },
+    { id: uid(), slot: "Breakfast", name: "Eggs, avocado & sourdough",    time: "08:30", kcal: 480, protein: 24, carbs: 34, fats: 26, fiber: 6, note: "" },
+    { id: uid(), slot: "Dinner",    name: "Lentil soup & flatbread",      time: "19:00", kcal: 510, protein: 22, carbs: 72, fats: 12, fiber: 14, note: "" },
   ];
+  s.nutrition.days = {};
+  [0, -1, -2].forEach((off, i) => {
+    const d = addDays(t, off);
+    const pick = [s.nutrition.library[i % 2 ? 4 : 0], s.nutrition.library[1], s.nutrition.library[off === 0 ? 3 : 5]];
+    s.nutrition.days[d] = { meals: pick.map(m => Object.assign({}, m, { id: uid(), libId: m.id, eaten: off !== 0 })), goals: null };
+  });
   s.nutrition.supplements = [
     { id: uid(), name: "Vitamin D3", emoji: "☀️", dose: "1000 IU", every: "day" },
     { id: uid(), name: "Magnesium",  emoji: "🌙", dose: "300 mg",  every: "day" },
@@ -888,6 +904,68 @@ const MIGRATIONS = [
     s.learning = s.learning || {};
     if (!Array.isArray(s.learning.resources)) s.learning.resources = [];
     if (!Array.isArray(s.learning.sessions)) s.learning.sessions = [];
+  },
+
+  /* 24 → 25 · one fixed meal schedule becomes a LIBRARY plus a real record per day.
+     "Each day I'll have a different meal for breakfast, lunch, dinner and snacks, so that will
+     differ and I want to change it each day — and also the goal calories and macros."
+
+     The old model could not express that: it held ONE schedule and a per-day tick, so every day was
+     the same four meals and the only variable was whether you'd checked them off.
+
+     Nothing is thrown away. The old schedule becomes your library — those genuinely are the meals
+     you eat often — and every day you ever ticked something becomes a real day carrying real meals,
+     with their macros SNAPSHOT as they stand now. That snapshot is exactly what the app was already
+     showing for those days (the old totals also read today's numbers), so no figure changes; but
+     from here on editing a library entry can no longer rewrite history.
+
+     A meal that was never ticked but HAS a photo on that day is carried across too, marked not
+     eaten — otherwise remapping the photo keys would orphan the picture. */
+  (s) => {
+    s.nutrition = s.nutrition || {};
+    const old = s.nutrition.meals || [];
+    const log = s.nutrition.log || {};
+    const photos = s.nutrition.photos = s.nutrition.photos || {};
+    const num = (v) => +v || 0;
+
+    if (!Array.isArray(s.nutrition.library)) {
+      s.nutrition.library = old.map(m => ({
+        id: m.id, name: m.name || "", slot: m.slot || "Snacks", time: m.time || "",
+        kcal: num(m.kcal), protein: num(m.protein), carbs: num(m.carbs), fats: num(m.fats),
+        fiber: num(m.fiber), note: m.note || "",
+      }));
+    }
+
+    const days = s.nutrition.days = s.nutrition.days || {};
+    const byId = {};
+    old.forEach(m => { byId[m.id] = m; });
+    Object.keys(log).forEach(d => {
+      if (days[d]) return;                       // already migrated — stay idempotent
+      const ticks = log[d] || {};
+      const ph = photos[d] || {};
+      /* everything this day knows about: what was ticked, plus anything holding a photo */
+      const ids = [...new Set([...Object.keys(ticks).filter(k => ticks[k]), ...Object.keys(ph)])];
+      const meals = [], remap = {};
+      ids.forEach(id => {
+        const m = byId[id];
+        if (!m) return;                          // the library entry is long gone; nothing to copy
+        const nid = uid();
+        remap[id] = nid;
+        meals.push({ id: nid, libId: m.id, slot: m.slot || "Snacks", name: m.name || "",
+          time: m.time || "", kcal: num(m.kcal), protein: num(m.protein), carbs: num(m.carbs),
+          fats: num(m.fats), fiber: num(m.fiber), note: m.note || "", eaten: !!ticks[id] });
+      });
+      if (meals.length) days[d] = { meals, goals: null };
+      if (Object.keys(remap).length) {
+        const next = {};
+        Object.keys(ph).forEach(k => { next[remap[k] || k] = ph[k]; });
+        photos[d] = next;
+      }
+    });
+
+    delete s.nutrition.meals;
+    delete s.nutrition.log;
+    delete s.nutrition.shopping;                 // declared and backfilled for months, never read
   },
 ];
 
@@ -1986,10 +2064,59 @@ function setMoodOn(d, m) {
   const l = state.health.log[d] = healthOn(d);
   l.mood = l.mood === m ? "" : m;
 }
+/* ---- meals: a library you keep, and what you actually ate on a given day ---- */
+const mealLibrary = () => (state.nutrition.library = state.nutrition.library || []);
+const nutritionDays = () => (state.nutrition.days = state.nutrition.days || {});
+const dayEntry = (d) => nutritionDays()[d] || null;
+/* the day's meals, earliest first; untimed ones sink to the bottom rather than claiming 00:00 */
+const mealsOn = (d) => ((dayEntry(d) || {}).meals || [])
+  .slice().sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
+function ensureDay(d) {
+  const days = nutritionDays();
+  if (!days[d]) days[d] = { meals: [], goals: null };
+  days[d].meals = days[d].meals || [];
+  return days[d];
+}
+/* Your standing targets, unless this particular day was given its own. A day override is stored
+   only when you set one — an absent override is not the same as a copy of the defaults, because a
+   copy would silently stop tracking any change you make to the standing goals. */
+const dayGoals = (d) => ((dayEntry(d) || {}).goals) || state.nutrition.goals;
+const hasDayGoals = (d) => !!((dayEntry(d) || {}).goals);
+const MEAL_SLOTS = ["Breakfast", "Lunch", "Dinner", "Snacks"];
+/* one set of fields for a day's meal AND for one of your usuals — they are the same shape, so add
+   and edit can never drift apart in either place */
+function mealFormFields(m) {
+  m = m || {};
+  return `<div class="fld-row">${
+    fld("Slot", `<select name="slot">${MEAL_SLOTS.map(x => `<option${x === (m.slot || "Breakfast") ? " selected" : ""}>${x}</option>`).join("")}</select>`)}${
+    fld("Time <small class=\"soft\">— optional</small>", `<input type="time" name="time" value="${esc(m.time || "")}">`)
+  }</div>` +
+  fld("What was it?", txt("name", "e.g. Oatmeal, banana & nuts", m.name || "")) +
+  `<div class="fld-row">${
+    fld("kcal", num("kcal", m.kcal != null ? m.kcal : 400, 0, 10))}${
+    fld("Protein g", num("protein", m.protein != null ? m.protein : 20, 0, 1))}${
+    fld("Carbs g", num("carbs", m.carbs != null ? m.carbs : 40, 0, 1))}${
+    fld("Fats g", num("fats", m.fats != null ? m.fats : 10, 0, 1))}${
+    fld("Fiber g", num("fiber", m.fiber != null ? m.fiber : 5, 0, 1))
+  }</div>` +
+  fld("Note <small class=\"soft\">— optional</small>", `<textarea name="note" maxlength="4000" placeholder="how it was made, how it sat with you, what to change…">${esc(m.note || "")}</textarea>`);
+}
+const mealFromForm = (f) => ({
+  slot: MEAL_SLOTS.includes(f.slot) ? f.slot : "Snacks",
+  name: String(f.name || "").trim().slice(0, 90),
+  time: f.time || "",
+  kcal: Math.max(0, +f.kcal || 0), protein: Math.max(0, +f.protein || 0),
+  carbs: Math.max(0, +f.carbs || 0), fats: Math.max(0, +f.fats || 0),
+  fiber: Math.max(0, +f.fiber || 0),
+  note: String(f.note || "").slice(0, 4000),
+});
 function nutritionOn(d) {
-  const checked = state.nutrition.log[d] || {};
   const tot = { kcal: 0, protein: 0, carbs: 0, fats: 0, fiber: 0 };
-  state.nutrition.meals.forEach(m => { if (checked[m.id]) { tot.kcal += m.kcal; tot.protein += m.protein; tot.carbs += m.carbs; tot.fats += m.fats; tot.fiber += (m.fiber || 0); } });
+  mealsOn(d).forEach(m => {
+    if (!m.eaten) return;
+    tot.kcal += +m.kcal || 0; tot.protein += +m.protein || 0; tot.carbs += +m.carbs || 0;
+    tot.fats += +m.fats || 0; tot.fiber += +m.fiber || 0;
+  });
   return tot;
 }
 function nutritionToday() {
@@ -2226,8 +2353,8 @@ function areaProgressToday(id) {
       if (m.steps) parts.push(clamp((l.steps || 0) / g.steps, 0, 1));
       if (m.water) parts.push(clamp((l.water || 0) / g.water, 0, 1));
       if (m.sleep) parts.push(clamp((l.sleep || 0) / g.sleep, 0, 1));
-      if (m.meals) { const n = state.nutrition.meals.length, c = state.nutrition.log[t] || {};
-        if (n) parts.push(Object.keys(c).filter(k => c[k]).length / n); }
+      if (m.meals) { const day = mealsOn(t);
+        if (day.length) parts.push(day.filter(x => x.eaten).length / day.length); }
       return parts.length ? Math.round(100 * parts.reduce((a, x) => a + x, 0) / parts.length) : 0; }
     case "workout": return Math.round(100 * clamp(workoutsThisWeek() / state.workout.weeklyGoal, 0, 1));
 
@@ -3019,9 +3146,9 @@ function timelineOn(d) {
   tasksOn(d).filter(td => hhmm(td.time)).forEach(td => add({ kind: "task", id: td.id, time: td.time,
     title: td.text, sub: "task", icon: "\u2713", hue: "#3e63dd", done: td.done, action: "todo-open" }));
 
-  (state.nutrition.meals || []).filter(m => hhmm(m.time)).forEach(m => add({ kind: "meal", id: m.id,
+  mealsOn(d).filter(m => hhmm(m.time)).forEach(m => add({ kind: "meal", id: m.id,
     time: m.time, title: m.name || m.slot, sub: m.slot || "meal", icon: "\u{1F37D}\uFE0F", hue: "#30a46c",
-    done: !!(state.nutrition.log[d] || {})[m.id], nav: "health" }));
+    done: !!m.eaten, nav: "health" }));
 
   /* a plan item is scheduled by weekday, so "is it on today" is a cadence question, not a date one */
   (state.workout.plan || []).filter(pl => hhmm(pl.time) && (pl.days || []).includes(WEEKDAY_MON0(d)))
@@ -5163,7 +5290,9 @@ function macroBar(label, value, goal, color) {
    Extracted from the old vNutrition so the merged page can compose it. Reads state.nutrition
    exactly as before: this merge moved pages, not data. */
 function foodCards(t, isToday) {
-  const g = state.nutrition.goals, tot = nutritionOn(t), m = metricsOn();
+  /* the day's own target if it was given one, otherwise your standing goals — and the card says
+     which of the two it is, because a number you can't explain is worse than no number */
+  const g = dayGoals(t), own = hasDayGoals(t), tot = nutritionOn(t), m = metricsOn();
   const kcalPct = g.kcal ? Math.round(100 * tot.kcal / g.kcal) : 0;
   const out = [];
   if (m.kcal) out.push(card("", `
@@ -5172,7 +5301,14 @@ function foodCards(t, isToday) {
         <span class="big-ic" style="--a:#30a46c">${I.apple}</span>
       </div>
       ${barHtml(kcalPct, "#30a46c")}
-      <div class="pill-row" style="margin-top:12px"><button class="btn ghost" data-action="nutrition-goals">${I.sliders}Edit goals</button></div>`));
+      <p class="soft small day-goal-note">${own
+        ? `${I.sliders} A target set just for ${isToday ? "today" : "this day"}.`
+        : `${I.sliders} Your standing target.`}</p>
+      <div class="pill-row" style="margin-top:10px">
+        <button class="btn ghost" data-action="nutrition-goals">${I.sliders}Standing goals</button>
+        <button class="btn ghost" data-action="day-goals">${I.calendar || I.sliders}Just ${isToday ? "today" : "this day"}</button>
+        ${own ? `<button class="btn ghost slim" data-action="day-goals-clear">Use standing</button>` : ""}
+      </div>`));
   if (m.macros) out.push(card("", cardHead("Macros " + (isToday ? "today" : "that day")) + `<div class="macro-bars">
       ${macroBar("Protein", tot.protein, g.protein, "#e5484d")}
       ${macroBar("Carbs", tot.carbs, g.carbs, "#f5a623")}
@@ -5182,20 +5318,26 @@ function foodCards(t, isToday) {
   return out.join("");
 }
 function mealsCard(t) {
-  const checked = state.nutrition.log[t] || {};
-  const meals = [...state.nutrition.meals].sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : 1);
-  return card("span2", cardHead("Meal schedule", addBtn("Add meal", "meal-add")) + (meals.length ? `
+  const meals = mealsOn(t), isToday = t === todayIso();
+  const lib = mealLibrary();
+  const head = cardHead(`Meals${meals.length ? ` <small class="soft">${meals.filter(m => m.eaten).length} of ${meals.length} eaten</small>` : ""}`,
+    `<span class="pill-row">
+      ${lib.length ? `<button class="btn ghost tiny" data-action="meal-pick">${I.plus}From your usuals</button>` : ""}
+      ${addBtn("New meal", "meal-add")}
+    </span>`);
+  const body = meals.length ? `
       <ul class="meal-sched">
         ${meals.map(m => {
-          const done = !!checked[m.id];
           const photos = mealPhotos(t, m.id);
-          return `<li class="meal-item ${done ? "done" : ""}">
-            <span class="meal-time">${m.time ? esc(m.time) : "—"}</span>
-            <button class="checkbox" data-action="meal-toggle" data-id="${m.id}" aria-label="Mark ${esc(m.name)} eaten">${I.check}</button>
+          const saved = m.libId && lib.some(x => x.id === m.libId);
+          return `<li class="meal-item ${m.eaten ? "done" : ""}">
+            <span class="meal-time">${m.time ? esc(m.time) : "\u2014"}</span>
+            <button class="checkbox" data-action="meal-toggle" data-id="${m.id}" aria-label="Mark ${esc(m.name || m.slot)} eaten">${I.check}</button>
             <div class="meal-main">
               <div class="meal-head">
                 <b>${esc(m.slot)}</b>
                 <span class="meal-actions">
+                  ${saved ? "" : `<button class="icon-btn ghost" data-action="meal-save-lib" data-id="${m.id}" aria-label="Save to your usuals" title="Save to your usuals">${I.plus}</button>`}
                   <button class="icon-btn ghost" data-action="meal-edit" data-id="${m.id}" aria-label="Edit meal">${I.edit}</button>
                   <button class="icon-btn ghost" data-action="meal-del" data-id="${m.id}" aria-label="Delete meal">${I.trash}</button>
                 </span>
@@ -5208,7 +5350,7 @@ function mealsCard(t) {
               </div>
               <div class="meal-photos">
                 ${photos.map(ph => `<span class="meal-photo">
-                  <span class="media-host" data-media="${ph.id}" data-media-kind="${ph.kind}"><span class="media-missing">…</span></span>
+                  <span class="media-host" data-media="${ph.id}" data-media-kind="${ph.kind}"><span class="media-missing">\u2026</span></span>
                   <button class="photo-x" data-action="meal-photo-del" data-id="${m.id}" data-ref="${ph.id}" aria-label="Remove photo">${I.x}</button>
                 </span>`).join("")}
                 <label class="meal-photo-add" aria-label="Add a photo of this meal">
@@ -5219,8 +5361,41 @@ function mealsCard(t) {
             </div>
           </li>`;
         }).join("")}
-      </ul>` : emptyMsg("apple", "Plan your meals for the day.", addBtn("Add a meal", "meal-add"))));
+      </ul>`
+    : emptyMsg("apple", lib.length
+        ? `Nothing logged ${isToday ? "yet today" : "on this day"}. Build the day from the meals you already keep, or add something new.`
+        : "What you eat changes day to day, so meals are recorded per day. Add one and you can save it to your usuals for next time.",
+      `<span class="pill-row">${lib.length ? `<button class="btn primary" data-action="meal-pick">${I.plus}From your usuals</button>` : ""}<button class="btn ${lib.length ? "ghost" : "primary"}" data-action="meal-add">${I.plus}New meal</button></span>`);
+  return card("span2", head + body +
+    `<p class="soft note">${I.spark} Meals belong to <b>the day you logged them</b>. Editing one you keep in <i>your usuals</i> never rewrites a day you've already recorded \u2014 each day keeps the numbers it had.</p>`);
 }
+
+/* Your usuals: the picker, which doubles as where the library is maintained. Keeping it in one
+   sheet means there is no second page to go hunting for. */
+function openMealPicker() {
+  const lib = mealLibrary();
+  const d = dayCursor("health");
+  return openModal(`
+    <header class="modal-head"><h3>Your usual meals</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="soft small">Adding one copies it onto <b>${esc(niceDate(d, { weekday: "long", month: "long", day: "numeric" }))}</b>. Change it there and your usual stays as it was.</p>
+      ${lib.length ? `<ul class="lib-list">
+        ${MEAL_SLOTS.filter(sl => lib.some(m => m.slot === sl)).map(sl => `
+          <li class="lib-group"><b class="lib-slot">${esc(sl)}</b>
+            <ul>${lib.filter(m => m.slot === sl).map(m => `<li class="lib-item">
+              <button class="lib-add" data-action="meal-from-lib" data-id="${m.id}">
+                <span class="row-txt"><b>${esc(m.name)}</b><small>${m.kcal} kcal \u00b7 ${m.protein}P ${m.carbs}C ${m.fats}F${m.fiber ? ` ${m.fiber}Fi` : ""}${m.time ? ` \u00b7 ${esc(m.time)}` : ""}</small></span>
+                <span class="lib-plus">${I.plus}</span>
+              </button>
+              <button class="icon-btn ghost" data-action="lib-edit" data-id="${m.id}" aria-label="Edit ${esc(m.name)}">${I.edit}</button>
+              <button class="icon-btn ghost" data-action="lib-del" data-id="${m.id}" aria-label="Remove ${esc(m.name)} from your usuals">${I.trash}</button>
+            </li>`).join("")}</ul>
+          </li>`).join("")}
+      </ul>` : `<p class="soft small">Nothing saved yet. Add a meal to a day and tap ${I.plus} on it to keep it here.</p>`}
+      <p class="soft note">${I.check} Removing something from your usuals never touches a day you already logged it on.</p>
+    </div>`);
+}
+
 function supplementsCard() {
   const sups = state.nutrition.supplements;
   const dueCount = sups.filter(s => supStatus(s).due).length;
@@ -7494,7 +7669,10 @@ const ACTIONS = {
     if (h && h.kind === "workout") { setCursor("workout", d); go("workout"); toast("Log your workout here — it ticks the habit 💪"); return; }
     setCursor("habits", d); toggleHabit(el.dataset.id); if (d === todayIso()) syncHabitToTask(el.dataset.id); render();
   },
-  "ag-meal": (el) => { const t = todayIso(); const l = state.nutrition.log[t] = state.nutrition.log[t] || {}; l[el.dataset.id] = !l[el.dataset.id]; if (l[el.dataset.id]) addXp(5, "Meal logged"); save(); render(); },
+  "ag-meal": (el) => {
+    const m = mealsOn(todayIso()).find(x => x.id === el.dataset.id); if (!m) return;
+    m.eaten = !m.eaten; if (m.eaten) addXp(5, "Meal logged"); save(); render();
+  },
   "ag-uni": (el) => {
     const k = learnTasks().find(x => x.id === el.dataset.id);
     if (!k) return;
@@ -7807,44 +7985,85 @@ const ACTIONS = {
   "ex-history": (el) => openExerciseHistory(el.dataset.name),
 
   /* nutrition */
-  "meal-add": () => formModal("Add meal",
-    `<div class="fld-row">${fld("Slot", `<select name="slot">${["Breakfast", "Lunch", "Dinner", "Snacks"].map(s => `<option>${s}</option>`).join("")}</select>`)}${fld("Time", `<input type="time" name="time" value="08:00">`)}</div>` +
-    fld("Description", txt("name", "e.g. Oatmeal & berries")) +
-    `<div class="fld-row">${fld("kcal", num("kcal", 400, 0, 10))}${fld("Protein g", num("protein", 20, 0, 1))}${fld("Carbs g", num("carbs", 40, 0, 1))}${fld("Fats g", num("fats", 10, 0, 1))}${fld("Fiber g", num("fiber", 5, 0, 1))}</div>` +
-    fld("Note <small class=\"soft\">— optional</small>", `<textarea name="note" maxlength="4000" placeholder="how it was made, how it sat with you, what to change…"></textarea>`), "meal-add"),
+  "meal-add": () => {
+    const t = dayCursor("health");
+    formModal(`Add a meal${t === todayIso() ? "" : ` \u00b7 ${niceDate(t, { month: "short", day: "numeric" })}`}`,
+      mealFormFields(null) +
+      `<label class="chip-check" style="display:inline-flex;margin:2px 0 4px"><input type="checkbox" name="keep" checked><span>Also save it to my usuals</span></label>`,
+      "meal-add", "Add");
+  },
   "meal-edit": (el) => {
-    const m = state.nutrition.meals.find(x => x.id === el.dataset.id);
+    const t = dayCursor("health");
+    const m = mealsOn(t).find(x => x.id === el.dataset.id);
     if (!m) return;
-    formModal("Edit meal",
-      `<div class="fld-row">${fld("Slot", `<select name="slot">${["Breakfast", "Lunch", "Dinner", "Snacks"].map(s => `<option${s === m.slot ? " selected" : ""}>${s}</option>`).join("")}</select>`)}${fld("Time", `<input type="time" name="time" value="${m.time || ""}">`)}</div>` +
-      fld("Description", txt("name", "", m.name)) +
-      `<div class="fld-row">${fld("kcal", num("kcal", m.kcal, 0, 10))}${fld("Protein g", num("protein", m.protein, 0, 1))}${fld("Carbs g", num("carbs", m.carbs, 0, 1))}${fld("Fats g", num("fats", m.fats, 0, 1))}${fld("Fiber g", num("fiber", m.fiber || 0, 0, 1))}</div>` +
-      fld("Note <small class=\"soft\">— optional</small>", `<textarea name="note" maxlength="4000" placeholder="how it was made, how it sat with you, what to change…">${esc(m.note || "")}</textarea>`) +
-      `<input type="hidden" name="id" value="${m.id}">`, "meal-edit");
+    formModal("Edit meal", mealFormFields(m) + `<input type="hidden" name="id" value="${m.id}">`, "meal-edit");
   },
   "meal-toggle": (el) => {
-    const t = dayCursor("health"); const l = state.nutrition.log[t] = state.nutrition.log[t] || {};
-    l[el.dataset.id] = !l[el.dataset.id];
-    if (l[el.dataset.id]) addXp(5, "Meal logged");
+    const m = mealsOn(dayCursor("health")).find(x => x.id === el.dataset.id);
+    if (!m) return;
+    m.eaten = !m.eaten;
+    if (m.eaten && dayCursor("health") === todayIso()) addXp(5, "Meal logged");
     save(); render();
   },
-  "meal-del": (el) => {
+  /* the picker, and copying one of your usuals onto the day you are looking at */
+  "meal-pick": () => openMealPicker(),
+  "meal-from-lib": (el) => {
+    const src = mealLibrary().find(x => x.id === el.dataset.id); if (!src) return;
+    const t = dayCursor("health");
+    ensureDay(t).meals.push(Object.assign({}, src, { id: uid(), libId: src.id, eaten: false }));
+    save(); render(); closeModal();
+    toast(`${src.name || src.slot} added \u{1F37D}\uFE0F`);
+  },
+  /* keep a day's meal for next time. It is COPIED, not referenced — editing the day's version later
+     must not quietly rewrite what you saved. */
+  "meal-save-lib": (el) => {
+    const t = dayCursor("health");
+    const m = mealsOn(t).find(x => x.id === el.dataset.id); if (!m) return;
+    const copy = { id: uid(), slot: m.slot, name: m.name, time: m.time || "",
+      kcal: m.kcal, protein: m.protein, carbs: m.carbs, fats: m.fats, fiber: m.fiber, note: m.note || "" };
+    mealLibrary().push(copy);
+    m.libId = copy.id;
+    save(); render(); toast("Saved to your usuals \u2b50");
+  },
+  "lib-edit": (el) => {
+    const m = mealLibrary().find(x => x.id === el.dataset.id); if (!m) return;
+    formModal("Edit your usual", mealFormFields(m) + `<input type="hidden" name="id" value="${m.id}">`, "lib-edit");
+  },
+  "lib-del": (el) => {
     const id = el.dataset.id;
-    deleteWithUndo(() => state.nutrition.meals, id, "Meal deleted", () => {
-      /* photos survive the undo window, then go — across every day, not just today */
-      Object.keys(state.nutrition.photos || {}).forEach(day => {
-        mealPhotos(day, id).forEach(dropMedia);
-        if (state.nutrition.photos[day]) delete state.nutrition.photos[day][id];
-      });
+    closeModal();
+    /* days that already used it keep their own copy — only the shortcut goes */
+    deleteWithUndo(() => mealLibrary(), id, "Removed from your usuals", null, null);
+  },
+  "meal-del": (el) => {
+    const t = dayCursor("health"), id = el.dataset.id;
+    const day = ensureDay(t);
+    deleteWithUndo(() => day.meals, id, "Meal deleted", () => {
+      /* its photos survive the undo window, then go with it */
+      mealPhotos(t, id).forEach(dropMedia);
+      if (state.nutrition.photos[t]) delete state.nutrition.photos[t][id];
       save();
     });
   },
   "meal-photo-del": (el) => {
-    const t = todayIso(), arr = (state.nutrition.photos[t] || {})[el.dataset.id];
+    const t = dayCursor("health"), arr = (state.nutrition.photos[t] || {})[el.dataset.id];
     if (!arr) return;
     dropMedia(arr.find(p => p.id === el.dataset.ref));
     state.nutrition.photos[t][el.dataset.id] = arr.filter(p => p.id !== el.dataset.ref);
     save(); render();
+  },
+  /* a target for one day only, on top of your standing goals */
+  "day-goals": () => {
+    const t = dayCursor("health"), g = dayGoals(t);
+    formModal(`Goals for ${niceDate(t, { weekday: "long", month: "long", day: "numeric" })}`,
+      fld("Calories", num("kcal", g.kcal, 0, 50)) +
+      `<div class="fld-row">${fld("Protein g", num("protein", g.protein))}${fld("Carbs g", num("carbs", g.carbs))}${fld("Fats g", num("fats", g.fats))}${fld("Fiber g", num("fiber", g.fiber))}</div>` +
+      `<p class="soft note">${I.spark} This applies to <b>this day only</b>. Every other day keeps your standing goals \u2014 and if you change those later, this day stays where you set it.</p>`,
+      "day-goals", "Set for this day");
+  },
+  "day-goals-clear": () => {
+    const t = dayCursor("health"), e = dayEntry(t);
+    if (e) { e.goals = null; save(); render(); toast("Back to your standing goals"); }
   },
   "nutrition-goals": () => formModal("Nutrition goals",
     fld("Calories", num("kcal", state.nutrition.goals.kcal, 800, 50)) +
@@ -8471,12 +8690,29 @@ const SUBMITS = {
     if (after > before && before > 0) toast(`New PR on ${ex.name} — ${prLabel(ex.kind, after, ex.name)} 🏆`, "badge");
     addXp(5, "Set logged");
   },
-  "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, time: f.time || "", kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0, note: String(f.note || "").slice(0, 4000) }); },
+  "meal-add": (f) => {
+    const t = dayCursor("health");
+    const base = mealFromForm(f);
+    let libId = "";
+    if (f.keep) { const copy = Object.assign({ id: uid() }, base); mealLibrary().push(copy); libId = copy.id; }
+    ensureDay(t).meals.push(Object.assign({ id: uid(), libId, eaten: false }, base));
+  },
   "meal-edit": (f) => {
-    const m = state.nutrition.meals.find(x => x.id === f.id);
-    if (m) { m.slot = f.slot; m.name = f.name; m.time = f.time || ""; m.kcal = +f.kcal; m.protein = +f.protein; m.carbs = +f.carbs; m.fats = +f.fats; m.fiber = +f.fiber || 0; m.note = String(f.note || "").slice(0, 4000); }
+    /* edits the DAY's meal. Your usuals are edited from the picker — one form, two owners, and
+       neither writes through to the other. */
+    const m = mealsOn(dayCursor("health")).find(x => x.id === f.id);
+    if (m) Object.assign(m, mealFromForm(f));
+  },
+  "lib-edit": (f) => {
+    const m = mealLibrary().find(x => x.id === f.id);
+    if (m) Object.assign(m, mealFromForm(f));
+    setTimeout(() => openMealPicker(), 0);
   },
   "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }; },
+  "day-goals": (f) => {
+    ensureDay(dayCursor("health")).goals = { kcal: +f.kcal || 0, protein: +f.protein || 0,
+      carbs: +f.carbs || 0, fats: +f.fats || 0, fiber: +f.fiber || 0 };
+  },
   "sup-edit": (f) => { const x = state.nutrition.supplements.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.dose = f.dose || ""; x.every = ["day","week","month"].includes(f.every) ? f.every : x.every; } },
   "project-edit": (f) => {
     const x = state.projects.find(v => v.id === f.id); if (!x) return;
@@ -8737,7 +8973,9 @@ const CHANGES = {
     storeMediaFile(el.files[0], (r) => { s.media = s.media || []; s.media.push(r); save(); render(); openStudySession(s.id); toast("Added to this session 📎"); });
   },
   "meal-photo-add": (el) => {
-    const t = todayIso(), id = el.dataset.id;
+    /* the day on screen, not today — reading todayIso() here filed every photo under today however
+       far back you had navigated, the same defect the meal tick and the study log each had once */
+    const t = dayCursor("health"), id = el.dataset.id;
     storeMediaFile(el.files[0], (ref) => {
       const day = state.nutrition.photos[t] = state.nutrition.photos[t] || {};
       (day[id] = day[id] || []).push(ref);
