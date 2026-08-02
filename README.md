@@ -116,6 +116,9 @@ What **stays behind on today**: *Today's focus* picking and pinning, the hard th
 *Start focus session*, and "N things left today". Those decide about the day you're living. A focus
 session started on Tuesday is not a thing that can exist, and a button offering one would be lying.
 
+This is also what makes it safe for a task to stay on its own day rather than chasing you into today —
+see **One list, and a task that stays on its day** below.
+
 Back-filling a past day earns **no XP** — the streak system stays honest. Navigating into the
 Dashboard from anywhere else returns you to today.
 
@@ -266,9 +269,27 @@ Areas feed each other, so the same fact is never entered twice. A habit can be *
 
 Fed habits have no manual counter — the number is derived, so it can never drift from the truth, and tapping one takes you to the place that logs it. **Today's Focus** also shows coursework due today (checking one there marks it done), and **Upcoming** gathers deadlines from Learning *and* your goals.
 
-## 🔁 Tasks that carry, repeat and reorder
+## ✅ One list, and a task that stays on its day
 
-An unfinished task used to disappear the moment the day turned over. Now, once a day, LifeHub shows you what's still open from before and lets you **bring each one forward or drop it** — nothing is moved silently, and nothing is deleted without you saying so. Dismiss it and they're still one tap away on the dashboard.
+Every task for the day is in **one checklist**. Finish one and it gets a line through it **where it is** — it doesn't drop into a "Done today" drawer, and there's no "3 more tasks today" fold hiding the rest. What you see is what the day holds.
+
+**Today's focus** is separate and holds only what *you* pinned, up to three. It used to top itself up from priority and label the result "picked for you"; it doesn't any more. An empty focus list means you haven't chosen yet, which is a true and useful thing for a page to say.
+
+**A task belongs to the day it was for**, the way a calendar entry does. Nothing is dragged into today and nothing asks you a question about it each morning. If you didn't do Tuesday's task, it stays on Tuesday — where you can still find it, tick it, or delete it by stepping the dashboard back.
+
+> The honest trade: an unfinished task will no longer come and find you. That's deliberate, and it's only safe because the dashboard can now walk back through days — before that, the same change would have made old tasks unreachable.
+
+### One link, one meaning
+
+A task used to offer three overlapping ways to connect it to something — *Counts toward*, *In service of*, and a generic *Link something* picker. There's now **one** control:
+
+- point it at a **habit** and ticking the task ticks the habit;
+- point it at a **goal** or **project** and its focus minutes are filed there;
+- point it at an **area** and it's simply filed there.
+
+Name a task after a supplement ("Take Vitamin D3") and it still links itself — the sheet says so plainly, with a button to undo it.
+
+## 🔁 Tasks that repeat and reorder
 
 A task can also **repeat** — every day, or on chosen weekdays. Each due day gets a fresh copy, so ticking Monday's doesn't erase Tuesday's; the days you've already completed stay as history. Changing or switching off a repeat applies to **future copies** — and it really switches off, series-wide.
 

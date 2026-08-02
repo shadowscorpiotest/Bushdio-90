@@ -227,7 +227,7 @@ let state = null;
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
    which tab is open are per-device, per-moment; keeping them in `state` meant switching a tab wrote
    to disk and uploaded the whole encrypted database. */
-const ui = { cursor: {}, readingTab: "current", mediaTab: "watchlist", showMore: false };
+const ui = { cursor: {}, readingTab: "current", mediaTab: "watchlist" };
 
 /* set when startup couldn't read saved data — blocks cloud pushes so we never overwrite good data */
 let loadIssue = null;
@@ -2931,18 +2931,14 @@ const goalsByStatus = (st) => (state.goals || []).filter(g =>
   : false);
 
 const FOCUS_MAX = 3;
-/* Exactly three, as specified. Pinned tasks come first; if fewer than three are pinned the rest fill
-   by priority then time, so the section is never half-empty — and the row says which were auto-filled
-   rather than pretending the person chose them. */
-function focusTasks() {
-  const open = tasksOn(todayIso()).filter(td => !td.done && !td.hard);
-  const pinned = open.filter(td => td.focus);
-  const rest = open.filter(td => !td.focus)
-    .sort((a, b) => prioRank(a.priority) - prioRank(b.priority)
-      || (a.time || "99:99").localeCompare(b.time || "99:99") || (a.order || 0) - (b.order || 0));
-  return { picked: pinned.slice(0, FOCUS_MAX),
-           filled: pinned.length >= FOCUS_MAX ? [] : rest.slice(0, FOCUS_MAX - pinned.length) };
-}
+/* Your focus is what you PINNED. Nothing else.
+
+   This used to top up from priority and time whenever fewer than three were pinned, and label the
+   result "picked for you" — which meant the section could never be empty and could never be wrong,
+   because it was never a claim about anything. The request was exact: see every task first, then
+   choose. So the auto-fill is gone; an empty focus list now means you haven't chosen yet, which is a
+   true and useful thing for a page to say. */
+const focusTasks = (d) => tasksOn(d || todayIso()).filter(td => td.focus && !td.hard).slice(0, FOCUS_MAX);
 const hardTask = () => tasksOn(todayIso()).find(td => td.hard) || null;
 
 /* what a task is in service of — a goal, or a project, or nothing */
@@ -3093,7 +3089,7 @@ function eventFormFields(e) {
   return fld("What is it?", txt("title", "e.g. Statistics lecture", e.title || "")) +
     `<div class="fld-row">${fld("Date", `<input type="date" name="date" value="${esc(e.date || todayIso())}" required>`)}${fld("Time <small class=\"soft\">— leave blank for any time</small>", `<input type="time" name="time" value="${esc(e.time || "")}">`)}</div>` +
     `<div class="fld-row">${fld("How long? (minutes)", num("mins", e.mins || 0, 0))}${fld("Category", `<select name="category">${EV_CATS.map(c => `<option ${e.category === c ? "selected" : ""}>${c}</option>`).join("")}</select>`)}</div>` +
-    fld("Note", `<textarea name="note" maxlength="400" placeholder="Room, who's there, what to bring…">${esc(e.note || "")}</textarea>`);
+    fld("Note", `<textarea name="note" maxlength="4000" placeholder="Room, who's there, what to bring…">${esc(e.note || "")}</textarea>`);
 }
 
 /* todayAgenda() and agendaRow() lived here: the old Today page's flat list of everything due.
@@ -3104,7 +3100,7 @@ function eventFormFields(e) {
 function openReflectModal() {
   openModal(`<header class="modal-head"><h3>${I.spark} Daily reflection</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body"><p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[todayIso()] || "")}</textarea>
+      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="8000">${esc(state.reflections[todayIso()] || "")}</textarea>
       <div class="modal-foot"><button type="button" class="btn primary" data-action="modal-close">Done</button></div></div>`);
 }
 /* keyword → habit suggestion (the offline "smart" half of Both) */
@@ -3189,7 +3185,7 @@ function syncHabitToTask(habitId) {
   const h = state.habits.find(x => x.id === habitId); if (!h) return;
   markLinkedTaskDone("habit", habitId, habitMet(h, todayIso()));
 }
-/* ---------- tasks: repeats, carry-forward, order ---------- */
+/* ---------- tasks: repeats and order ---------- */
 /* A repeating task reuses the habit cadence shape rather than inventing a second one, so
    "every day" and "Mon/Wed/Fri" mean exactly what they already mean elsewhere in the app. */
 function taskDueOn(rep, d) {
@@ -3220,9 +3216,6 @@ function addTaskOn(text, date, opts) {
   state.todos.push(td);
   return td;
 }
-/* unfinished and dated before today — the ones that used to disappear */
-const strandedTasks = () => state.todos.filter(td => !td.done && td.date && td.date < todayIso())
-  .sort((a, b) => a.date < b.date ? -1 : 1);
 
 const KEEP_DONE_DAYS = 90;
 /* A daily repeat is ~365 rows a year inside a blob that is re-encrypted and re-uploaded on every
@@ -3235,8 +3228,9 @@ function pruneTasks() {
   return before - state.todos.length;
 }
 
-/* Runs at boot and whenever the app comes back to a new day. Spawns today's repeats, prunes, and
-   hands any stranded tasks to the once-a-day prompt. */
+/* Runs at boot and whenever the app comes back to a new day. Spawns today's repeating instances and
+   prunes old completed copies. It does NOT touch a task's date — an unfinished task belongs to the
+   day it was for. */
 function rollTasks() {
   const t = todayIso();
   if (state.tasksRolledOn === t) return 0;
@@ -3344,8 +3338,8 @@ function finishFocus(markDone, re) {
   const row = { id: f.id, taskId: f.taskId, title: f.title, mins,
                 goalId: f.goalId, projectId: f.projectId, at: new Date().toISOString(),
                 focus: clamp(+r.focus || 0, 0, 5),
-                outcome: String(r.outcome || "").slice(0, 400),
-                obstacles: String(r.obstacles || "").slice(0, 400),
+                outcome: String(r.outcome || "").slice(0, 4000),
+                obstacles: String(r.obstacles || "").slice(0, 4000),
                 next: String(r.next || "").slice(0, 200) };
   (state.focusLog[t] = state.focusLog[t] || []).push(row);
   /* The next action becomes the project's next step only when asked, and only where there are no
@@ -3484,8 +3478,8 @@ function focusReflectFields(pr) {
           </label>`).join("")}
         </div>
       </div>
-      ${fld("What got done", `<textarea name="outcome" maxlength="400" rows="2" placeholder="the thing you actually finished…"></textarea>`)}
-      ${fld("What got in the way <small class=\"soft\">— optional</small>", `<textarea name="obstacles" maxlength="400" rows="2" placeholder="what slowed it down"></textarea>`)}
+      ${fld("What got done", `<textarea name="outcome" maxlength="4000" rows="2" placeholder="the thing you actually finished…"></textarea>`)}
+      ${fld("What got in the way <small class=\"soft\">— optional</small>", `<textarea name="obstacles" maxlength="4000" rows="2" placeholder="what slowed it down"></textarea>`)}
       ${fld("Next action", txt("next", "where to pick up next time", "", false))}
       ${canSetNext ? `<label class="chip-check" style="display:inline-flex;margin-top:2px">
         <input type="checkbox" name="setNext"><span>…and make this ${esc(pr.name)}'s next step</span></label>`
@@ -3524,36 +3518,14 @@ function openFocusFinish() {
     </footer></form>`);
 }
 
-/* The prompt the user chose over silent auto-carry: shown at most once a day, and only when there is
-   actually something stranded. Answering it (either way) marks the day as rolled. */
-function maybeCarryForward() {
-  const t = todayIso();
-  if (state.tasksRolledOn === t) return false;
-  const stranded = strandedTasks();
-  if (!stranded.length) { state.tasksRolledOn = t; save(); return false; }
-  openModal(`
-    <header class="modal-head"><h3>${stranded.length} unfinished from before</h3>
-      <button type="button" class="icon-btn" data-action="carry-dismiss" aria-label="Close">${I.x}</button></header>
-    <div class="modal-body">
-      <p class="soft">These were never finished. Bring them into today, or let them go.</p>
-      <ul class="check-list carry-list">
-        ${stranded.map(td => `<li data-carry="${td.id}">
-          <span class="row-emoji">✅</span>
-          <span class="row-txt"><b>${esc(td.text)}</b><small>${esc(niceDate(td.date, { weekday: "long", month: "short", day: "numeric" }))}</small></span>
-          <span class="pill-row">
-            <button class="btn tiny" data-action="carry-one" data-id="${td.id}">${I.check}Today</button>
-            <button class="icon-btn ghost" data-action="carry-drop" data-id="${td.id}" aria-label="Drop ${esc(td.text)}">${I.trash}</button>
-          </span>
-        </li>`).join("")}
-      </ul>
-    </div>
-    <footer class="modal-foot">
-      <button type="button" class="btn ghost" data-action="carry-dismiss">Not now</button>
-      <button type="button" class="btn primary" data-action="carry-all">${I.check}Bring all forward</button>
-    </footer>`);
-  return true;
-}
-function carryTask(td) { if (td) { td.from = td.date; td.date = todayIso(); td.done = false; } }
+/* maybeCarryForward() and carryTask() lived here: a once-a-day modal asking whether each unfinished
+   task should be dragged into today. It is gone on request — "just let them stay at that day, like
+   Google Calendar". A task now belongs to the day it was for, full stop.
+
+   That is only safe because the Dashboard can walk back through days (schema 24). Before that, an
+   unfinished task became genuinely unreachable, which is the silent-loss bug this app already fixed
+   once. `td.from` is no longer written; it is still rendered where it exists, so tasks carried
+   forward under the old behaviour keep their explanation. */
 /* The repeat belongs to the SERIES, not to the copy you happen to have open. Setting it on one row
    only would leave older copies still carrying it — and since rollTasks seeds from the latest row
    in a series, switching a repeat off would look like it worked and then keep spawning tomorrow.
@@ -3561,12 +3533,6 @@ function carryTask(td) { if (td) { td.from = td.date; td.date = todayIso(); td.d
 function setSeriesRepeat(td, rep) {
   const rows = td.seriesId ? state.todos.filter(x => x.seriesId === td.seriesId) : [td];
   rows.forEach(x => { x.repeat = rep ? JSON.parse(JSON.stringify(rep)) : null; });
-}
-/* after handling one, keep the sheet open if there are more; close and settle the day if not */
-function maybeCarryForwardAgain() {
-  if (strandedTasks().length) { maybeCarryForward(); return true; }
-  state.tasksRolledOn = todayIso(); closeModal(); save(); render();
-  return false;
 }
 /* Swap with the neighbour in the CURRENT visible order, so the arrows do what they look like.
    If two rows share an order value (possible after a migration backfill), renumber first. */
@@ -3611,7 +3577,6 @@ function taskRow(td, i, total, opts) {
     <span class="row-txt open" data-action="todo-open" data-id="${td.id}"><b>${esc(td.text)}</b>${link || marks ? `<span class="task-marks">${link}${marks}</span>` : ""}</span>
     ${o.pin && !td.done ? `<button class="icon-btn ghost pin ${td.focus ? "on" : ""}" data-action="task-pin" data-id="${td.id}" aria-pressed="${td.focus ? "true" : "false"}" aria-label="${td.focus ? "Unpin from today's focus" : "Pin to today's focus"}">${I.target}</button>` : ""}
     ${canMove ? `<span class="grip" data-drag="${td.id}" aria-hidden="true" title="Drag to reorder">${I.grip}</span>` : ""}
-    <button class="icon-btn ghost" data-action="todo-open" data-id="${td.id}" aria-label="Edit task">${I.chevR}</button>
   </li>`;
 }
 const repeatShort = (r) => !r ? "" : r.mode === "days" ? (r.days || []).map(i => WD_SHORT[i]).join("") : "daily";
@@ -3626,9 +3591,10 @@ function openTaskDetail(id) {
         <label class="fld"><span>Time (optional)</span><input type="time" data-change="task-time" data-id="${td.id}" value="${td.time || ""}"></label>
         <label class="fld"><span>Counts toward</span>
           <select data-change="task-link" data-id="${td.id}">
-            <option value="">— none —</option>
+            <option value="">— nothing in particular —</option>
             <optgroup label="Habits">${liveHabits().map(h => `<option value="h:${h.id}" ${td.habitId === h.id ? "selected" : ""}>${esc(h.emoji)} ${esc(h.name)}</option>`).join("")}</optgroup>
-            <optgroup label="Supplements">${state.nutrition.supplements.map(s => `<option value="s:${s.id}" ${td.supId === s.id ? "selected" : ""}>${esc(s.emoji || "💊")} ${esc(s.name)}</option>`).join("")}</optgroup>
+            <optgroup label="Goals">${activeGoals().map(g => `<option value="g:${g.id}" ${td.linkGoalId === g.id ? "selected" : ""}>${esc(g.emoji || "\u{1F3AF}")} ${esc(g.title)}</option>`).join("")}</optgroup>
+            <optgroup label="Projects">${(state.projects || []).filter(p => p.status !== "done").map(p => `<option value="p:${p.id}" ${td.projectId === p.id ? "selected" : ""}>${esc(p.emoji || "\u{1F680}")} ${esc(p.name)}</option>`).join("")}</optgroup>
             <optgroup label="Areas">${AREAS.filter(a => a.id !== "habits").map(a => `<option value="a:${a.id}" ${td.areaId === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</optgroup>
           </select></label>
       </div>
@@ -3639,12 +3605,9 @@ function openTaskDetail(id) {
           </select></label>
         <label class="fld"><span>How long? (minutes)</span><input type="number" min="0" max="1440" step="5" data-change="task-est" data-id="${td.id}" value="${td.estMin || ""}" placeholder="e.g. 45"></label>
       </div>
-      <label class="fld"><span>In service of</span>
-        <select data-change="task-serves" data-id="${td.id}">
-          <option value="">— nothing in particular —</option>
-          <optgroup label="Goals">${activeGoals().map(g => `<option value="g:${g.id}" ${td.linkGoalId === g.id ? "selected" : ""}>${esc(g.emoji || "\u{1F3AF}")} ${esc(g.title)}</option>`).join("")}</optgroup>
-          <optgroup label="Projects">${(state.projects || []).filter(p => p.status !== "done").map(p => `<option value="p:${p.id}" ${td.projectId === p.id ? "selected" : ""}>${esc(p.emoji || "\u{1F680}")} ${esc(p.name)}</option>`).join("")}</optgroup>
-        </select></label>
+      ${(() => { const sup = td.supId ? state.nutrition.supplements.find(x => x.id === td.supId) : null;
+        return sup ? `<p class="soft note">${I.check} Ticking this also takes <b>${esc(sup.emoji || "\u{1F48A}")} ${esc(sup.name)}</b> \u2014 matched from the task's name. <button class="btn tiny ghost" data-action="task-unlink-sup" data-id="${td.id}">Remove</button></p>` : ""; })()}
+      <p class="soft note">${I.spark} One link, one meaning: ticking this task also ticks the <b>habit</b> you point it at, and files its focus minutes against the <b>goal</b> or <b>project</b>. Pointing it at an <b>area</b> just files it there.</p>
       <label class="chip-check" style="display:inline-flex;margin:2px 0 10px">
         <input type="checkbox" data-change="task-hard" data-id="${td.id}" ${td.hard ? "checked" : ""}>
         <span>This is today's hard thing</span></label>
@@ -3671,7 +3634,6 @@ function openTaskDetail(id) {
           <button type="button" class="btn ghost slim" data-action="task-down" data-id="${td.id}">Later${I.chevR}</button>
         </span></label>
       <p class="soft note">${I.grip} On the list you can drag a task by its handle. These buttons do the same thing — drag needs a pointer, so they stay for keyboards and anyone who'd rather not.</p>
-      ${relatedCard("task", td.id)}
       ${historyCard("task", td.id)}
       <div class="pill-row"><button class="btn ${td.done ? "good" : "primary"} slim" data-action="todo-toggle" data-id="${td.id}">${td.done ? I.check + "Done — tap to undo" : "Mark done"}</button><button class="btn danger" data-action="todo-del" data-id="${td.id}">${I.trash}Delete</button></div>
     </div>`);
@@ -3920,19 +3882,6 @@ function welcomeCard(remaining, d) {
     ${isToday ? `<p class="wel-line">${esc(motivationOfDay())}</p>` : ""}`);
 }
 
-/* A past day's tasks, plainly. No pinning, no auto-fill, no "start a focus session" — a session
-   begun on Tuesday is not a thing that can exist, and offering it would be a button that lies. */
-function pastTasksCard(d, undone, done) {
-  const all = [...undone, ...done];
-  const head = cardHead(`Tasks that day <small class="soft">${done.length} of ${all.length} done</small>`);
-  if (!all.length) return card("focus-card span2", head +
-    `<p class="soft small" style="padding:6px 2px">No tasks were on this day.</p>` + taskAddForm(d));
-  return card("focus-card span2", head +
-    `<ul class="todo-list">${all.map(td => taskRow(td)).join("")}</ul>` +
-    taskAddForm(d) +
-    `<p class="soft note">${I.spark} You can still tick these off and still add one — it files under <b>${esc(niceDate(d, { month: "long", day: "numeric" }))}</b>, the day you are looking at, not today.</p>`);
-}
-
 /* The largest block on the page, on purpose: if you only read one thing here, read what you are
    actually building. Four at most — a wall of goals is the same as none. */
 function goalsCard() {
@@ -3967,30 +3916,42 @@ function goalsCard() {
     (goals.length > 4 ? `<p class="soft small">${goals.length - 4} more open in Goals.</p>` : ""));
 }
 
-/* Three, as specified — but the tasks beyond three are disclosed rather than hidden. A dashboard
-   that quietly drops task four is the same silent-loss bug this app already fixed once. */
-function focusCard(uniDue, undone, done, stranded) {
+/* ---------- the day's tasks, all of them, in one list ----------
+   Three separate places used to hold today's tasks: the focus three, a `<details>` labelled "N more
+   tasks today", and another labelled "Done today". Finishing something made it vanish into a drawer.
+   The request was to see everything at once, tick things off where they stand, and only then decide
+   what the focus is — so there is one checklist, and a done task stays exactly where it was with a
+   line through it. `taskSort` already ordered by hand-order then time, so nothing has to move. */
+function tasksCard(d, todos) {
+  const t = todayIso(), isToday = d === t;
+  const done = todos.filter(td => td.done).length;
+  const head = cardHead(`${isToday ? "Today" : "Tasks that day"}${todos.length ? ` <small class="soft">${done} of ${todos.length} done</small>` : ""}`);
+  const rows = todos.map((td, i) => taskRow(td, i, todos.length, { pin: isToday }));
+  return card("tasks-card span2", head +
+    (rows.length
+      ? `<ul class="todo-list" data-drag-list="todos">${rows.join("")}</ul>`
+      : `<p class="soft small" style="padding:6px 2px">Nothing on this day yet ${isToday ? "\u{1F33F}" : ""}</p>`) +
+    taskAddForm(d) +
+    (isToday
+      ? `<p class="soft note">${I.spark} Tap ${I.target} on anything here to make it one of today's <b>three</b>. Name a task after a habit or area ("Take Vitamin D3", "Pay yoga tuition") and it links itself — priority, duration and <b>repeat</b> live in the task's own sheet.</p>`
+      : `<p class="soft note">${I.spark} You can still tick these off and still add one — it files under <b>${esc(niceDate(d, { month: "long", day: "numeric" }))}</b>, the day you are looking at, not today.</p>`));
+}
+
+/* Only what you pinned. Deliberately capable of being empty. */
+function focusCard(uniDue) {
   const t = todayIso();
-  const { picked, filled } = focusTasks();
-  const shown = [...picked, ...filled];
-  const more = undone.filter(td => !td.hard && !shown.some(x => x.id === td.id));
-  const rows = shown.map((td, i) => taskRow(td, i, shown.length, { pin: true, auto: !td.focus }));
+  const picked = focusTasks(t);
   const uni = uniDue.map(k => `
     <li class="todo ${k.due < t ? "overdue" : ""}">
       <span class="todo-time"></span>
       <button class="checkbox" data-action="ag-uni" data-id="${k.id}" aria-label="Mark ${esc(k.title)} done">${I.check}</button>
-      <span class="row-txt" data-nav="learning"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.tag || taskKind(k).label)}</span> · due ${daysUntil(k.due)}</small></span>
+      <span class="row-txt" data-nav="learning"><b>${esc(k.title)}</b><small><span class="task-area" style="--a:#3e63dd">${esc(k.tag || taskKind(k).label)}</span> \u00b7 due ${daysUntil(k.due)}</small></span>
     </li>`);
+  const rows = picked.map((td, i) => taskRow(td, i, picked.length, { pin: true }));
   const body = (uni.length + rows.length)
-    ? `${uni.length ? `<ul class="todo-list">${uni.join("")}</ul>` : ""}${rows.length ? `<ul class="todo-list" data-drag-list="todos">${rows.join("")}</ul>` : ""}`
-    : `<p class="soft small" style="padding:6px 2px">Nothing chosen yet — add the first thing below \u{1F33F}</p>`;
-  return card("focus-card span2", cardHead(`Today's focus <small class="soft">${picked.length ? `${picked.length} of ${FOCUS_MAX} chosen` : shown.length ? "picked for you" : "nothing yet"}</small>`) + body +
-    (filled.length ? `<p class="soft small">${I.spark} ${filled.length === shown.length ? "These were" : `${filled.length} of these were`} picked for you by priority — tap ${I.target} on any task to choose your own.</p>` : "") +
-    taskAddForm() +
-    `<p class="soft note">${I.spark} Name a task after a habit, supplement or area ("Take Vitamin D3", "Pay yoga tuition") and it auto-links. Priority, duration, the goal it serves and <b>repeat</b> all live in the task's detail sheet.</p>` +
-    (more.length ? `<details class="done-wrap"${ui.showMore ? " open" : ""}><summary data-action="focus-more">${more.length} more task${more.length > 1 ? "s" : ""} today</summary><ul class="todo-list">${more.map(td => taskRow(td, null, null, { pin: true })).join("")}</ul></details>` : "") +
-    (stranded.length ? `<button class="btn ghost slim" data-action="carry-open" style="margin-top:10px">${I.chevL}${stranded.length} unfinished from before</button>` : "") +
-    (done.length ? `<details class="done-wrap"><summary>${I.check} Done today (${done.length})</summary><ul class="todo-list done-list">${done.map(td => taskRow(td)).join("")}</ul></details>` : ""));
+    ? `${uni.length ? `<ul class="todo-list">${uni.join("")}</ul>` : ""}${rows.length ? `<ul class="todo-list">${rows.join("")}</ul>` : ""}`
+    : `<p class="soft small" style="padding:6px 2px">Nothing chosen yet \u2014 tap ${I.target} on up to ${FOCUS_MAX} tasks below to say what today is really about.</p>`;
+  return card("focus-card span2", cardHead(`Today's focus <small class="soft">${picked.length ? `${picked.length} of ${FOCUS_MAX}` : "your pick"}</small>`) + body);
 }
 
 /* One task, marked by hand as the one you're avoiding. Kept separate from the focus three so it
@@ -4039,7 +4000,6 @@ function vDashboard() {
   const todos = tasksOn(t);
   const undone = todos.filter(td => !td.done);
   const done = todos.filter(td => td.done);
-  const stranded = strandedTasks();
   const dueHabits = state.habits.filter(h => isScheduled(h, t) && !isSkipped(h, t));
   /* everything with a date, not just University — this card is the one place you look for "what's coming" */
   const deadlines = [
@@ -4062,8 +4022,9 @@ function vDashboard() {
     ${card("span2 daynav-card", dayNav("dashboard"))}
     ${welcomeCard(remaining, t)}
     ${isToday ? goalsCard() : ""}
-    ${isToday ? focusCard(uniDue, undone, done, stranded) : pastTasksCard(t, undone, done)}
+    ${isToday ? focusCard(uniDue) : ""}
     ${isToday ? hardTaskCard() : ""}
+    ${tasksCard(t, todos)}
 
     ${timelineCard(t)}
     ${habitsTodayCard(t)}
@@ -4076,7 +4037,7 @@ function vDashboard() {
 
     ${card("", cardHead(isToday ? "Reflection" : `Reflection · ${esc(niceDate(t, { month: "long", day: "numeric" }))}`) + `
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" data-date="${t}" placeholder="${isToday ? "A sentence or two…" : "Nothing written that day — you can still add it."}" maxlength="1000">${esc(state.reflections[t] || "")}</textarea>`)}
+      <textarea class="reflect-input" data-change="reflection" data-date="${t}" placeholder="${isToday ? "A sentence or two…" : "Nothing written that day — you can still add it."}" maxlength="8000">${esc(state.reflections[t] || "")}</textarea>`)}
 
   </div>`;
 }
@@ -4360,7 +4321,7 @@ function vHabits() {
     ${card("reflect-card", `
       <div class="reflect-head">${I.spark}<span>Daily reflection</span></div>
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="1000">${esc(state.reflections[todayIso()] || "")}</textarea>`)}
+      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="8000">${esc(state.reflections[todayIso()] || "")}</textarea>`)}
 
     ${/* Goals has its own page now. This stays as the bridge — habits are the daily actions, Goals
           is where they add up — rather than being the only place goals live. */
@@ -4478,7 +4439,7 @@ function openHabitDetail(id) {
       ${habitDayControl(h, d, e)}
       <div class="pill-row"><span class="chip-cad">${cadenceLabel(h)}</span><span class="spacer"></span><button class="btn tiny ghost" data-action="habit-skip" data-id="${h.id}">${e.skip ? "Un-skip this day" : "Skip / rest day"}</button></div>
       <label class="fld"><span>What did you do? · ${niceDate(d, { month: "short", day: "numeric" })}</span>
-        <textarea data-change="habit-note" data-id="${h.id}" placeholder="A line about how it went…" maxlength="600">${esc(e.note || "")}</textarea></label>
+        <textarea data-change="habit-note" data-id="${h.id}" placeholder="A line about how it went…" maxlength="4000">${esc(e.note || "")}</textarea></label>
       <div class="fld"><span>Last 4 weeks · ${habitCompletion(h, 30)}% completion</span>${habitHistoryRow(h)}</div>
       <label class="fld"><span>Order in the list</span>
         <span class="pill-row">
@@ -4955,9 +4916,9 @@ function openSessionReport(id) {
       <div class="fld"><span>How hard was it?</span>${rateRow("difficulty", s.difficulty, 5, "easy", "brutal")}</div>
       <div class="fld"><span>Did you enjoy it?</span>${rateRow("enjoyed", s.enjoyed, 5, "not really", "loved it")}</div>
 
-      ${fld("What did your coach correct?", `<textarea name="feedback" rows="2" maxlength="400" placeholder="e.g. Open your shoulders more">${esc(s.feedback || "")}</textarea>`)}
-      ${fld("What improved, or what did you learn?", `<textarea name="learned" rows="2" maxlength="400" placeholder="e.g. The back wheel felt much smoother">${esc(s.learned || "")}</textarea>`)}
-      ${fld("Anything else <small class=\"soft\">— optional</small>", `<textarea name="reflection" rows="2" maxlength="600" placeholder="how it felt">${esc(s.reflection || "")}</textarea>`)}
+      ${fld("What did your coach correct?", `<textarea name="feedback" rows="2" maxlength="4000" placeholder="e.g. Open your shoulders more">${esc(s.feedback || "")}</textarea>`)}
+      ${fld("What improved, or what did you learn?", `<textarea name="learned" rows="2" maxlength="4000" placeholder="e.g. The back wheel felt much smoother">${esc(s.learned || "")}</textarea>`)}
+      ${fld("Anything else <small class=\"soft\">— optional</small>", `<textarea name="reflection" rows="2" maxlength="4000" placeholder="how it felt">${esc(s.reflection || "")}</textarea>`)}
       ${fld("What should you focus on next time?", txt("nextGoal", "e.g. bridge kick-over", s.nextGoal || "", false))}
 
       <p class="soft note">${I.spark} Every part of this is optional, and all of it can be changed later — coach feedback often only makes sense the next day.</p>
@@ -5240,6 +5201,7 @@ function mealsCard(t) {
                 </span>
               </div>
               <small class="soft">${esc(m.name)}</small>
+              ${m.note ? `<p class="meal-note">${esc(m.note)}</p>` : ""}
               <div class="meal-macros">
                 <span class="mm kcal">${m.kcal} kcal</span>
                 <span class="mm">${m.protein}P</span><span class="mm">${m.carbs}C</span><span class="mm">${m.fats}F</span>${m.fiber ? `<span class="mm">${m.fiber}Fi</span>` : ""}
@@ -5454,8 +5416,8 @@ function sessionFromForm(f) {
     chapter: String(f.chapter || "").trim().slice(0, 60),
     pages: String(f.pages || "").trim().slice(0, 40),
     link: String(f.link || "").slice(0, 300),
-    learned: String(f.learned || "").slice(0, 600),
-    notes: String(f.notes || "").slice(0, 1000),
+    learned: String(f.learned || "").slice(0, 4000),
+    notes: String(f.notes || "").slice(0, 4000),
   };
 }
 function studySessionFormFields(s, date) {
@@ -5482,8 +5444,8 @@ function studySessionFormFields(s, date) {
       fld("Pages <small class=\"soft\">— optional</small>", txt("pages", "112–118", s.pages || "", false))
     }</div>` +
     fld("Link <small class=\"soft\">— optional</small>", txt("link", "the episode, video or page you used", s.link || "", false)) +
-    fld("What did you learn?", `<textarea name="learned" rows="2" maxlength="600" placeholder="e.g. Dative after 'mit', 'nach', 'aus'">${esc(s.learned || "")}</textarea>`) +
-    fld("Notes <small class=\"soft\">— optional</small>", `<textarea name="notes" rows="2" maxlength="1000" placeholder="anything worth keeping">${esc(s.notes || "")}</textarea>`);
+    fld("What did you learn?", `<textarea name="learned" rows="2" maxlength="4000" placeholder="e.g. Dative after 'mit', 'nach', 'aus'">${esc(s.learned || "")}</textarea>`) +
+    fld("Notes <small class=\"soft\">— optional</small>", `<textarea name="notes" rows="2" maxlength="4000" placeholder="anything worth keeping">${esc(s.notes || "")}</textarea>`);
   return head + moreBlock(rest, "What you studied");
 }
 
@@ -5790,7 +5752,7 @@ function courseFromForm(f) {
     grade: g === "" ? null : +g,
     gradeMax: Math.max(1, +f.gradeMax || 20),
     progress: clamp(+f.progress || 0, 0, 100),
-    link: (f.link || "").slice(0, 300), notes: (f.notes || "").slice(0, 400),
+    link: (f.link || "").slice(0, 300), notes: (f.notes || "").slice(0, 4000),
   };
 }
 function courseFormFields(c, compact) {
@@ -5814,7 +5776,7 @@ function courseFormFields(c, compact) {
     `<p class="soft note">${I.spark} A grade only counts toward your average once you enter it — an average that quietly includes ungraded courses is an average of nothing.</p>` +
     fld("Progress %", `<input type="number" name="progress" min="0" max="100" value="${c.progress || 0}" inputmode="numeric">`) +
     fld("Link <small class=\"soft\">— optional</small>", txt("link", "https://…", c.link || "", false)) +
-    fld("Notes", `<textarea name="notes" maxlength="400" placeholder="syllabus, what to revise…">${esc(c.notes || "")}</textarea>`);
+    fld("Notes", `<textarea name="notes" maxlength="4000" placeholder="syllabus, what to revise…">${esc(c.notes || "")}</textarea>`);
   return compact ? head + moreBlock(rest) : head + rest;
 }
 
@@ -6181,7 +6143,7 @@ function openBookDetail(id) {
       ${b.status === "wishlist" ? `<button class="btn primary slim" data-action="book-start-d" data-id="${b.id}">${I.book}Start reading</button>` : ""}
       ${b.status === "done" ? `<p class="soft">${I.check} Finished${b.finished ? ` · ${niceDate(b.finished)}` : ""}</p><button class="btn ghost slim" data-action="book-reread" data-id="${b.id}">Read again</button>` : ""}
       <label class="fld"><span>Blurb <small class="soft">— one line for the gallery card</small></span><input type="text" data-change="book-blurb" data-id="${b.id}" placeholder="A short hook or synopsis…" maxlength="140" value="${esc(b.blurb || "")}"></label>
-      <label class="fld"><span>Notes &amp; thoughts</span><textarea data-change="book-notes" data-id="${b.id}" placeholder="What did you think? Favorite quotes, takeaways…" maxlength="1200">${esc(b.notes || "")}</textarea></label>
+      <label class="fld"><span>Notes &amp; thoughts</span><textarea data-change="book-notes" data-id="${b.id}" placeholder="What did you think? Favorite quotes, takeaways…" maxlength="4000">${esc(b.notes || "")}</textarea></label>
       <div class="fld"><span>Format</span>
         <div class="seg">
           <button type="button" class="seg-btn ${b.format !== "digital" ? "on" : ""}" data-action="book-format" data-id="${b.id}" data-v="physical">${I.book}Physical</button>
@@ -6334,7 +6296,7 @@ function openMediaDetail(id) {
       ${m.status === "watching" ? `<button class="btn good slim" data-action="media-advance" data-id="${m.id}">${I.check}Mark completed 🎉</button>` : ""}
       ${m.status === "done" ? `<p class="soft">${I.check} Completed${m.finished ? ` · ${niceDate(m.finished)}` : ""}</p><button class="btn ghost slim" data-action="media-rewatch" data-id="${m.id}">Watch again</button>` : ""}
       <label class="fld"><span>Blurb <small class="soft">— one line for the gallery card</small></span><input type="text" data-change="media-blurb" data-id="${m.id}" placeholder="A short hook or synopsis…" maxlength="140" value="${esc(m.blurb || "")}"></label>
-      <label class="fld"><span>Review &amp; thoughts</span><textarea data-change="media-notes" data-id="${m.id}" placeholder="What did you think? Favorite scenes, takeaways…" maxlength="1200">${esc(m.notes || "")}</textarea></label>
+      <label class="fld"><span>Review &amp; thoughts</span><textarea data-change="media-notes" data-id="${m.id}" placeholder="What did you think? Favorite scenes, takeaways…" maxlength="4000">${esc(m.notes || "")}</textarea></label>
       ${recEditor("media", m.id, m.recommenders)}
       <div class="pill-row">
         <button class="btn ghost" data-action="media-edit" data-id="${m.id}">${I.edit}Edit details</button>
@@ -6538,7 +6500,7 @@ function projectFormFields(p, compact) {
     fld("Next step <small class=\"soft\">— used until you add milestones</small>",
       txt("nextMilestone", "e.g. ship the migration", p.nextMilestone || "", false)) +
     fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "code, side project", (p.tags || []).join(", "), false)) +
-    fld("Notes", `<textarea name="note" maxlength="400" placeholder="What is it, and what's next?">${esc(p.note || "")}</textarea>`);
+    fld("Notes", `<textarea name="note" maxlength="4000" placeholder="What is it, and what's next?">${esc(p.note || "")}</textarea>`);
   /* Starting a project should be typing its name. Nine fields to begin was friction I added in
      P1, and the user felt it at once: "the project section is too complex to begin with". */
   return compact ? head + moreBlock(rest) : head + rest;
@@ -6763,7 +6725,7 @@ function personFormFields(p) {
   return fld("Name", txt("name", "e.g. Mara", p.name || "")) +
     `<div class="fld-row">${fld("Emoji <small class=\"soft\">— optional</small>", txt("emoji", "🙂", p.emoji || "", false))}${fld("How you know them", txt("relation", "sister / colleague…", p.relation || "", false))}</div>` +
     `<div class="fld-row"><label class="fld"><span>Birthday</span><input type="date" name="birthday" value="${esc(p.birthday || "")}"></label>${fld("Tags", txt("tags", "family, uni", (p.tags || []).join(", "), false))}</div>` +
-    fld("Note", `<textarea name="note" rows="2" maxlength="500" placeholder="Anything worth remembering…">${esc(p.note || "")}</textarea>`);
+    fld("Note", `<textarea name="note" rows="2" maxlength="4000" placeholder="Anything worth remembering…">${esc(p.note || "")}</textarea>`);
 }
 
 /* ---------- memories ---------- */
@@ -7543,27 +7505,10 @@ const ACTIONS = {
   "ag-reflect": openReflectModal,
   "todo-open": (el) => openTaskDetail(el.dataset.id),
 
-  /* carry-forward: unfinished tasks from previous days, offered once a day */
-  "carry-open": () => { state.tasksRolledOn = ""; maybeCarryForward(); },
-  "carry-one": (el) => {
-    carryTask(state.todos.find(x => x.id === el.dataset.id));
-    save(); render();
-    if (!maybeCarryForwardAgain()) toast("Brought forward ✅");
+  "task-unlink-sup": (el) => {
+    const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
+    td.supId = ""; save(); render(); openTaskDetail(td.id);
   },
-  "carry-drop": (el) => {
-    state.todos = state.todos.filter(x => x.id !== el.dataset.id);
-    save(); render();
-    if (!maybeCarryForwardAgain()) toast("Dropped");
-  },
-  "carry-all": () => {
-    const n = strandedTasks().length;
-    strandedTasks().forEach(carryTask);
-    state.tasksRolledOn = todayIso();
-    closeModal(); save(); render();
-    toast(`${n} task${n === 1 ? "" : "s"} brought forward ✅`);
-  },
-  "carry-dismiss": () => { state.tasksRolledOn = todayIso(); closeModal(); save(); render(); },
-
   "task-up": (el) => moveTask(el.dataset.id, -1),
   "task-down": (el) => moveTask(el.dataset.id, 1),
   /* Pinning is capped at three. Rather than silently refusing the fourth — which reads as a broken
@@ -7577,7 +7522,6 @@ const ACTIONS = {
     save(); render();
   },
   /* <details> toggles itself; this only remembers the state across the re-render a pin causes */
-  "focus-more": () => { ui.showMore = !ui.showMore; },
   "focus-open": (el) => openFocusStart(el.dataset.id),
   "focus-pause": () => pauseFocus(),
   "focus-resume": () => resumeFocus(),
@@ -7774,8 +7718,8 @@ const ACTIONS = {
   "class-del": (el) => { deleteWithUndo(() => state.workout.classes, el.dataset.id, "Package deleted"); },
   "session-add": () => formModal("Log a session",
     fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option>${c}</option>`).join("")}</select>`) +
-    fld("What did you do?", `<textarea name="note" placeholder="Sets, reps, how it felt…" maxlength="600"></textarea>`), "session-add"),
-  "session-note": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (s) formModal("Session note", fld("Notes", `<textarea name="note" maxlength="600">${esc(s.note || "")}</textarea>`) + `<input type="hidden" name="id" value="${s.id}">`, "session-note"); },
+    fld("What did you do?", `<textarea name="note" placeholder="Sets, reps, how it felt…" maxlength="4000"></textarea>`), "session-add"),
+  "session-note": (el) => { const s = state.workout.sessions.find(x => x.id === el.dataset.id); if (s) formModal("Session note", fld("Notes", `<textarea name="note" maxlength="4000">${esc(s.note || "")}</textarea>`) + `<input type="hidden" name="id" value="${s.id}">`, "session-note"); },
   "session-del": (el) => { removeSession(el.dataset.id); save(); render(); },
   "session-report": (el) => openSessionReport(el.dataset.id),
 
@@ -7813,7 +7757,7 @@ const ACTIONS = {
   "skill-note": (el) => {
     const sk = skillById(el.dataset.id); if (!sk) return;
     formModal("Coach correction",
-      fld("What were you told?", `<textarea name="text" rows="2" maxlength="300" placeholder="e.g. Keep your core tighter"></textarea>`) +
+      fld("What were you told?", `<textarea name="text" rows="2" maxlength="4000" placeholder="e.g. Keep your core tighter"></textarea>`) +
       fld("Who said it <small class=\"soft\">— optional</small>", `<input type="text" name="coach" list="people-list" autocomplete="off">`) + peopleDatalist() +
       `<input type="hidden" name="sid" value="${sk.id}">`, "skill-note", "Save");
   },
@@ -7866,7 +7810,8 @@ const ACTIONS = {
   "meal-add": () => formModal("Add meal",
     `<div class="fld-row">${fld("Slot", `<select name="slot">${["Breakfast", "Lunch", "Dinner", "Snacks"].map(s => `<option>${s}</option>`).join("")}</select>`)}${fld("Time", `<input type="time" name="time" value="08:00">`)}</div>` +
     fld("Description", txt("name", "e.g. Oatmeal & berries")) +
-    `<div class="fld-row">${fld("kcal", num("kcal", 400, 0, 10))}${fld("Protein g", num("protein", 20, 0, 1))}${fld("Carbs g", num("carbs", 40, 0, 1))}${fld("Fats g", num("fats", 10, 0, 1))}${fld("Fiber g", num("fiber", 5, 0, 1))}</div>`, "meal-add"),
+    `<div class="fld-row">${fld("kcal", num("kcal", 400, 0, 10))}${fld("Protein g", num("protein", 20, 0, 1))}${fld("Carbs g", num("carbs", 40, 0, 1))}${fld("Fats g", num("fats", 10, 0, 1))}${fld("Fiber g", num("fiber", 5, 0, 1))}</div>` +
+    fld("Note <small class=\"soft\">— optional</small>", `<textarea name="note" maxlength="4000" placeholder="how it was made, how it sat with you, what to change…"></textarea>`), "meal-add"),
   "meal-edit": (el) => {
     const m = state.nutrition.meals.find(x => x.id === el.dataset.id);
     if (!m) return;
@@ -7874,6 +7819,7 @@ const ACTIONS = {
       `<div class="fld-row">${fld("Slot", `<select name="slot">${["Breakfast", "Lunch", "Dinner", "Snacks"].map(s => `<option${s === m.slot ? " selected" : ""}>${s}</option>`).join("")}</select>`)}${fld("Time", `<input type="time" name="time" value="${m.time || ""}">`)}</div>` +
       fld("Description", txt("name", "", m.name)) +
       `<div class="fld-row">${fld("kcal", num("kcal", m.kcal, 0, 10))}${fld("Protein g", num("protein", m.protein, 0, 1))}${fld("Carbs g", num("carbs", m.carbs, 0, 1))}${fld("Fats g", num("fats", m.fats, 0, 1))}${fld("Fiber g", num("fiber", m.fiber || 0, 0, 1))}</div>` +
+      fld("Note <small class=\"soft\">— optional</small>", `<textarea name="note" maxlength="4000" placeholder="how it was made, how it sat with you, what to change…">${esc(m.note || "")}</textarea>`) +
       `<input type="hidden" name="id" value="${m.id}">`, "meal-edit");
   },
   "meal-toggle": (el) => {
@@ -7929,7 +7875,7 @@ const ACTIONS = {
     const x = state.memories.find(v => v.id === el.dataset.id); if (!x) return;
     formModal("Edit memory",
       fld("Title", txt("title", "", x.title)) +
-      fld("Note", `<textarea name="note" maxlength="240">${esc(x.note || "")}</textarea>`) +
+      fld("Note", `<textarea name="note" maxlength="4000">${esc(x.note || "")}</textarea>`) +
       `<div class="fld-row">${fld("Emoji", txt("emoji", "📸", x.emoji || "📸", false))}${fld("Date", `<input type="date" name="date" value="${x.date}" required>`)}</div>` +
       fld("How did it feel?", txt("felt", "e.g. Like the whole summer was ours", x.felt || "", false)) +
       fld("Tags <small class=\"soft\">— comma separated</small>", txt("tags", "e.g. family, travel", (x.tags || []).join(", "), false)) +
@@ -8297,7 +8243,7 @@ const ACTIONS = {
   },
   "social-del": (el) => { deleteWithUndo(() => state.social.items, el.dataset.id, "Goal deleted"); },
   "memory-add": () => formModal("New memory",
-    fld("Title", txt("title", "e.g. Sunset picnic")) + fld("Note", `<textarea name="note" placeholder="What made it special?" maxlength="240"></textarea>`) +
+    fld("Title", txt("title", "e.g. Sunset picnic")) + fld("Note", `<textarea name="note" placeholder="What made it special?" maxlength="4000"></textarea>`) +
     `<div class="fld-row">${fld("Emoji", txt("emoji", "🌅", "🌅", false))}${fld("Date", `<input type="date" name="date" value="${todayIso()}" required>`)}</div>` +
     fld("How did it feel? <small class=\"soft\">— one line, in your words</small>", txt("felt", "e.g. Like the whole summer was ours", "", false)) +
     fld("Who was there <small class=\"soft\">— comma separated</small>", txt("people", "e.g. Mum, Sara", "", false)) +
@@ -8409,7 +8355,7 @@ const SUBMITS = {
     const e = born({ id: uid(), title: f.title.slice(0, 120), date: f.date || todayIso(),
       time: /^\d{2}:\d{2}$/.test(f.time || "") ? f.time : "", mins: clamp(+f.mins || 0, 0, 1440),
       category: EV_CATS.includes(f.category) ? f.category : "Other",
-      icon: CAT_ICON[f.category] || "\u{1F4C5}", note: (f.note || "").slice(0, 400),
+      icon: CAT_ICON[f.category] || "\u{1F4C5}", note: (f.note || "").slice(0, 4000),
       /* "" means you typed it. A calendar import would stamp its own source here. */
       source: "" });
     (state.events = state.events || []).push(e);
@@ -8421,7 +8367,7 @@ const SUBMITS = {
     e.time = /^\d{2}:\d{2}$/.test(f.time || "") ? f.time : "";
     e.mins = clamp(+f.mins || 0, 0, 1440);
     if (EV_CATS.includes(f.category)) { e.category = f.category; e.icon = CAT_ICON[f.category]; }
-    e.note = (f.note || "").slice(0, 400);
+    e.note = (f.note || "").slice(0, 4000);
     touch("event", e.id, "Updated");
   },
   "link-add": (f) => {
@@ -8458,9 +8404,9 @@ const SUBMITS = {
     s.energy = clamp(+f.energy || 0, 0, 5);
     s.difficulty = clamp(+f.difficulty || 0, 0, 5);
     s.enjoyed = clamp(+f.enjoyed || 0, 0, 5);
-    s.feedback = String(f.feedback || "").slice(0, 400);
-    s.learned = String(f.learned || "").slice(0, 400);
-    s.reflection = String(f.reflection || "").slice(0, 600);
+    s.feedback = String(f.feedback || "").slice(0, 4000);
+    s.learned = String(f.learned || "").slice(0, 4000);
+    s.reflection = String(f.reflection || "").slice(0, 4000);
     s.nextGoal = String(f.nextGoal || "").slice(0, 200);
     s.skills = skillsAll().filter(sk => f["skill_" + sk.id]).map(sk => sk.id);
     syncSessionSkills(s);       // one pass, both directions, idempotent
@@ -8500,7 +8446,7 @@ const SUBMITS = {
     const coach = String(f.coach || "").trim();
     if (coach) ensurePerson(coach);
     sk.notes = sk.notes || [];
-    sk.notes.push({ id: uid(), at: new Date().toISOString(), text: f.text.trim().slice(0, 300), coach });
+    sk.notes.push({ id: uid(), at: new Date().toISOString(), text: f.text.trim().slice(0, 4000), coach });
     setTimeout(() => openSkillDetail(sk.id), 0);
   },
   "ex-add": (f) => {
@@ -8525,10 +8471,10 @@ const SUBMITS = {
     if (after > before && before > 0) toast(`New PR on ${ex.name} — ${prLabel(ex.kind, after, ex.name)} 🏆`, "badge");
     addXp(5, "Set logged");
   },
-  "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, time: f.time || "", kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }); },
+  "meal-add": (f) => { state.nutrition.meals.push({ id: uid(), slot: f.slot, name: f.name, time: f.time || "", kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0, note: String(f.note || "").slice(0, 4000) }); },
   "meal-edit": (f) => {
     const m = state.nutrition.meals.find(x => x.id === f.id);
-    if (m) { m.slot = f.slot; m.name = f.name; m.time = f.time || ""; m.kcal = +f.kcal; m.protein = +f.protein; m.carbs = +f.carbs; m.fats = +f.fats; m.fiber = +f.fiber || 0; }
+    if (m) { m.slot = f.slot; m.name = f.name; m.time = f.time || ""; m.kcal = +f.kcal; m.protein = +f.protein; m.carbs = +f.carbs; m.fats = +f.fats; m.fiber = +f.fiber || 0; m.note = String(f.note || "").slice(0, 4000); }
   },
   "nutrition-goals": (f) => { state.nutrition.goals = { kcal: +f.kcal, protein: +f.protein, carbs: +f.carbs, fats: +f.fats, fiber: +f.fiber || 0 }; },
   "sup-edit": (f) => { const x = state.nutrition.supplements.find(v => v.id === f.id); if (x) { x.name = f.name; x.emoji = f.emoji || x.emoji; x.dose = f.dose || ""; x.every = ["day","week","month"].includes(f.every) ? f.every : x.every; } },
@@ -8721,7 +8667,7 @@ const SUBMITS = {
 /* changes (inputs) */
 const CHANGES = {
   "sleep-set": (el) => { const d = dayCursor("health"); const l = state.health.log[d] = healthOn(d); l.sleep = clamp(+el.value || 0, 0, 24); save(); render(); },
-  "habit-note": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.note = el.value.slice(0, 600); save(); } },
+  "habit-note": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const e = ensureHabitEntry(h, dayCursor("habits")); e.note = el.value.slice(0, 4000); save(); } },
   "habit-goal-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "goal-habit-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "habit-amount": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const was = habitMet(h, dayCursor("habits")); const e = ensureHabitEntry(h, dayCursor("habits")); e.amount = Math.max(0, +el.value || 0); if (!was && habitMet(h, dayCursor("habits")) && dayCursor("habits") === todayIso()) addXp(10, h.name); save(); render(); openHabitDetail(h.id); } },
@@ -8731,7 +8677,7 @@ const CHANGES = {
     const d = el.dataset.date || todayIso();
     const v = el.value.trim();
     if (v) {
-      state.reflections[d] = v.slice(0, 1000);
+      state.reflections[d] = v.slice(0, 8000);
       /* writing about Tuesday on Thursday is not doing Thursday's journalling habit */
       if (d === todayIso()) { const jid = suggestHabitForText("reflection journal"); if (jid) completeHabitToday(jid); }
     } else delete state.reflections[d];
@@ -8741,13 +8687,6 @@ const CHANGES = {
   "task-time": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.time = el.value || ""; save(); } },
   "task-prio": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.priority = PRIORITY[el.value] ? el.value : "med"; save(); render(); } },
   "task-est": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.estMin = clamp(parseInt(el.value, 10) || 0, 0, 1440); save(); render(); } },
-  "task-serves": (el) => {
-    const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
-    const v = el.value || "";
-    td.linkGoalId = v.startsWith("g:") ? v.slice(2) : "";
-    td.projectId = v.startsWith("p:") ? v.slice(2) : "";
-    save(); render(); openTaskDetail(td.id);
-  },
   /* Exactly one hard task, the same one-of-many rule the app already uses elsewhere: setting this
      clears whoever held it, so the card can never show two "the one thing"s. */
   "task-hard": (el) => {
@@ -8774,12 +8713,19 @@ const CHANGES = {
     setSeriesRepeat(td, { mode: "days", days: el.checked ? [...new Set([...days, d])].sort() : days.filter(x => x !== d) });
     save(); render(); openTaskDetail(td.id);
   },
+  /* ONE control now. There used to be three on this sheet — "Counts toward" (habit/supplement/area),
+     "In service of" (goal/project) and the generic "Link something" chips — and the user asked, quite
+     reasonably, what the difference was. There wasn't a defensible one. Every field is kept so
+     nothing that already exists breaks; only the UI collapses. */
   "task-link": (el) => {
     const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
     const v = el.value || "";
     td.habitId = v.startsWith("h:") ? v.slice(2) : "";
-    td.supId = v.startsWith("s:") ? v.slice(2) : "";
     td.areaId = v.startsWith("a:") ? v.slice(2) : "";
+    td.linkGoalId = v.startsWith("g:") ? v.slice(2) : "";
+    td.projectId = v.startsWith("p:") ? v.slice(2) : "";
+    /* supId is deliberately NOT cleared here: it is set by name-detection ("Take Vitamin D3"), never
+       from this menu, and has its own Remove button below it. */
     save(); render(); openTaskDetail(td.id);
   },
   "session-media": (el) => {
@@ -8808,7 +8754,7 @@ const CHANGES = {
   },
   "book-notes": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
-    if (b) { b.notes = el.value.slice(0, 1200); save(); }   // no re-render: keep the textarea focused
+    if (b) { b.notes = el.value.slice(0, 4000); save(); }   // no re-render: keep the textarea focused
   },
   "book-blurb": (el) => {
     const b = state.reading.books.find(x => x.id === el.dataset.id);
@@ -8820,7 +8766,7 @@ const CHANGES = {
   },
   "media-notes": (el) => {
     const m = state.media.find(x => x.id === el.dataset.id);
-    if (m) { m.notes = el.value.slice(0, 1200); save(); }
+    if (m) { m.notes = el.value.slice(0, 4000); save(); }
   },
   "media-ep-set": (el) => {
     const m = state.media.find(x => x.id === el.dataset.id);
@@ -9109,8 +9055,9 @@ bindDrag();
 bindTip();
 render();
 showLoadIssue();
-/* spawn today's repeating tasks, prune old copies, then offer anything left unfinished from before */
-if (!loadIssue) { if (rollTasks()) { save(); render(); } setTimeout(() => maybeCarryForward(), 900); }
+/* spawn today's repeating tasks and prune old copies. Nothing is dragged forward: a task belongs to
+   the day it was for, the way a calendar entry does. */
+if (!loadIssue) { if (rollTasks()) { save(); render(); } }
 maybeOnboard();
 
 /* cloud sync: restore any saved session, then pull the latest snapshot (HTTPS origins only) */
@@ -9151,6 +9098,6 @@ document.addEventListener("visibilitychange", () => {
      stale the moment you look at it again — re-sync from the clock rather than from the ticks */
   startFocusTimer();
   /* the app is often left open overnight — coming back is when "today" actually changes */
-  if (!loadIssue && state.tasksRolledOn !== todayIso()) { if (rollTasks()) save(); render(); maybeCarryForward(); }
+  if (!loadIssue && state.tasksRolledOn !== todayIso()) { if (rollTasks()) save(); render(); }
 });
 window.addEventListener("focus", () => { tickReminders(); startFocusTimer(); });
