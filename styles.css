@@ -656,8 +656,6 @@ li.overdue .row-txt small { color: var(--danger); }
   font-size: 11.5px; color: var(--ink-3); }
 .task-from svg, .task-rep svg { width: 12px; height: 12px; }
 .task-from { color: #d9730d; }
-.carry-list li { cursor: default; }
-.carry-list .row-txt small { color: var(--ink-3); }
 
 /* ---------- people (Social) ---------- */
 .people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 12px; }
@@ -761,7 +759,7 @@ input[type="color"] { width: 100%; height: 42px; border: 1px solid var(--line); 
 .reflect-head { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; margin-bottom: 8px; }
 .reflect-head svg { width: 18px; height: 18px; color: var(--brand); }
 .reflect-prompt { font-size: 14.5px; color: var(--ink); margin-bottom: 10px; }
-.reflect-input { width: 100%; min-height: 74px; resize: vertical; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); padding: 11px 13px; line-height: 1.5; }
+.reflect-input { width: 100%; min-height: 132px; resize: vertical; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); padding: 11px 13px; line-height: 1.5; }
 
 .habit-list.dim { opacity: .55; }
 .habit-list.dim li { border-bottom-color: transparent; }
@@ -1029,7 +1027,10 @@ li.done .checkbox { animation: checkPop .3s ease; }
   border: 1px solid var(--line); border-radius: 11px;
   background: var(--surface-2); padding: 10px 12px; width: 100%;
 }
-.fld textarea { min-height: 74px; resize: vertical; }
+/* Room to actually write. These were 74px tall against limits as low as 240 characters — a memory
+   got a tweet. The cap is now thousands of characters, so the box has to look like somewhere you
+   can think. */
+.fld textarea { min-height: 132px; resize: vertical; line-height: 1.55; }
 .fld-row { display: flex; gap: 10px; }
 .avatar-pick { display: flex; flex-wrap: wrap; gap: 6px; }
 .avatar-pick input { position: absolute; opacity: 0; pointer-events: none; }
@@ -1228,9 +1229,12 @@ li.done .checkbox { animation: checkPop .3s ease; }
 
 /* today's focus — timeline to-do list */
 .todo-list { display: flex; flex-direction: column; }
-.todo { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+/* Every fixed-width control here is width the task's own name doesn't get. On a 390px phone the row
+   was giving the title about a third of the line, so "Finish German grammar chapter" wrapped to four.
+   The trailing chevron went (the title itself already opens the task) and the rest is tighter. */
+.todo { display: flex; align-items: center; gap: 8px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
 .todo:last-child { border-bottom: 0; }
-.todo-time { flex: 0 0 46px; font-size: 12px; font-weight: 700; color: var(--brand); text-align: right; font-variant-numeric: tabular-nums; }
+.todo-time { flex: 0 0 40px; font-size: 12px; font-weight: 700; color: var(--brand); text-align: right; font-variant-numeric: tabular-nums; }
 .todo-time:empty::before { content: "·"; color: var(--ink-3); }
 .todo .row-txt { flex: 1; min-width: 0; cursor: pointer; }
 .todo .row-txt b { font-weight: 500; }
@@ -1240,7 +1244,6 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .done-wrap { margin-top: 12px; }
 .done-wrap summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--ink-3); display: flex; align-items: center; gap: 6px; padding: 6px 2px; }
 .done-wrap summary svg { width: 15px; height: 15px; color: var(--good); }
-.done-list { opacity: .7; margin-top: 4px; }
 
 /* today's habit chips */
 
@@ -1524,7 +1527,7 @@ li.done .checkbox { animation: checkPop .3s ease; }
 .gf-go svg { width: 18px; height: 18px; }
 
 /* 3 — Today's focus. The pin is how three becomes a choice rather than a guess. */
-.todo .pin { flex: 0 0 auto; width: 30px; height: 30px; color: var(--ink-3); opacity: .55; }
+.todo .pin { flex: 0 0 auto; width: 28px; height: 28px; color: var(--ink-3); opacity: .55; }
 .todo .pin svg { width: 16px; height: 16px; }
 .todo .pin:hover { opacity: 1; color: var(--brand); }
 .todo .pin.on { opacity: 1; color: var(--brand); background: var(--brand-soft); }
@@ -2098,3 +2101,6 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 /* the dashboard, showing a day that has already happened */
 .welcome.looking-back { --grad-brand: linear-gradient(135deg, #5b6270, #39404d); }
 .welcome.looking-back .wel-hi { text-transform: uppercase; letter-spacing: .07em; font-size: 11.5px; }
+
+/* a meal's own note — it had nowhere to say how the food actually was */
+.meal-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); margin: 4px 0 2px; white-space: pre-wrap; }
