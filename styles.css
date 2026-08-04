@@ -2130,3 +2130,18 @@ li.dragging .grip { opacity: 1; color: var(--brand); }
 .lib-plus svg { width: 18px; height: 18px; }
 .day-goal-note { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; }
 .day-goal-note svg { width: 13px; height: 13px; flex: none; }
+
+/* ---------- the end-of-day report ---------- */
+.report-list { display: flex; flex-direction: column; margin-bottom: 4px; }
+.report-list li { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+.report-list li:last-child { border-bottom: 0; }
+.rp-ic { flex: none; display: flex; color: var(--ink-3); }
+.rp-ic svg { width: 16px; height: 16px; }
+.rp-label { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-val { flex: none; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.report-write { margin-top: 12px; }
+.report-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+/* the evening nudge: the day is done and nothing is written yet */
+.report-card.nudge { border-color: color-mix(in srgb, var(--brand) 40%, var(--line)); }
+.report-card.nudge .reflect-prompt { font-weight: 650; color: var(--ink); display: inline-flex; align-items: flex-start; gap: 6px; }
+.report-card.nudge .reflect-prompt svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--brand); }

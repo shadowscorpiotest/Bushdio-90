@@ -122,6 +122,32 @@ see **One list, and a task that stays on its day** below.
 Back-filling a past day earns **no XP** — the streak system stays honest. Navigating into the
 Dashboard from anywhere else returns you to today.
 
+## 📓 A report at the end of the day, and one place to write
+
+Every day gets a **report** on the dashboard: tasks done, habits kept, minutes focused, minutes
+studied, workouts, meals and calories, steps, water, sleep, XP earned. All of it **derived** — not one
+new thing to fill in.
+
+**It only says what it knows.** A line appears when the day has a record of it and is absent when it
+doesn't. A day you didn't study shows no study line rather than a proud `0 minutes`, and a day before
+you started using LifeHub reports nothing at all instead of "0 of 5 habits kept".
+
+Under the report is the writing box, with the day's mood and tags. On today it reads *Today so far*;
+after 6pm with nothing written it nudges; on a past day it's the full account of how that day went.
+
+### One place, not two
+
+LifeHub used to keep **two separate stores** for what you write about a day. The reflection box on the
+Dashboard, the Habit Tracker and the reflect modal all wrote to one; the Journal page read the other.
+Write on the dashboard, open the Journal, and find it empty.
+
+They're one store now. Whatever you write — dashboard, Habit Tracker, or the Journal page — is the
+same entry, and every box files it under **the day that screen is showing**. Writing earns XP once a
+day, when a day's first words appear, not once per keystroke.
+
+Merging them lost nothing: a day that had text in both keeps both, the second part marked so you can
+still tell them apart.
+
 ## 🪶 Starting something should be typing its name
 
 A new project asks for a **name**. That's it. Everything else — purpose, priority, dates, tags, the

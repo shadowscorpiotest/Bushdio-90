@@ -218,7 +218,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 25;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 26;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -282,7 +282,6 @@ function defaultState() {
        tasks   {id,title,kind:"university"|"career",tag,due,done} */
     learning: { monthlyHours: 10, weeklyHours: 20, courses: [], tasks: [], resources: [], sessions: [] },
     study: { log: {} },        // log[date]={skills:mins, university:mins} — quick logs only; sessions carry their own mins
-    reflections: {},           // {date: text}
     reading: { yearlyGoal: 12, books: [], log: {} },
     media: [],                 // {id,title,type,status,rating}
     university: { weeklyHours: 20, tasks: [] },
@@ -966,6 +965,35 @@ const MIGRATIONS = [
     delete s.nutrition.meals;
     delete s.nutrition.log;
     delete s.nutrition.shopping;                 // declared and backfilled for months, never read
+  },
+
+  /* 25 → 26 · two stores for "what I wrote about my day" become one.
+     `state.reflections` was a {date: text} map fed by a textarea that renders in THREE places —
+     the Dashboard, the Habit Tracker and the reflect modal — while `state.journal[]` was fed only
+     by the Journal page. None of the three reflection boxes was the Journal, so you could write on
+     the dashboard, open the Journal, and find it empty.
+
+     Nothing is lost. Per date: no entry → create one; empty entry → the reflection becomes its
+     text; BOTH hold text → the journal's own text first, then the reflection under a marker, so
+     the two are still distinguishable rather than silently glued together. An identical reflection
+     is not appended twice.
+
+     Deleting `s.reflections` at the end is what makes this idempotent. */
+  (s) => {
+    const refl = s.reflections || {};
+    const journal = s.journal = s.journal || [];
+    const byDate = {};
+    journal.forEach(j => { if (j && j.date) byDate[j.date] = j; });
+    Object.keys(refl).forEach(d => {
+      const text = String(refl[d] || "").trim();
+      if (!text) return;
+      const j = byDate[d];
+      if (!j) { journal.push({ id: uid(), date: d, text, mood: "", tags: [] }); return; }
+      const had = String(j.text || "").trim();
+      if (!had) j.text = text;
+      else if (!had.includes(text)) j.text = had + "\n\n— also written that day —\n" + text;
+    });
+    delete s.reflections;
   },
 ];
 
@@ -2440,7 +2468,7 @@ const BADGES = [
   { id: "athlete",     name: "Athlete",          desc: "Log 10 workouts",                emoji: "🏋️", test: () => Object.values(state.workout.log).reduce((a, v) => a + v.length, 0) >= 10 },
   { id: "hydrated",    name: "Hydro homie",      desc: "Hit your water goal 7 times",    emoji: "💧", test: () => Object.values(state.health.log).filter(l => (l.water || 0) >= state.health.goals.water).length >= 7 },
   { id: "scholar",     name: "Scholar",          desc: "Log 10 hours of study",          emoji: "🎓", test: () => studyDays().reduce((a, d) => a + studyMins(d), 0) >= 600 },
-  { id: "journalist",  name: "Dear diary",       desc: "Write 7 journal entries",        emoji: "✒️", test: () => state.journal.length >= 7 },
+  { id: "journalist",  name: "Dear diary",       desc: "Write 7 journal entries",        emoji: "✒️", test: () => state.journal.filter(j => String(j.text || "").trim()).length >= 7 },
   { id: "keeper",      name: "Memory keeper",    desc: "Save 5 memories",                emoji: "📸", test: () => state.memories.length >= 5 },
   { id: "shipper",     name: "Shipped it",       desc: "Complete a project",             emoji: "🚢", test: () => state.projects.some(projectDone) },
   { id: "butterfly",   name: "Social butterfly", desc: "Hit all social goals in a week", emoji: "🦋", test: () => { const w = socialWeek(); return w.target > 0 && w.done >= w.target; } },
@@ -3227,7 +3255,7 @@ function eventFormFields(e) {
 function openReflectModal() {
   openModal(`<header class="modal-head"><h3>${I.spark} Daily reflection</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
     <div class="modal-body"><p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="8000">${esc(state.reflections[todayIso()] || "")}</textarea>
+      <textarea class="reflect-input" data-change="reflection" data-date="${todayIso()}" placeholder="A sentence or two…" maxlength="8000">${esc(journalText(todayIso()))}</textarea>
       <div class="modal-foot"><button type="button" class="btn primary" data-action="modal-close">Done</button></div></div>`);
 }
 /* keyword → habit suggestion (the offline "smart" half of Both) */
@@ -3503,6 +3531,77 @@ function discardFocus() {
   save(); renderFocusBar(); render();
 }
 const focusMinutesOn = (d) => (state.focusLog[d] || []).reduce((n, r) => n + (r.mins || 0), 0);
+
+/* ---------- the end-of-day report ----------
+   "Can I get a report at the end of each day that finished so I can write about that day and see
+   how my day went?"
+
+   Entirely DERIVED — not one new field. And every line is omitted when the day holds no record of
+   it: printing "0 minutes studied" at someone who does not study is noise dressed up as data, and
+   this app does not assert things it has no evidence for. A day with nothing on it says so. */
+function dayReport(d) {
+  const rows = [];
+  const push = (icon, label, value) => rows.push({ icon, label, value });
+
+  const todos = tasksOn(d);
+  if (todos.length) push(I.check, "Tasks", `${todos.filter(t => t.done).length} of ${todos.length} done`);
+
+  /* A daily habit is "scheduled" on every date its cadence covers — including dates before you had
+     the habit at all. Reporting "0 of 5 kept" for a day three months before you started is the app
+     asserting something it cannot know, so the line needs evidence the day happened: any habit
+     logged, or the day being today. */
+  const due = liveHabits().filter(h => isScheduled(h, d) && !isSkipped(h, d));
+  const habitEvidence = d === todayIso() || state.habits.some(h => h.log && h.log[d]);
+  if (due.length && habitEvidence) push(I.target, "Habits", `${due.filter(h => habitMet(h, d)).length} of ${due.length} kept`);
+
+  const focus = focusMinutesOn(d);
+  if (focus) push(I.clock, "Focused", estLabel(focus));
+
+  const study = studyMins(d);
+  if (study) {
+    const sess = studySessionsOn(d).length;
+    push(I.gradcap, "Studied", estLabel(study) + (sess ? ` \u00b7 ${sess} session${sess === 1 ? "" : "s"}` : ""));
+  }
+
+  const wk = (state.workout.log[d] || []).length;
+  if (wk) push(I.dumbbell, "Workout", `${wk} session${wk === 1 ? "" : "s"}`);
+
+  const meals = mealsOn(d), eaten = meals.filter(m => m.eaten).length;
+  if (meals.length) {
+    const kcal = nutritionOn(d).kcal;
+    push(I.apple, "Meals", `${eaten} of ${meals.length}${kcal ? ` \u00b7 ${kcal.toLocaleString()} kcal` : ""}`);
+  }
+
+  const h = healthOn(d), m = metricsOn();
+  if (m.steps && h.steps) push(I.heart, "Steps", (+h.steps).toLocaleString());
+  if (m.water && h.water) push(I.heart, "Water", `${h.water} L`);
+  if (m.sleep && h.sleep) push(I.moon, "Sleep", `${h.sleep} h`);
+
+  const pages = pagesOn(d);
+  if (pages) push(I.book, "Read", `${pages} page${pages === 1 ? "" : "s"}`);
+
+  const xp = state.xpLog[d] || 0;
+  if (xp) push(I.spark, "Earned", `${xp} XP`);
+
+  return rows;
+}
+
+/* One place to write about a day, and the one store behind it. */
+const JOURNAL_TAGS = ["Grateful", "Happy", "Focused", "Tired"];
+const journalText = (d) => (journalOn(d) || {}).text || "";
+function writeJournal(d, text) {
+  const clean = String(text || "").slice(0, 8000);
+  const had = journalText(d).trim();
+  if (!clean.trim()) {
+    /* emptying the box removes the entry only if it carries nothing else */
+    const e = journalOn(d);
+    if (e) { e.text = ""; if (!e.mood && !(e.tags || []).length) state.journal = state.journal.filter(x => x.id !== e.id); }
+    return false;
+  }
+  ensureJournalOn(d).text = clean;
+  /* XP once per day, when a day's writing first exists — an auto-saving textarea must not farm it */
+  return !had;
+}
 const focusMinutesFor = (key, id, d = todayIso()) =>
   !id ? 0 : (state.focusLog[d] || []).filter(r => r[key] === id).reduce((n, r) => n + (r.mins || 0), 0);
 function pruneFocusLog() {
@@ -4064,6 +4163,33 @@ function tasksCard(d, todos) {
       : `<p class="soft note">${I.spark} You can still tick these off and still add one — it files under <b>${esc(niceDate(d, { month: "long", day: "numeric" }))}</b>, the day you are looking at, not today.</p>`));
 }
 
+/* The day report: what the day held, and the one place to write about it.
+   Replaces the old Reflection card, which wrote to a store the Journal page never read. */
+function dayReportCard(d) {
+  const isToday = d === todayIso();
+  const rows = dayReport(d);
+  const entry = journalOn(d);
+  const text = (entry && entry.text) || "";
+  const late = isToday && new Date().getHours() >= 18;
+  const title = isToday ? "Today so far" : `How ${niceDate(d, { weekday: "long" })} went`;
+  const nudge = !text && (late || !isToday);
+  return card("span2 report-card" + (nudge ? " nudge" : ""), cardHead(title,
+    `<button class="btn ghost tiny" data-nav="journal">Journal</button>`) + `
+    ${rows.length
+      ? `<ul class="report-list">${rows.map(r => `<li><span class="rp-ic">${r.icon}</span><span class="rp-label">${esc(r.label)}</span><b class="rp-val">${esc(r.value)}</b></li>`).join("")}</ul>`
+      : `<p class="soft small">${isToday ? "Nothing logged yet today." : "Nothing was logged on this day."}</p>`}
+
+    <div class="report-write">
+      <p class="reflect-prompt">${nudge ? `${I.spark} ${esc(reflectionOfDay())}` : esc(reflectionOfDay())}</p>
+      <textarea class="reflect-input" data-change="reflection" data-date="${d}" placeholder="${isToday ? "How did today go?" : "Nothing written that day — you can still add it."}" maxlength="8000">${esc(text)}</textarea>
+      <div class="report-foot">
+        <span class="mood-row">${["\u{1F604}", "\u{1F642}", "\u{1F60C}", "\u{1F610}", "\u{1F614}"].map(m => `<button class="mood ${moodOn(d) === m ? "on" : ""}" data-action="report-mood" data-d="${d}" data-m="${m}">${m}</button>`).join("")}</span>
+        <span class="pill-row">${JOURNAL_TAGS.map(tag => `<button class="tag ${(entry && (entry.tags || []).includes(tag)) ? "on" : ""}" data-action="report-tag" data-d="${d}" data-tag="${tag}">${tag}</button>`).join("")}</span>
+      </div>
+      <p class="soft note">${I.check} This is the same entry the <b>Journal</b> page shows \u2014 one place, whichever screen you write it from.</p>
+    </div>`);
+}
+
 /* Only what you pinned. Deliberately capable of being empty. */
 function focusCard(uniDue) {
   const t = todayIso();
@@ -4162,9 +4288,7 @@ function vDashboard() {
     ${isToday && deadlines.length ? card("", cardHead("What's next") + `
       <ul class="mini-agenda">${deadlines.map(k => { const a = areaOf(k.area); return `<li data-nav="${k.nav}"><span class="a-ic" style="--a:${cssVar(a.hue)}">${I[a.icon]}</span><span class="row-txt"><b>${esc(k.title)}</b><small>${esc(a.name.toLowerCase())}</small></span><span class="a-when ${k.due < t ? "over" : ""}">${daysUntil(k.due)}</span></li>`; }).join("")}</ul>`) : ""}
 
-    ${card("", cardHead(isToday ? "Reflection" : `Reflection · ${esc(niceDate(t, { month: "long", day: "numeric" }))}`) + `
-      <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" data-date="${t}" placeholder="${isToday ? "A sentence or two…" : "Nothing written that day — you can still add it."}" maxlength="8000">${esc(state.reflections[t] || "")}</textarea>`)}
+    ${dayReportCard(t)}
 
   </div>`;
 }
@@ -4448,7 +4572,7 @@ function vHabits() {
     ${card("reflect-card", `
       <div class="reflect-head">${I.spark}<span>Daily reflection</span></div>
       <p class="reflect-prompt">${esc(reflectionOfDay())}</p>
-      <textarea class="reflect-input" data-change="reflection" placeholder="A sentence or two…" maxlength="8000">${esc(state.reflections[todayIso()] || "")}</textarea>`)}
+      <textarea class="reflect-input" data-change="reflection" data-date="${d}" placeholder="A sentence or two…" maxlength="8000">${esc(journalText(d))}</textarea>`)}
 
     ${/* Goals has its own page now. This stays as the bridge — habits are the daily actions, Goals
           is where they add up — rather than being the only place goals live. */
@@ -7046,7 +7170,7 @@ function vJournal() {
       <div class="journal-foot">
         <span class="mood-row">${moods.map(m => `<button class="mood ${moodOn(d) === m ? "on" : ""}" data-action="journal-mood" data-m="${m}">${m}</button>`).join("")}</span>
         <span class="pill-row">
-          ${["Grateful", "Happy", "Focused", "Tired"].map(tag => `<button class="tag ${entry?.tags?.includes(tag) ? "on" : ""}" data-action="journal-tag" data-tag="${tag}">${tag}</button>`).join("")}
+          ${JOURNAL_TAGS.map(tag => `<button class="tag ${entry?.tags?.includes(tag) ? "on" : ""}" data-action="journal-tag" data-tag="${tag}">${tag}</button>`).join("")}
         </span>
         ${entry && entry.text ? `<button class="btn ghost" data-action="journal-del" data-d="${d}">${I.trash}Delete</button>` : ""}
         <button class="btn primary" data-action="journal-save">${I.check}Save entry</button>
@@ -8492,6 +8616,14 @@ const ACTIONS = {
 
   /* journal */
   "journal-mood": (el) => { setMoodOn(dayCursor("journal"), el.dataset.m); save(); render(); },   /* same store as Health */
+  /* the report card carries its own date, so it works on whichever day the dashboard is showing */
+  "report-mood": (el) => { setMoodOn(el.dataset.d, el.dataset.m); save(); render(); },
+  "report-tag": (el) => {
+    const e = ensureJournalOn(el.dataset.d); e.tags = e.tags || [];
+    const i = e.tags.indexOf(el.dataset.tag);
+    if (i >= 0) e.tags.splice(i, 1); else e.tags.push(el.dataset.tag);
+    save(); render();
+  },
   "journal-open": (el) => { setCursor("journal", el.dataset.d); render(); window.scrollTo({ top: 0 }); },
   "journal-tag": (el) => {
     const e = ensureJournalOn(dayCursor("journal")); e.tags = e.tags || [];
@@ -8907,16 +9039,19 @@ const CHANGES = {
   "habit-goal-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "goal-habit-toggle": (el) => { const h = state.habits.find(x => x.id === el.dataset.h); if (h) { h.goalIds = h.goalIds || []; const i = h.goalIds.indexOf(el.dataset.g); if (el.checked && i < 0) h.goalIds.push(el.dataset.g); else if (!el.checked && i >= 0) h.goalIds.splice(i, 1); save(); } },
   "habit-amount": (el) => { const h = state.habits.find(x => x.id === el.dataset.id); if (h) { const was = habitMet(h, dayCursor("habits")); const e = ensureHabitEntry(h, dayCursor("habits")); e.amount = Math.max(0, +el.value || 0); if (!was && habitMet(h, dayCursor("habits")) && dayCursor("habits") === todayIso()) addXp(10, h.name); save(); render(); openHabitDetail(h.id); } },
-  /* the date rides on the element, because this same textarea appears on the dashboard (which can
-     now be showing a past day), in the Journal and in the reflect modal */
+  /* ONE store. This textarea appears on the dashboard's day report, on the Habit Tracker and in the
+     reflect modal, and all three now write the journal entry for the date on the element — which is
+     why every one of them carries a data-date. Two of them didn't, and wrote to today whatever day
+     was on screen. */
   "reflection": (el) => {
     const d = el.dataset.date || todayIso();
-    const v = el.value.trim();
-    if (v) {
-      state.reflections[d] = v.slice(0, 8000);
+    const isNew = writeJournal(d, el.value);
+    if (isNew && d === todayIso()) {
+      addXp(15, "Journal entry");
       /* writing about Tuesday on Thursday is not doing Thursday's journalling habit */
-      if (d === todayIso()) { const jid = suggestHabitForText("reflection journal"); if (jid) completeHabitToday(jid); }
-    } else delete state.reflections[d];
+      const jid = suggestHabitForText("reflection journal");
+      if (jid) completeHabitToday(jid);
+    }
     save();
   },
   "task-text": (el) => { const td = state.todos.find(x => x.id === el.dataset.id); if (td) { td.text = el.value.slice(0, 120); save(); } },
