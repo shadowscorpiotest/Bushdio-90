@@ -153,6 +153,10 @@ async function run() {
     await noOverflow(page, chk, "dashboard");
     await page.evaluate(async () => { go("health"); await new Promise((r) => setTimeout(r, 80)); });
     await noOverflow(page, chk, "health");
+    /* the class package rows carry a name, a fraction, a price, a date and two controls on one line;
+       at 390px that is where text last overflowed its row */
+    await page.evaluate(async () => { go("workout"); await new Promise((r) => setTimeout(r, 80)); });
+    await noOverflow(page, chk, "workout");
     await page.evaluate(async () => {
       state.profile.theme = "dark"; save(); render();
       if (typeof applyTheme === "function") applyTheme();

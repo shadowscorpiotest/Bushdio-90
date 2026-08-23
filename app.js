@@ -218,7 +218,7 @@ const NAV_GROUPS = [
 /* ================= state ================= */
 const STORE_KEY = "lifehub-v1";
 const CORRUPT_KEY = STORE_KEY + ".corrupt";   // where unreadable data is parked, never overwritten
-const SCHEMA = 26;                             // bump when you append a step to MIGRATIONS
+const SCHEMA = 27;                             // bump when you append a step to MIGRATIONS
 /* People are joined by NAME across Social, Reading, Movies and Memories. Names are what you actually
    type in each of those places, so a normalised name is the key — no id rewrite, nothing to break. */
 const normName = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -994,6 +994,25 @@ const MIGRATIONS = [
       else if (!had.includes(text)) j.text = had + "\n\n— also written that day —\n" + text;
     });
     delete s.reflections;
+  },
+
+  /* 26 → 27 · a class package remembers the terms it has already been through.
+     Renewing used to do `c.log = []`. The dates of every session in the term you had just finished
+     were deleted outright — the one thing you would want to look back at.
+
+     Each package gains `terms[]` for finished terms, plus `paidOn` and `receipt` for the current
+     one. Nothing here can recover what the old renew destroyed, and nothing here pretends to:
+     `renewals` still counts every term ever paid for, so `renewals - terms.length` is exactly how
+     many terms ran before the dates were being kept. The detail sheet says so in those words rather
+     than showing an empty list as though you had simply never attended. */
+  (s) => {
+    ((s.workout || {}).classes || []).forEach(c => {
+      c.log = (c.log || []).filter(Boolean).map(String);
+      c.terms = c.terms || [];
+      c.paidOn = c.paidOn || "";
+      if (c.receipt === undefined) c.receipt = null;
+      c.renewals = Math.max(+c.renewals || 0, c.terms.length);
+    });
   },
 ];
 
@@ -5348,20 +5367,20 @@ function vWorkout() {
     ${card("span2", cardHead("Classes & packages", addBtn("Add package", "class-add")) + (state.workout.classes.length ? `
       <ul class="class-list">
         ${state.workout.classes.map(c => {
-          const used = (c.log || []).length, remaining = c.total - used, pct = Math.round(100 * used / c.total), doneAll = remaining <= 0;
+          const used = classUsed(c), pct = Math.round(100 * used / Math.max(1, c.total)), doneAll = classFull(c);
+          const last = classDates(c)[0];
           return `<li class="${doneAll ? "spent" : ""}">
             <span class="row-emoji">🎟️</span>
-            <span class="row-txt"><b>${esc(c.name)}</b><small>${used}/${c.total} sessions${c.price ? ` · ${money(c.price, c.cur)}` : ""}${used ? ` · last ${niceDate((c.log[c.log.length - 1]))}` : ""}</small>${barHtml(pct, doneAll ? "#e5484d" : "#f76b15")}</span>
+            <span class="row-txt open" data-action="class-open" data-id="${c.id}"><b>${esc(c.name)}</b><small><b class="class-frac ${doneAll ? "full" : ""}">${used} of ${c.total}</b> sessions${c.price ? ` · ${money(c.price, c.cur)}` : ""}${last ? ` · last ${esc(niceDate(last, { month: "short", day: "numeric" }))}` : ""}</small>${barHtml(pct, doneAll ? "#e5484d" : "#f76b15")}</span>
             <span class="pill-row">
               ${doneAll ? `<button class="btn tiny good" data-action="class-renew" data-id="${c.id}">Renew</button>` : `<button class="btn tiny" data-action="class-attend" data-id="${c.id}">+ Attend</button>`}
-              ${used ? `<button class="icon-btn ghost" data-action="class-undo" data-id="${c.id}" aria-label="Undo last">${I.chevL}</button>` : ""}
-              <button class="icon-btn ghost" data-action="class-edit" data-id="${c.id}" aria-label="Edit package">${I.edit}</button>
-              <button class="icon-btn ghost" data-action="class-del" data-id="${c.id}" aria-label="Delete package">${I.trash}</button>
+              <button class="icon-btn ghost" data-action="class-open" data-id="${c.id}" aria-label="Details for ${esc(c.name)}">${I.chevR}</button>
             </span>
           </li>`;
         }).join("")}
       </ul>
-      <p class="soft note">${I.spark} Total on classes: <b>${moneyTotal(sumByCur(state.workout.classes, c => (c.price || 0) * (1 + (c.renewals || 0)), c => c.cur))}</b> — this feeds the Finance section.</p>`
+      <p class="soft note">${I.spark} Total on classes, every term included: <b>${moneyTotal(sumByCur(state.workout.classes, classSpend, c => c.cur))}</b></p>
+      <p class="soft small" style="margin-top:6px">This feeds the Finance section. Tap a package for its session dates, payments and receipts.</p>`
       : emptyMsg("calendar", "Track class packages (e.g. 8 yoga sessions) so you know when to rebook.", addBtn("Add a package", "class-add"))))}
 
     ${card("span2", cardHead((isToday ? "Today's" : "That day's") + " sessions", addBtn("Log session", "session-add")) + dayNav("workout") + (daySessions.length ? `
@@ -5751,6 +5770,80 @@ function studySessionFormFields(s, date) {
     fld("What did you learn?", `<textarea name="learned" rows="2" maxlength="4000" placeholder="e.g. Dative after 'mit', 'nach', 'aus'">${esc(s.learned || "")}</textarea>`) +
     fld("Notes <small class=\"soft\">— optional</small>", `<textarea name="notes" rows="2" maxlength="4000" placeholder="anything worth keeping">${esc(s.notes || "")}</textarea>`);
   return head + moreBlock(rest, "What you studied");
+}
+
+/* One receipt slot — the photo of what you paid, kept with the term it paid for. */
+function receiptBlock(c, term) {
+  const owner = term || c;
+  const tAttr = term ? ` data-t="${term.id}"` : "";
+  if (owner.receipt) return `
+    <div class="media-grid">
+      <div class="media-item">
+        <span class="media-host" data-media="${owner.receipt.id}" data-media-kind="${owner.receipt.kind}"><span class="media-missing">loading…</span></span>
+        <button class="icon-btn ghost media-thumb-del" data-action="class-receipt-del" data-id="${c.id}"${tAttr} aria-label="Remove receipt">${I.x}</button>
+      </div>
+    </div>`;
+  return `<label class="btn tiny ghost upload-btn"><input type="file" accept="image/*" hidden data-change="class-receipt" data-id="${c.id}"${tAttr}><span>${I.upload}Attach receipt</span></label>`;
+}
+
+/* A list of dates, newest first. Deliberately plain: the question it answers is "when did I go?" */
+function classDateList(dates, c, removable) {
+  if (!dates.length) return `<p class="soft small">No sessions recorded in this term.</p>`;
+  return `<ol class="class-dates">${dates.map((d, i) => `<li>
+    <span class="cd-n">${dates.length - i}</span>
+    <span class="row-txt"><b>${esc(niceDate(d, { weekday: "short", month: "short", day: "numeric" }))}</b></span>
+    ${removable ? `<button class="icon-btn ghost" data-action="class-session-del" data-id="${c.id}" data-d="${esc(d)}" aria-label="Remove this session">${I.x}</button>` : ""}
+  </li>`).join("")}</ol>`;
+}
+
+/* The package sheet: how far through the term you are, every date you attended, what you paid and
+   the receipt for it — and the terms before this one, which renewing used to delete. */
+function openClassDetail(id) {
+  const c = classById(id);
+  if (!c) { closeModal(); return; }
+  const used = classUsed(c), pct = Math.round(100 * used / Math.max(1, c.total));
+  const full = classFull(c);
+  const lost = classLostTerms(c);
+  const terms = (c.terms || []).slice().reverse();     // most recent finished term first
+  return openModal(`
+    <header class="modal-head"><h3>🎟️ ${esc(c.name)}</h3><button type="button" class="icon-btn" data-action="modal-close" aria-label="Close">${I.x}</button></header>
+    <div class="modal-body">
+      <p class="class-count ${full ? "full" : ""}"><b>${used}</b> of <b>${c.total}</b> sessions${full ? " · term finished" : ` · ${classLeft(c)} left`}</p>
+      ${barHtml(pct, full ? "#e5484d" : "#f76b15")}
+
+      <div class="fld"><span>This term${c.start ? ` · from ${esc(niceDate(c.start, { month: "short", day: "numeric" }))}` : ""}</span>
+        ${classDateList(classDates(c), c, true)}
+        <div class="pill-row" style="margin-top:8px">
+          ${full
+            ? `<button class="btn good slim" data-action="class-renew" data-id="${c.id}">${I.check}Renew</button>`
+            : `<button class="btn primary slim" data-action="class-attend" data-id="${c.id}">${I.plus}Attended today</button>
+               <button class="btn ghost slim" data-action="class-attend-on" data-id="${c.id}">${I.calendar}Another day</button>`}
+        </div>
+      </div>
+
+      <div class="fld"><span>Payment</span>
+        <p class="soft small">${c.price ? `<b>${money(c.price, c.cur)}</b> for ${c.total} sessions${c.price && c.total ? ` · ${money(c.price / c.total, c.cur)} a session` : ""}` : "No price recorded for this term."}${c.paidOn ? ` · paid ${esc(niceDate(c.paidOn, { month: "short", day: "numeric" }))}` : ""}</p>
+        ${receiptBlock(c, null)}
+        <div class="pill-row" style="margin-top:8px"><button class="btn ghost slim" data-action="class-paid" data-id="${c.id}">${I.wallet}${c.price ? "Edit payment" : "Record payment"}</button></div>
+      </div>
+
+      ${terms.length ? `<div class="fld"><span>Earlier terms</span>
+        ${terms.map(t => `<div class="class-term">
+          <p class="soft small"><b>${(t.dates || []).length} of ${t.total} sessions</b>${t.start ? ` · ${esc(niceDate(t.start, { month: "short", day: "numeric" }))}` : ""}${t.end && t.end !== t.start ? ` – ${esc(niceDate(t.end, { month: "short", day: "numeric" }))}` : ""}${t.price ? ` · ${money(t.price, t.cur)}` : ""}</p>
+          ${classDateList((t.dates || []).slice().sort().reverse(), c, false)}
+          ${receiptBlock(c, t)}
+        </div>`).join("")}
+      </div>` : ""}
+
+      ${lost ? `<p class="soft note">${I.spark} ${lost} earlier term${lost > 1 ? "s" : ""} ${lost > 1 ? "were" : "was"} paid for before LifeHub kept session dates, so ${lost > 1 ? "their" : "its"} dates aren't recorded. They're counted in the total below, not forgotten.</p>` : ""}
+
+      <p class="soft note">${I.wallet} Total on this package: <b>${money(classSpend(c), c.cur)}</b> across ${1 + (c.renewals || 0)} term${(c.renewals || 0) ? "s" : ""}.</p>
+
+      <div class="pill-row">
+        <button class="btn ghost" data-action="class-edit" data-id="${c.id}">${I.edit}Edit package</button>
+        <button class="btn danger" data-action="class-del" data-id="${c.id}">${I.trash}Delete</button>
+      </div>
+    </div>`);
 }
 
 /* The session sheet: the record, its photos, and its error log. Mistakes are added and closed HERE
@@ -6853,11 +6946,55 @@ const usedCurrencies = () => Object.keys(sumByCur(state.finance.entries || [], e
 function pendingClassSpend() {
   return (state.workout.classes || []).filter(c => !state.finance.importedClasses.includes(c.id) && (c.price || 0) > 0);
 }
+/* ----- class packages -----
+   `log` holds the dates of the CURRENT term; `terms[]` holds the ones already finished, each with
+   its own dates, price and receipt. `renewals` counts every term ever paid for, so the difference
+   between it and terms.length is how many ran before LifeHub kept their dates. */
+const classById = (id) => (state.workout.classes || []).find(c => c.id === id) || null;
+const classUsed = (c) => (c.log || []).length;
+const classLeft = (c) => Math.max(0, (c.total || 0) - classUsed(c));
+const classFull = (c) => classUsed(c) >= (c.total || 0);
+/* the sessions of a term, newest first, with the untracked ones simply absent rather than invented */
+const classDates = (c) => (c.log || []).slice().sort().reverse();
+/* Terms whose dates predate this record-keeping. Derived, never stored — `renewals` stays the one
+   source of truth for how many terms were paid for. */
+const classLostTerms = (c) => Math.max(0, (c.renewals || 0) - (c.terms || []).length);
+/* What this package has cost in total. Exact for every term we actually have a price for; for the
+   terms that ran before terms[] existed it can only assume they cost what this one costs, which is
+   the same assumption the old `(1 + renewals) * price` made — but now only where it must. */
+function classSpend(c) {
+  return (c.price || 0) * (1 + classLostTerms(c))
+    + (c.terms || []).reduce((a, t) => a + (+t.price || 0), 0);
+}
+/* The ONE path that records attendance, so ticking from the card, from the detail sheet and
+   backfilling a date you missed can never drift apart. */
+function attendClass(id, date) {
+  const c = classById(id);
+  if (!c || classFull(c)) return false;
+  const d = date || todayIso();
+  if (d > todayIso()) { toast("You can't attend a class in the future."); return false; }
+  if ((c.log || []).includes(d)) { toast(`${c.name} is already ticked for ${niceDate(d, { month: "short", day: "numeric" })}.`); return false; }
+  c.log = c.log || [];
+  c.log.push(d);
+  if (d === todayIso()) addXp(10, c.name);
+  if (classFull(c)) remindRenewal(c);
+  save();
+  return true;
+}
+/* "remind me when all the sessions finish that I have to pay again".
+   A toast is not a reminder — it is gone the moment you look away. This writes a real task onto
+   today, which is the thing the app already surfaces, syncs and can notify you about. */
+function remindRenewal(c) {
+  const text = `Renew ${c.name} — ${c.total} of ${c.total} sessions used`;
+  const already = state.todos.some(td => !td.done && td.text === text);
+  if (!already) addTaskOn(text, todayIso(), { areaId: "finance", priority: "high" });
+  toast(`Last session of ${c.name} — a renewal task is on today 🔁`);
+}
 function vFinance() {
   const m = financeMonth();
   const entries = [...state.finance.entries].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).slice(0, 24);
   const pending = pendingClassSpend();
-  const pendingTot = sumByCur(pending, c => (c.price || 0) * (1 + (c.renewals || 0)), c => c.cur);
+  const pendingTot = sumByCur(pending, classSpend, c => c.cur);
   const trendCur = defaultCur(), others = usedCurrencies().filter(c => c !== trendCur);
   return `
   <div class="grid">
@@ -8021,9 +8158,50 @@ const ACTIONS = {
     fld("Class name", txt("name", "e.g. Yoga studio")) +
     `<div class="fld-row">${fld("Total sessions", `<input type="number" name="total" value="8" min="1">`)}${fld("Price paid", `<input type="number" name="price" value="0" min="0" step="any">`)}</div>` +
     `<div class="fld-row">${fld("Currency", curSelect())}${fld("Start date", `<input type="date" name="start" value="${todayIso()}">`)}</div>`, "class-add"),
-  "class-attend": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length < c.total) { c.log = c.log || []; c.log.push(todayIso()); addXp(10, c.name); save(); render(); if ((c.log.length) >= c.total) toast(`Last session of ${c.name} — time to renew 🔁`); } },
-  "class-undo": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c && (c.log || []).length) { c.log.pop(); save(); render(); } },
-  "class-renew": (el) => { const c = state.workout.classes.find(x => x.id === el.dataset.id); if (c) { c.renewals = (c.renewals || 0) + 1; c.log = []; c.start = todayIso(); save(); render(); toast(`${c.name} renewed`); } },
+  "class-open": (el) => openClassDetail(el.dataset.id),
+  /* Deliberately today, NOT the workout day cursor. The Classes card sits outside the day navigator
+     and its button says "Attended today", so reading the cursor would tick a day the button never
+     mentioned. Backfilling a date is a separate, explicit action — "Another day" in the sheet. */
+  "class-attend": (el) => { attendClass(el.dataset.id, todayIso()); },
+  /* backfilling a session you forgot to tick — the date comes from the row you pressed */
+  "class-attend-on": (el) => {
+    const c = classById(el.dataset.id); if (!c) return;
+    formModal(`Add a session · ${esc(c.name)}`,
+      fld("Date", `<input type="date" name="date" value="${esc(dayCursor("workout"))}" max="${todayIso()}" required>`) +
+      `<p class="soft note">${I.spark} ${classLeft(c)} of ${c.total} left in this term.</p>` +
+      `<input type="hidden" name="id" value="${c.id}">`, "class-attend-on", "Add");
+  },
+  "class-session-del": (el) => {
+    const c = classById(el.dataset.id); if (!c) return;
+    const i = (c.log || []).indexOf(el.dataset.d);
+    if (i >= 0) { c.log.splice(i, 1); save(); render(); openClassDetail(c.id); }
+  },
+  /* class-undo (pop the last session) is gone: the sheet removes a NAMED date instead, which is what
+     you actually want when the one you mis-ticked was not the most recent. */
+  "class-renew": (el) => {
+    const c = classById(el.dataset.id); if (!c) return;
+    formModal(`Renew · ${esc(c.name)}`,
+      `<div class="fld-row">${fld("Sessions in the new term", `<input type="number" name="total" value="${c.total}" min="1" required>`)}${
+        fld("Price paid", `<input type="number" name="price" value="${c.price || 0}" min="0" step="any">`)}</div>` +
+      `<div class="fld-row">${fld("Starts", `<input type="date" name="start" value="${todayIso()}">`)}${
+        fld("Paid on <small class=\"soft\">— optional</small>", `<input type="date" name="paidOn" value="${todayIso()}">`)}</div>` +
+      `<p class="soft note">${I.spark} The term you just finished is kept — its ${classUsed(c)} session dates and its receipt stay on this package.</p>` +
+      `<input type="hidden" name="id" value="${c.id}">`, "class-renew", "Renew");
+  },
+  "class-paid": (el) => {
+    const c = classById(el.dataset.id); if (!c) return;
+    formModal(`Payment · ${esc(c.name)}`,
+      `<div class="fld-row">${fld("Price paid", `<input type="number" name="price" value="${c.price || 0}" min="0" step="any">`)}${fld("Currency", curSelect(c.cur))}</div>` +
+      fld("Paid on <small class=\"soft\">— optional</small>", `<input type="date" name="paidOn" value="${esc(c.paidOn || "")}">`) +
+      `<input type="hidden" name="id" value="${c.id}">`, "class-paid", "Save");
+  },
+  "class-receipt-del": (el) => {
+    const c = classById(el.dataset.id); if (!c) return;
+    const t = el.dataset.t ? (c.terms || []).find(x => x.id === el.dataset.t) : c;
+    if (!t || !t.receipt) return;
+    dropMedia(t.receipt); t.receipt = null;
+    save(); render(); openClassDetail(c.id);
+  },
   "class-del": (el) => { deleteWithUndo(() => state.workout.classes, el.dataset.id, "Package deleted"); },
   "session-add": () => formModal("Log a session",
     fld("Type", `<select name="category">${WORKOUT_CATS.map(c => `<option>${c}</option>`).join("")}</select>`) +
@@ -8550,7 +8728,7 @@ const ACTIONS = {
   "fin-import-classes": () => {
     const pending = pendingClassSpend();
     pending.forEach(c => {
-      state.finance.entries.push({ id: uid(), date: c.start || todayIso(), type: "expense", amount: (c.price || 0) * (1 + (c.renewals || 0)), cur: CURRENCIES[c.cur] ? c.cur : defaultCur(), category: "Fitness", note: `${c.name} class package` });
+      state.finance.entries.push({ id: uid(), date: c.start || todayIso(), type: "expense", amount: classSpend(c), cur: CURRENCIES[c.cur] ? c.cur : defaultCur(), category: "Fitness", note: `${c.name} class package` });
       state.finance.importedClasses.push(c.id);
     });
     save(); render(); toast(`Imported ${pending.length} class ${pending.length > 1 ? "packages" : "package"} 💸`);
@@ -8749,7 +8927,34 @@ const SUBMITS = {
   "health-goals": (f) => { state.health.goals = { steps: +f.steps, water: +f.water, sleep: +f.sleep }; },
   "workout-add": (f) => { state.workout.plan.push(Object.assign({ id: uid() }, planFromForm(f))); },
   "workout-edit": (f) => { const p = state.workout.plan.find(x => x.id === f.id); if (p) Object.assign(p, planFromForm(f)); },
-  "class-add": (f) => { state.workout.classes.push({ id: uid(), name: f.name, total: Math.max(1, +f.total || 8), price: +f.price || 0, cur: CURRENCIES[f.cur] ? f.cur : defaultCur(), start: f.start || todayIso(), log: [], renewals: 0 }); },
+  "class-add": (f) => { state.workout.classes.push({ id: uid(), name: f.name, total: Math.max(1, +f.total || 8), price: +f.price || 0, cur: CURRENCIES[f.cur] ? f.cur : defaultCur(), start: f.start || todayIso(), log: [], renewals: 0, terms: [], paidOn: "", receipt: null }); },
+  "class-attend-on": (f) => { if (attendClass(f.id, f.date)) setTimeout(() => openClassDetail(f.id), 0); },
+  "class-paid": (f) => {
+    const c = classById(f.id); if (!c) return;
+    c.price = Math.max(0, +f.price || 0);
+    if (CURRENCIES[f.cur]) c.cur = f.cur;
+    c.paidOn = f.paidOn || "";
+    setTimeout(() => openClassDetail(c.id), 0);
+  },
+  /* Renewing ARCHIVES the finished term rather than deleting it. The old handler did `c.log = []`,
+     which threw away every session date of the package you had just paid off. */
+  "class-renew": (f) => {
+    const c = classById(f.id); if (!c) return;
+    const dates = (c.log || []).slice().sort();
+    c.terms = c.terms || [];
+    c.terms.push({ id: uid(), start: c.start || "", end: dates[dates.length - 1] || c.start || "",
+      total: c.total, dates, price: +c.price || 0, cur: c.cur, paidOn: c.paidOn || "",
+      receipt: c.receipt || null });
+    c.renewals = (c.renewals || 0) + 1;
+    c.log = [];
+    c.receipt = null;                       // the new term gets its own receipt
+    c.total = Math.max(1, +f.total || c.total);
+    c.price = Math.max(0, +f.price || 0);
+    c.start = f.start || todayIso();
+    c.paidOn = f.paidOn || "";
+    toast(`${c.name} renewed — the last term is kept`);
+    setTimeout(() => openClassDetail(c.id), 0);
+  },
   "session-add": (f) => { const d = dayCursor("workout"); const sess = bornSession({ date: d, category: f.category || "Strength", note: f.note || "" }); state.workout.sessions.push(sess); (state.workout.log[d] = state.workout.log[d] || []).push(sess.id); if (d === todayIso()) addXp(20, "Workout"); },
   "session-note": (f) => { const s = state.workout.sessions.find(x => x.id === f.id); if (s) s.note = f.note; },
   "session-report": (f) => {
@@ -9115,6 +9320,16 @@ const CHANGES = {
   "study-media": (el) => {
     const s = studySessionById(el.dataset.id); if (!s) return;
     storeMediaFile(el.files[0], (r) => { s.media = s.media || []; s.media.push(r); save(); render(); openStudySession(s.id); toast("Added to this session 📎"); });
+  },
+  "class-receipt": (el) => {
+    const c = classById(el.dataset.id); if (!c) return;
+    const target = el.dataset.t ? (c.terms || []).find(x => x.id === el.dataset.t) : c;
+    if (!target) return;
+    storeMediaFile(el.files[0], (ref) => {
+      if (target.receipt) dropMedia(target.receipt);   // one receipt per term, not a pile
+      target.receipt = ref;
+      save(); render(); openClassDetail(c.id); toast("Receipt attached 🧾");
+    });
   },
   "meal-photo-add": (el) => {
     /* the day on screen, not today — reading todayIso() here filed every photo under today however
