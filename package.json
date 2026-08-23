@@ -1,0 +1,13 @@
+{
+  "name": "lifehub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LifeHub — a dependency-free life OS. This file exists only so the tests can run; the app itself has no build step and no runtime dependencies.",
+  "scripts": {
+    "test": "node tests/run.js",
+    "browser": "playwright-core install chromium"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.48.0"
+  }
+}
