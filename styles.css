@@ -889,7 +889,31 @@ input[type="color"] { width: 100%; height: 42px; border: 1px solid var(--line); 
 .class-list li:last-child { border-bottom: 0; }
 .class-list li.spent .row-txt b { color: var(--ink-2); }
 .class-list .row-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.class-list .row-txt b { font-size: 14.5px; font-weight: 600; }
+/* The name and its meta line each stay on ONE line and ellipsize. Letting them wrap turned a phone
+   row into five stacked lines and truncated the name mid-word, which is worse than a clean cut. */
+.class-list .row-txt b { font-size: 14.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.class-list .row-txt small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.class-list .pill-row { flex: 0 0 auto; }
+/* "5 of 8" — the number you actually look for, so it reads as a number and not as prose */
+.class-frac { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 700; }
+.class-frac.full { color: #e5484d; }
+
+/* ---------- a class package's own sheet ---------- */
+.class-count { font-size: 15px; margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
+.class-count b { font-size: 20px; font-weight: 700; }
+.class-count.full { color: #e5484d; }
+.class-dates { list-style: none; display: flex; flex-direction: column; margin: 6px 0 0; padding: 0; }
+.class-dates li { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--line); }
+.class-dates li:last-child { border-bottom: 0; }
+.class-dates .cd-n {
+  flex: 0 0 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--line);
+  font-size: 11.5px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
+.class-dates .row-txt b { font-size: 13.5px; font-weight: 500; }
+.class-term { background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; }
+.class-term:last-child { margin-bottom: 0; }
+.class-term > p:first-child { margin: 0 0 2px; }
 
 /* ---------- workout sessions ---------- */
 .session-list { display: flex; flex-direction: column; gap: 12px; }
@@ -900,6 +924,9 @@ input[type="color"] { width: 100%; height: 42px; border: 1px solid var(--line); 
 .session-note { font-size: 13.5px; color: var(--ink-2); margin: 8px 0; white-space: pre-wrap; }
 .session .media-grid { margin: 8px 0; }
 .upload-btn { cursor: pointer; margin-top: 4px; }
+/* the icon and the label live in ONE span (the file input is the other child), so .btn's own gap
+   never applies between them — without this they sit flush, unlike every other button */
+.upload-btn > span { display: inline-flex; align-items: center; gap: 6px; }
 
 /* exercises & sets */
 .ex-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }

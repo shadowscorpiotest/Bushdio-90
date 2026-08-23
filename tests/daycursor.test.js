@@ -252,14 +252,13 @@ async function run() {
     chk("...and those wrappers are still there, so this guard is testing something",
       hits.length === NAMED_TODAY.length, `${hits.length} of ${NAMED_TODAY.length}`);
 
-    /* Dead handlers are how a fixed bug comes back: nobody calls them, so nobody notices they were
-     * never fixed, until a renderer starts emitting the action again. */
-    const orphans = await page.evaluate(() => {
-      const emitted = new Set();
-      /* every data-action the source can produce, read from the app's own text */
-      return { defined: Object.keys(ACTIONS).length, emitted: emitted.size };
-    });
-    chk("the action map is populated", orphans.defined > 50, String(orphans.defined));
+    /* There is no automated check here for dead handlers, and that is deliberate. Two attempts at
+     * one — matching data-action="…" in the source, then counting each key's occurrences — both
+     * produced dozens of false positives, because actions are emitted through helpers (addBtn),
+     * built from variables, and because naively stripping /*…*\/ comments over-matches on the many
+     * strings in this file that contain those characters. A guard I cannot trust is worse than
+     * none: it would be silenced with an allowlist within a week. Dead handlers get found by
+     * reading the code, as ag-meal and class-undo both were. */
   } finally {
     await browser.close();
   }
