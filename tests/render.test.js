@@ -55,6 +55,49 @@ async function run() {
     chk("switching tabs writes nothing", writes.tabWrites === 0, String(writes.tabWrites));
     chk("...while a genuine change still saves", writes.realWrite > 0, String(writes.realWrite));
 
+    section("The one write a render is allowed to make, and its limit");
+    /* Being honest about what the block above proves. `render()` calls `checkMissions()`, which
+     * claims any daily mission you have just completed and awards its XP — and awarding XP saves.
+     * So a render is not unconditionally pure: the FIRST one after a mission becomes claimable does
+     * write. The counter above never sees it, because `go(v)` has already rendered once and settled
+     * the day before the counting starts.
+     *
+     * That single write is the intended behaviour — you did earn the mission. The regression worth
+     * guarding is the old one, where EVERY render wrote and merely switching tabs re-uploaded the
+     * whole encrypted database. So the invariant to pin is not "a render never writes", it is
+     * "a render settles the day once, and is then silent no matter how often you look".
+     */
+    const missions = await page.evaluate(async () => {
+      state = migrate(defaultState());
+      state.profile.onboarded = true;
+      state.habits = [{ id: "h1", name: "Read", emoji: "📖", kind: "", type: "build", color: "",
+        cadence: { mode: "daily" }, goalIds: [], groupId: "", order: 1, archived: false,
+        archivedOn: "", log: {} }];
+      save();
+      checkMissions();                         // settle whatever the fresh profile already qualifies for
+
+      const real = Storage.prototype.setItem;
+      let n = 0;
+      Storage.prototype.setItem = function (...a) { n++; return real.apply(this, a); };
+
+      /* complete a mission WITHOUT rendering, so the claim is still pending */
+      setCursor("habits", todayIso());
+      toggleHabit("h1");
+      const base = n, xp0 = state.xp;
+
+      render();
+      const first = n - base, earned = state.xp - xp0;
+      render(); render(); render();
+      const rest = n - base - first;
+
+      Storage.prototype.setItem = real;
+      return { first, earned, rest };
+    });
+    chk("the render that claims a mission does write, and does award the XP",
+      missions.first > 0 && missions.earned > 0, `${missions.first} writes, +${missions.earned} XP`);
+    chk("...and every render after it is silent — looking is not doing",
+      missions.rest === 0, String(missions.rest));
+
     section("Every view renders on a seeded profile");
     const seeded = await page.evaluate(async (names) => {
       const out = {};

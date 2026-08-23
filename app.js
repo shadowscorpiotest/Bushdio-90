@@ -3770,8 +3770,13 @@ function swapOrder(list, id, dir) {
   list[i].order = list[j].order; list[j].order = a;
   return true;
 }
+/* The task's OWN day, not today. Earlier/Later live in the task sheet, which opens from any day —
+   so reading todayIso() here meant the task simply was not in the list being reordered, swapOrder
+   returned false, and the button did nothing at all. Dragging was always right, because it reorders
+   by the ids the list is actually showing; this is what makes the two paths agree, as claimed. */
 function moveTask(id, dir) {
-  if (swapOrder(tasksOn(todayIso()).filter(td => !td.done), id, dir)) { save(); render(); }
+  const td = state.todos.find(x => x.id === id); if (!td) return;
+  if (swapOrder(tasksOn(td.date || todayIso()).filter(x => !x.done), id, dir)) { save(); render(); }
 }
 function moveHabit(id, dir) {
   const d = dayCursor("habits");
@@ -7793,10 +7798,9 @@ const ACTIONS = {
     if (h && h.kind === "workout") { setCursor("workout", d); go("workout"); toast("Log your workout here — it ticks the habit 💪"); return; }
     setCursor("habits", d); toggleHabit(el.dataset.id); if (d === todayIso()) syncHabitToTask(el.dataset.id); render();
   },
-  "ag-meal": (el) => {
-    const m = mealsOn(todayIso()).find(x => x.id === el.dataset.id); if (!m) return;
-    m.eaten = !m.eaten; if (m.eaten) addXp(5, "Meal logged"); save(); render();
-  },
+  /* ag-meal used to tick a meal straight from the agenda. It was removed when the agenda's meal row
+     became a link to Health, and the handler was left behind reading todayIso() — so had anything
+     ever re-emitted it, it would have ticked the wrong day. Deleted rather than fixed. */
   "ag-uni": (el) => {
     const k = learnTasks().find(x => x.id === el.dataset.id);
     if (!k) return;
@@ -7817,7 +7821,10 @@ const ACTIONS = {
      button — it says so and leaves the existing three alone. */
   "task-pin": (el) => {
     const td = state.todos.find(x => x.id === el.dataset.id); if (!td) return;
-    if (!td.focus && tasksOn(todayIso()).filter(x => x.focus && !x.done && !x.hard).length >= FOCUS_MAX) {
+    /* count against the task's OWN day. The button only renders on today, so this is the same number
+       either way — but reading todayIso() here would make the handler silently wrong the moment the
+       pin appears anywhere else, which is how this bug class keeps coming back. */
+    if (!td.focus && tasksOn(td.date || todayIso()).filter(x => x.focus && !x.done && !x.hard).length >= FOCUS_MAX) {
       toast(`Today's focus holds ${FOCUS_MAX}. Unpin one first.`); return;
     }
     td.focus = !td.focus;
@@ -8272,8 +8279,11 @@ const ACTIONS = {
   "course-open": (el) => openCourseDetail(el.dataset.id),
   "course-study": (el) => {
     const c = courseById(el.dataset.id); if (!c) return;
-    formModal(`Study · ${c.name}`,
-      `<div class="fld-row">${fld("Minutes", num("mins", 60, 1))}${fld("Date", `<input type="date" name="date" value="${todayIso()}">`)}</div>` +
+    /* the day Learning is showing, not today — the page has a cursor, and defaulting to today filed
+       every retro-logged minute under the wrong date without ever saying so */
+    const d = dayCursor("learning");
+    formModal(`Study · ${c.name}${d === todayIso() ? "" : ` · ${niceDate(d, { month: "short", day: "numeric" })}`}`,
+      `<div class="fld-row">${fld("Minutes", num("mins", 60, 1))}${fld("Date", `<input type="date" name="date" value="${esc(d)}">`)}</div>` +
       `<p class="soft note">${I.spark} These minutes go into your monthly totals <b>and</b> onto this course.</p>` +
       `<input type="hidden" name="cid" value="${c.id}">`, "course-study", "Log it");
   },
@@ -8690,7 +8700,6 @@ function ensureJournalOn(d) {
   if (!e) { e = { id: uid(), date: d, text: "", mood: "", tags: [] }; state.journal.push(e); }
   return e;
 }
-function ensureJournal() { return ensureJournalOn(todayIso()); }
 
 /* form submits */
 const SUBMITS = {
