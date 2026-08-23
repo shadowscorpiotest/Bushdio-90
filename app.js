@@ -227,7 +227,7 @@ let state = null;
 /* Transient UI state — deliberately NOT persisted and NOT synced. Which day you're looking at and
    which tab is open are per-device, per-moment; keeping them in `state` meant switching a tab wrote
    to disk and uploaded the whole encrypted database. */
-const ui = { cursor: {}, readingTab: "current", mediaTab: "watchlist" };
+const ui = { cursor: {}, readingTab: "current", mediaTab: "watchlist", finScope: "month" };
 
 /* set when startup couldn't read saved data — blocks cloud pushes so we never overwrite good data */
 let loadIssue = null;
@@ -6917,6 +6917,40 @@ function moneyTotal(sums, cls) {
 /* ---------- finance ---------- */
 const EXPENSE_CATS = ["Food", "Health", "Fitness", "Subscriptions", "Transport", "Bills", "Shopping", "Fun", "Education", "Other"];
 const INCOME_CATS = ["Salary", "Freelance", "Gift", "Refund", "Other"];
+/* A colour per category, so a row is recognisable before you have read its label — and so the same
+   category is the same colour everywhere it appears. Chosen to stay distinguishable from each other
+   at small sizes and to survive the dark theme; "Other" is deliberately grey so it never looks like
+   a category you chose. */
+const FIN_CAT_COLORS = {
+  Food: "#f76b15", Health: "#e5484d", Fitness: "#f5a524", Subscriptions: "#8e4ec6",
+  Transport: "#0091ff", Bills: "#3e63dd", Shopping: "#d6409f", Fun: "#e93d82",
+  Education: "#12a594", Salary: "#2f9e6f", Freelance: "#30a46c", Gift: "#7c66dc",
+  Refund: "#00a2c7", Other: "#8b8d98",
+};
+const catColor = (name) => FIN_CAT_COLORS[name] || FIN_CAT_COLORS.Other;
+
+/* What each category has cost, bucketed per currency because dollars and toman cannot share a bar.
+   `scope` is "month" or "all" — "how much have I spent on this so far" means both, depending on the
+   day you ask, so the card offers the choice rather than picking for you. */
+function spendByCategory(scope) {
+  const mk = monthKey();
+  const rows = (state.finance.entries || []).filter(e =>
+    e.type !== "income" && (scope === "all" || (e.date || "").slice(0, 7) === mk));
+  const byCur = {};
+  rows.forEach(e => {
+    const c = CURRENCIES[e.cur] ? e.cur : defaultCur();
+    const cat = EXPENSE_CATS.includes(e.category) ? e.category : "Other";
+    const bucket = byCur[c] = byCur[c] || { total: 0, n: 0, cats: {} };
+    const amt = +e.amount || 0;
+    bucket.total += amt; bucket.n++;
+    const k = bucket.cats[cat] = bucket.cats[cat] || { name: cat, amount: 0, n: 0 };
+    k.amount += amt; k.n++;
+  });
+  Object.keys(byCur).forEach(c => {
+    byCur[c].rows = Object.values(byCur[c].cats).sort((a, b) => b.amount - a.amount);
+  });
+  return byCur;
+}
 /* Per currency, never one merged number — see sumByCur(). */
 function financeMonth(mk) {
   mk = mk || monthKey();
@@ -7020,10 +7054,12 @@ function vFinance() {
       <p class="soft">You've got <b>${moneyLine(pendingTot)}</b> of class-package spend not yet in Finance.</p>
       <div class="pill-row"><button class="btn primary slim" data-action="fin-import-classes">${I.wallet}Import ${pending.length} class ${pending.length > 1 ? "packages" : "package"}</button></div>`) : ""}
 
+    ${spendCard()}
+
     ${card("span2", cardHead("Recent activity", addBtn("Add", "fin-expense")) + (entries.length ? `
       <ul class="fin-list">
         ${entries.map(e => `<li>
-          <span class="fin-ic ${e.type}">${e.type === "income" ? "↑" : "↓"}</span>
+          <span class="fin-ic ${e.type}" style="--a:${cssVar(catColor(e.category), FIN_CAT_COLORS.Other)}">${e.type === "income" ? "↑" : "↓"}</span>
           <span class="row-txt"><b>${esc(e.category || (e.type === "income" ? "Income" : "Expense"))}</b><small>${e.note ? esc(e.note) + " · " : ""}${niceDate(e.date)}</small></span>
           <b class="fin-amt ${e.type === "income" ? "pos" : "neg"}">${e.type === "income" ? "+" : "−"}${money(e.amount, e.cur)}</b>
           <button class="icon-btn ghost" data-action="fin-edit" data-id="${e.id}" aria-label="Edit entry">${I.edit}</button>
@@ -7032,6 +7068,37 @@ function vFinance() {
       </ul>` : emptyMsg("wallet", "Log income and expenses to see your money at a glance.", addBtn("Add an expense", "fin-expense"))))}
   </div>`;
 }
+/* "how much I spend on each category so far" — biggest first, with the share each one takes.
+   One block per currency: a bar comparing dollars against toman would be a picture of nothing. */
+function spendCard() {
+  const scope = ui.finScope === "all" ? "all" : "month";
+  const byCur = spendByCategory(scope);
+  const curs = Object.keys(byCur).filter(c => byCur[c].total > 0);
+  /* The switch goes on its own row rather than into the card header. At 390px a title plus two
+     labelled buttons cannot share a line — the heading broke as "Where it / goes" and the buttons
+     as "This / month". */
+  const head = cardHead("Where it goes") + `
+    <div class="seg seg-row">
+      <button type="button" class="seg-btn ${scope === "month" ? "on" : ""}" data-action="fin-scope" data-v="month">This month</button>
+      <button type="button" class="seg-btn ${scope === "all" ? "on" : ""}" data-action="fin-scope" data-v="all">All time</button>
+    </div>`;
+  if (!curs.length) return card("span2", head + `<p class="soft small" style="padding:6px 2px">Nothing spent ${scope === "all" ? "yet" : "this month"} — log an expense and this fills in by category.</p>`);
+  return card("span2", head + curs.map(c => {
+    const b = byCur[c];
+    return `
+    ${curs.length > 1 ? `<p class="soft small cat-cur">${esc(CURRENCIES[c].name)}</p>` : ""}
+    <ul class="cat-list">
+      ${b.rows.map(r => `<li>
+        <span class="cat-dot" style="--a:${cssVar(catColor(r.name), FIN_CAT_COLORS.Other)}"></span>
+        <span class="row-txt"><b>${esc(r.name)}</b><small>${r.n} ${r.n === 1 ? "entry" : "entries"} · ${Math.round(100 * r.amount / b.total)}%</small></span>
+        <b class="cat-amt">${money(r.amount, c)}</b>
+      </li>
+      <li class="cat-bar-row"><span class="cat-bar"><i style="width:${Math.max(1, Math.round(100 * r.amount / b.total))}%;--a:${cssVar(catColor(r.name), FIN_CAT_COLORS.Other)}"></i></span></li>`).join("")}
+    </ul>
+    <p class="soft note">${b.n} ${b.n === 1 ? "expense" : "expenses"} ${scope === "all" ? "in total" : "this month"} · <b>${money(b.total, c)}</b></p>`;
+  }).join(""));
+}
+
 function finEntryForm(type, presetAmount, presetNote, presetCat) {
   const cats = type === "income" ? INCOME_CATS : EXPENSE_CATS;
   formModal(type === "income" ? "Add income" : "Add expense",
@@ -8724,6 +8791,8 @@ const ACTIONS = {
   /* finance */
   "fin-income": () => finEntryForm("income"),
   "fin-expense": () => finEntryForm("expense"),
+  /* a view preference, not data — it lives in `ui` so switching it never marks the cloud dirty */
+  "fin-scope": (el) => { ui.finScope = el.dataset.v === "all" ? "all" : "month"; render(); },
   "fin-del": (el) => { deleteWithUndo(() => state.finance.entries, el.dataset.id, "Entry deleted"); },
   "fin-import-classes": () => {
     const pending = pendingClassSpend();
