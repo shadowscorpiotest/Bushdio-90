@@ -17,24 +17,61 @@ const APP = "file://" + path.join(ROOT, "index.html");
  * so it can never land in a commit. */
 const ARTIFACTS = path.join(__dirname, ".artifacts");
 
-/* Where a Chromium actually is. Playwright keeps browsers in a versioned directory whose name
- * changes with every release, so we look for one rather than naming a build that will be wrong in a
- * month. Order: an explicit override, this container's PLAYWRIGHT_BROWSERS_PATH, then the default
- * cache that `playwright-core install` writes to on CI. */
-const BIN = [
-  "chrome-linux/chrome",
-  "chrome-linux/headless_shell",
-  "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-  "chrome-win/chrome.exe",
-];
+/* Where a Chromium actually is.
+ *
+ * Playwright keeps browsers in a versioned directory, and the layout INSIDE that directory is not
+ * stable either: builds up to ~1194 unpack to `chrome-linux/chrome`, while newer ones ship Chrome
+ * for Testing as `chrome-linux64/chrome`. A hardcoded list of relative paths gets this wrong every
+ * time the upstream layout moves — it already did, silently passing here and failing on CI.
+ *
+ * So we ask, in order:
+ *   1. an explicit override, for anyone with their own build;
+ *   2. playwright-core itself, which knows the exact path for the version installed alongside it —
+ *      but only if that path really exists, since a preinstalled container browser is often a
+ *      different build number than the npm package expects;
+ *   3. a search of the browser caches that looks for a FILE BY NAME at any depth, so it does not
+ *      care what the enclosing folder is called this year.
+ */
+const BIN_NAMES = ["chrome", "headless_shell", "chrome-headless-shell", "Chromium", "chrome.exe"];
+
+/* the versioned dirs hold a handful of entries; a depth cap keeps this from walking a whole profile */
+function findBinary(dir, depth = 0) {
+  if (depth > 4) return null;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  for (const e of entries) {
+    if (e.isFile() && BIN_NAMES.includes(e.name)) return path.join(dir, e.name);
+  }
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      const hit = findBinary(path.join(dir, e.name), depth + 1);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/* filled in by findExec, so a failure can report where it looked instead of just "not found" */
+const SEARCHED = [];
+
 function findExec() {
   if (process.env.LIFEHUB_CHROME) return process.env.LIFEHUB_CHROME;
+
+  try {
+    const p = require("playwright-core").chromium.executablePath();
+    SEARCHED.push(`playwright-core expects ${p}${fs.existsSync(p) ? "" : " (missing)"}`);
+    if (p && fs.existsSync(p)) return p;
+  } catch (e) {
+    SEARCHED.push("playwright-core could not name a browser: " + e.message.split("\n")[0]);
+  }
+
   const roots = [
     process.env.PLAYWRIGHT_BROWSERS_PATH,
     path.join(os.homedir(), ".cache/ms-playwright"),
     path.join(os.homedir(), "Library/Caches/ms-playwright"),
     path.join(process.env.LOCALAPPDATA || "", "ms-playwright"),
   ].filter(Boolean);
+  roots.forEach((r) => SEARCHED.push(`${r}${fs.existsSync(r) ? "" : " (no such directory)"}`));
   const dirs = [];
   for (const r of roots) {
     if (!fs.existsSync(r)) continue;
@@ -45,9 +82,9 @@ function findExec() {
   /* prefer a full chromium over the headless shell: the shell cannot do everything, and a suite that
    * needs a real browser should not fail mysteriously */
   dirs.sort((a, b) => (/headless/.test(a) ? 1 : 0) - (/headless/.test(b) ? 1 : 0));
-  for (const d of dirs) for (const bin of BIN) {
-    const p = path.join(d, bin);
-    if (fs.existsSync(p)) return p;
+  for (const d of dirs) {
+    const hit = findBinary(d);
+    if (hit) return hit;
   }
   return null;
 }
@@ -99,4 +136,4 @@ async function noOverflow(page, chk, label) {
   await page.setViewportSize({ width: 390, height: 900 });
 }
 
-module.exports = { ROOT, APP, ARTIFACTS, EXEC, harness, open, noOverflow };
+module.exports = { ROOT, APP, ARTIFACTS, EXEC, SEARCHED, harness, open, noOverflow };

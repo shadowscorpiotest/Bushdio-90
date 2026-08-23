@@ -7,11 +7,13 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { EXEC } = require("./_env.js");
+const { EXEC, SEARCHED } = require("./_env.js");
 
 if (!EXEC) {
   console.error(
-    "\nNo Chromium found. Install one:\n" +
+    "\nNo Chromium found. Looked in:\n" +
+    SEARCHED.map((s) => "    " + s).join("\n") +
+    "\n\nInstall one:\n" +
     "    npx playwright-core install chromium\n" +
     "  or point at an existing binary:\n" +
     "    LIFEHUB_CHROME=/path/to/chrome npm test\n"
