@@ -1,0 +1,33 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # no lockfile is committed (one dev dependency, no app dependencies), so `npm install`
+      # rather than `npm ci`
+      - run: npm install --no-audit --no-fund
+      # the browser is not vendored; fetch one into the default playwright cache, which
+      # tests/_env.js knows how to find
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm test
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-artifacts
+          path: tests/.artifacts
+          if-no-files-found: ignore
+          retention-days: 7
