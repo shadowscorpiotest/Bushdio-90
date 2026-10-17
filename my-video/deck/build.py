@@ -88,6 +88,13 @@ def add_autoplay(src, dst, durations_ms):
             if m:
                 xml = data.decode("utf8")
                 spid = re.search(r'<p:cNvPr id="(\d+)" name="clip"', xml).group(1)
+                # pptxgenjs gives the overlay the video's shape id; ids must be unique per slide
+                xml = re.sub(
+                    r'<p:cNvPr id="\d+" name="click-catcher">',
+                    f'<p:cNvPr id="{int(spid) + 1}" name="click-catcher">',
+                    xml,
+                )
+                xml = xml.replace("<a:ln></a:ln>", "<a:ln><a:noFill/></a:ln>")
                 xml = re.sub(r"<p:timing>.*?</p:timing>", "", xml, flags=re.S)
                 timing = TIMING.format(spid=spid, dur=durations_ms[int(m.group(1)) - 1])
                 xml = xml.replace("</p:clrMapOvr>", "</p:clrMapOvr>" + timing, 1)

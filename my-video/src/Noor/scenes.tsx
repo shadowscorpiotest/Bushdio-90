@@ -22,6 +22,7 @@ import {
   SearchScreen,
   ShotScreen,
   StepShot,
+  StepSwitch,
   TafsirReadScreen,
 } from "./screens";
 
@@ -429,7 +430,7 @@ export const MethodScene: React.FC = () => {
   const steps: { icon: IconName; title: string; desc: string }[] = [
     { icon: "search", title: "یافتن آیات", desc: "جستجوی هوشمند و مراجعه به «فرهنگ موضوعی»" },
     { icon: "star", title: "گردآوری آیات", desc: "دسته‌بندی آیات در «علاقه‌مندی‌ها» و یادداشت‌نویسی" },
-    { icon: "layers", title: "مطالعه‌ی تفاسیر", desc: `مقایسه‌ی ${fa(11)} تفسیر شیعه و سنی، حتی بدون اینترنت` },
+    { icon: "layers", title: "مطالعه‌ی تفاسیر", desc: "مقایسه‌ی تفاسیر و روایات در «پنل آیه»" },
     { icon: "sparkles", title: "هوش مصنوعی", desc: "گفتگوی هوشمند با تفاسیر و کشف روایات مرتبط" },
   ];
   const line = interpolate(
@@ -500,27 +501,6 @@ export const MethodScene: React.FC = () => {
   );
 };
 
-// Phone screens that crossfade at each click of the practical example
-const ScreenSwitch: React.FC<{ screens: { from: number; el: React.ReactNode }[] }> = ({ screens }) => {
-  const frame = useCurrentFrame();
-  return (
-    <>
-      {screens.map((s, i) => {
-        const next = screens[i + 1];
-        const fadeIn = i === 0 ? 1 : interpolate(frame, [s.from, s.from + 12], [0, 1], clamp);
-        const fadeOut = next ? interpolate(frame, [next.from, next.from + 12], [1, 0], clamp) : 1;
-        const o = Math.min(fadeIn, fadeOut);
-        if (o <= 0) return null;
-        return (
-          <div key={i} style={{ position: "absolute", inset: 0, opacity: o }}>
-            {s.el}
-          </div>
-        );
-      })}
-    </>
-  );
-};
-
 export const ExampleScene: React.FC = () => {
   const frame = useCurrentFrame();
   const at = useAt();
@@ -534,7 +514,7 @@ export const ExampleScene: React.FC = () => {
   return (
     <PhoneLayout
       screen={
-        <ScreenSwitch
+        <StepSwitch
           screens={[
             {
               from: 0,
@@ -659,10 +639,10 @@ export const CritiqueScene: React.FC = () => {
       icon: "check",
       color: "#7fd8a4",
       items: [
-        `محتوای جامع: ${fa(28)} دوره‌ی قرائت، ${fa(11)} تفسیر آفلاین، ${fa(122)} ترجمه`,
-        "ابزارهای پژوهشی: جستجوی هوشمند، فرهنگ موضوعی، هوش مصنوعی",
-        "تولید مرکزی معتبر و باسابقه در علوم اسلامی",
-        "سه بستر و پنج زبان؛ مناسب عموم و پژوهشگران",
+        `محتوای جامع: ${fa(28)} دوره‌ی قرائت، ${fa(152)} ترجمه، ${fa(416)} تفسیر`,
+        "ابزارهای پژوهشی: پنل آیه، فرهنگ موضوعی، هوش مصنوعی",
+        `استقبال کاربران: بیش از ${fa(420)} هزار نصب و امتیاز ۴٫۸`,
+        "تولید مرکز نور؛ سه بستر و پنج زبان",
       ],
     },
     {

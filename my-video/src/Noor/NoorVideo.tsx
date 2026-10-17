@@ -21,19 +21,11 @@ import {
   QuoteScene,
   WhyScene,
 } from "./scenes";
-import {
-  Box,
-  SHOTS,
-  SearchStepScreen,
-  StepShot,
-  SuraNamehScreen,
-  TafsirScreen,
-  WordsScreen,
-} from "./screens";
+import { AIScreen, Box, RecSteps, SHOTS, StepShot, SuraNamehScreen } from "./screens";
 import deck from "./deck.json";
 
-// Sources: the user's screenshots of the current app, Rahavard-e Noor no. 83
-// ("New features of the Quran Noor mobile app") and noorsoft.org (translation count).
+// Sources: the user's screenshots and screen recordings of the current app (v5.8.3) and
+// Rahavard-e Noor no. 83 ("New features of the Quran Noor mobile app").
 // Spotlight boxes are in each screenshot's basis units (see SHOTS); one per bullet, null keeps the last.
 const row = (y: number, h = 112): Box => ({ x: 30, y, w: 865, h });
 
@@ -82,16 +74,26 @@ const features: Feature[] = [
   {
     id: "reciters",
     icon: "headphones",
-    title: "قاریان و قرائت‌ها",
-    short: "قاریان",
+    title: "تلاوت و قاریان",
+    short: "تلاوت و قاریان",
     subtitle: "تلاوت آیات با صدای قاریان برجسته",
     bullets: [
-      `${fa(28)} دوره‌ی کامل قرائت`,
-      "در قالب‌های ترتیل، تحقیق و تحدیر",
-      "دانلود یک‌جا یا تک‌تک سوره‌ها",
-      "امکان حذف قرائت‌های دانلودشده",
+      `${fa(28)} دوره‌ی کامل قرائت، با دنبال‌کردن هم‌زمان متن`,
+      "انتخاب قاری در قالب‌های ترتیل، تحقیق و تحدیر",
+      "دانلود یا حذف قرائت‌ها در «مدیریت دانلودها»",
+      "پخش بازه‌ای: آیه، سوره، جزء، حزب یا صفحه",
     ],
-    screen: <StepShot shot={SHOTS.readingSheet} boxes={[row(1310, 120), null, row(1042), null]} />,
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v2", from: 25, to: 30, rate: 1.25 },
+          { v: "v2", from: 34.5, to: 37.2 },
+          { v: "v2", from: 63.6, to: 69.4, rate: 1.5 },
+          { v: "v2", from: 70.6, to: 72.2 },
+          { v: "v2", from: 72.6, to: 75.5 },
+        ]}
+      />
+    ),
     stat: { value: fa(28), label: "دوره‌ی قرائت" },
   },
   {
@@ -103,7 +105,7 @@ const features: Feature[] = [
     bullets: [
       "۴ حالت پخش: متن، ترجمه یا هر دو به‌ترتیب دلخواه",
       `ترجمه‌ی گویای فارسی (${fa(2)} دوره‌ی کامل)`,
-      `سرعت پخش ${fa("0.5")} تا ${fa(2)} برابر و تکرار آیه تا ${fa(100)} بار`,
+      `سرعت پخش ۰٫۵ تا ${fa(2)} برابر و تکرار آیه تا ${fa(100)} بار`,
       "پخش دعای آیات سجده‌دار",
     ],
     screen: (
@@ -115,47 +117,71 @@ const features: Feature[] = [
     id: "translate",
     icon: "languages",
     title: "ترجمه",
-    short: "ترجمه‌ها",
-    subtitle: "ترجمه‌ی دلخواه، ذیل هر آیه",
+    short: "ترجمه",
+    subtitle: "با لمس هر آیه، «پنل آیه» باز می‌شود",
     bullets: [
-      `${fa(122)} ترجمه به بیش از ${fa(30)} زبان زنده`,
+      "ترجمه‌های منتخب هر آیه، همراه با منبع",
+      `${fa(152)} ترجمه؛ قابل دانلود و انتخاب`,
       "نمایش ترجمه‌ی منتخب زیر هر آیه",
-      "پخش تلاوت همراه با متن و ترجمه",
     ],
     screen: (
-      <StepShot
-        shot={SHOTS.readingNahl}
-        boxes={[
-          { x: 18, y: 545, w: 555, h: 80 },
-          { x: 18, y: 665, w: 555, h: 225 },
-          { x: 0, y: 1075, w: 591, h: 165 },
+      <RecSteps
+        segs={[
+          { v: "v2", from: 77, to: 81 },
+          { v: "v2", from: 81, to: 83 },
+          { v: "v2", from: 86.5, to: 93.5, rate: 1.6 },
+          { v: "v2", from: 29.5, to: 33.5 },
         ]}
       />
     ),
-    stat: { value: fa(122), label: "ترجمه" },
+    stat: { value: fa(152), label: "ترجمه" },
   },
   {
     id: "tafsir",
     icon: "layers",
-    title: "تفسیر",
-    short: "تفاسیر",
-    subtitle: "تفاسیر معتبر شیعه و اهل سنت",
+    title: "تفسیر و حدیث",
+    short: "تفسیر و حدیث",
+    subtitle: "تفاسیر شیعه و اهل سنت در «پنل آیه»",
     bullets: [
-      `${fa(11)} تفسیر شیعه و سنی، بدون نیاز به اینترنت`,
-      "فیلتر بر اساس مفسر، مذهب، زبان و نوع تفسیر",
-      "انتخاب «تفاسیر منتخب» در تنظیمات",
+      `${fa(416)} تفسیر عربی و فارسی؛ قابل دانلود برای استفاده‌ی آفلاین`,
+      "مطالعه‌ی متن کامل تفسیر، مانند تفسیر نمونه",
+      "روایات تفسیری از منابعی مانند تفسیر عیاشی، قمی و البرهان",
     ],
-    screen: <TafsirScreen />,
-    stat: { value: fa(11), label: "تفسیر آفلاین" },
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v2", from: 95, to: 98.8, rate: 1.2 },
+          { v: "v2", from: 99.6, to: 106.5, rate: 1.6 },
+          { v: "v3", from: 0, to: 7, rate: 1.5 },
+          { v: "v3", from: 14.5, to: 22, rate: 1.6 },
+        ]}
+      />
+    ),
+    stat: { value: fa(416), label: "تفسیر" },
   },
   {
     id: "words",
     icon: "type",
-    title: "واژگان و واژه‌نامه",
-    short: "واژه‌نامه",
-    subtitle: "معنای تک‌تک کلمات آیات",
-    bullets: ["ترجمه‌ی دقیق‌تر کلمه‌به‌کلمه", "بخش «واژه‌نامه» در صفحه‌ی اصلی", "اتصال به لغت‌نامه‌ی «قاموس نور»"],
-    screen: <WordsScreen />,
+    title: "واژگان و اعراب",
+    short: "واژگان و اعراب",
+    subtitle: "تحلیل تک‌تک کلمات آیه",
+    bullets: [
+      "ترجمه‌ی کلمه‌به‌کلمه، با قرائت هر واژه",
+      "توصیف واژگان از منابع لغت، مانند مجمع البحرین",
+      "اعراب قرآن: ترکیب نحوی آیه",
+      "تحلیل صرفی هر واژه",
+    ],
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v3", from: 39, to: 41.5 },
+          { v: "v3", from: 41.5, to: 46.5, rate: 1.3 },
+          { v: "v3", from: 47, to: 55, rate: 1.6 },
+          { v: "v3", from: 67.5, to: 72.5, rate: 1.3 },
+          { v: "v3", from: 73, to: 80.5, rate: 1.6 },
+        ]}
+      />
+    ),
   },
   {
     id: "suranameh",
@@ -179,34 +205,33 @@ const features: Feature[] = [
     subtitle: "پژوهش هوشمند در تفاسیر و منابع اسلامی",
     bullets: [
       "«گفتگوی هوشمند با تفاسیر»",
-      "کشف آیات و احادیث مرتبط با هوش مصنوعی",
+      "«آیات مرتبط» با نوع ارتباط و میزان مشابهت",
       "«با کتاب گفتگو کن» و کتابخانه‌ی دیجیتال نور",
       "دسترسی به برنامه‌های دیگر نور، مانند قاموس نور",
     ],
-    screen: (
-      <StepShot
-        shot={SHOTS.homeScroll}
-        boxes={[
-          { x: 54, y: 512, w: 814, h: 183 },
-          null,
-          { x: 54, y: 777, w: 814, h: 150 },
-          { x: 0, y: 1470, w: 923, h: 340 },
-        ]}
-      />
-    ),
+    screen: <AIScreen />,
   },
   {
     id: "search",
     icon: "search",
-    title: "جستجو و علاقه‌مندی‌ها",
+    title: "جستجو",
     short: "جستجو",
-    subtitle: "ابزارهای پژوهش و مطالعه‌ی شخصی",
+    subtitle: "جستجوی متنی و صوتی در همه‌ی قرآن",
     bullets: [
-      "جستجوی متنی و صوتی (با میکروفون)",
-      "جستجوی هوشمند در سوره، آیه، ترجمه و تفسیر",
-      "دسته‌بندی آیات در «علاقه‌مندی‌ها» و نشان‌ها",
+      "جستجو با نام سوره، شماره‌ی آیه، صفحه، جزء یا آیات نامدار",
+      "نتایج در نام سوره‌ها و متن قرآن",
+      "رفتن مستقیم به آیه‌ی دلخواه، مانند «بقره ۱۵»",
     ],
-    screen: <SearchStepScreen />,
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v1", from: 49.5, to: 50.5 },
+          { v: "v1", from: 50.5, to: 52.6 },
+          { v: "v1", from: 52.6, to: 55.6, rate: 1.1 },
+          { v: "v1", from: 55.6, to: 59.6 },
+        ]}
+      />
+    ),
   },
 ];
 
@@ -229,7 +254,7 @@ const sceneEls: Record<string, React.ReactNode> = {
 
 // Every scene but the last carries the crossfade into the next one after its final step
 const durations = deck.scenes.map(
-  (s, i) => s.entry + s.steps * s.step + (i < deck.scenes.length - 1 ? deck.fade : 0),
+  (s, i) => s.lens.reduce((a, b) => a + b, 0) + (i < deck.scenes.length - 1 ? deck.fade : 0),
 );
 export const DECK_DURATION = durations.reduce((a, b) => a + b, 0) - deck.fade * (deck.scenes.length - 1);
 
@@ -248,7 +273,7 @@ export const NoorDeck: React.FC = () => (
             ]
           : []),
         <TransitionSeries.Sequence key={s.id} durationInFrames={durations[i]}>
-          <StepCtx.Provider value={{ entry: s.entry, step: s.step }}>{sceneEls[s.id]}</StepCtx.Provider>
+          <StepCtx.Provider value={{ lens: s.lens }}>{sceneEls[s.id]}</StepCtx.Provider>
         </TransitionSeries.Sequence>,
       ])}
     </TransitionSeries>

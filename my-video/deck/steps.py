@@ -1,6 +1,6 @@
 """Click-step boundaries of the NoorDeck composition, derived from src/Noor/deck.json.
 
-Each scene is an entry animation followed by `steps` click steps of `step` frames; the
+Each scene's `lens` are its entry animation followed by one length per click step; the
 crossfade into the next scene belongs to that scene's entry clip. Clip j spans frames
 [bounds[j], bounds[j + 1]) and PowerPoint holds its last frame until the next click.
 """
@@ -12,14 +12,11 @@ DECK = json.loads((Path(__file__).resolve().parent.parent / "src/Noor/deck.json"
 
 def clips():
     """Yield (scene_id, step_index, start_frame, end_frame); step 0 is the scene entry."""
-    start = 0
-    clip_start = 0
+    end = 0
     for scene in DECK["scenes"]:
-        for i in range(scene["steps"] + 1):
-            end = start + scene["entry"] + i * scene["step"]
-            yield scene["id"], i, clip_start, end
-            clip_start = end
-        start = clip_start
+        for i, length in enumerate(scene["lens"]):
+            yield scene["id"], i, end, end + length
+            end += length
 
 
 if __name__ == "__main__":

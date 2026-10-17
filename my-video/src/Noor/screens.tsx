@@ -1,7 +1,7 @@
 import React from "react";
-import { Easing, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
+import { Easing, Freeze, Img, OffthreadVideo, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { A, QURAN, fa } from "./theme";
-import { Icon, IconName, MiniChip, Skeleton, useAt, useSpring } from "./ui";
+import { Icon, MiniChip, Skeleton, StepCtx, useAt, useSpring } from "./ui";
 
 const SCREEN_W = 412;
 const NOTCH_H = 40;
@@ -120,141 +120,6 @@ const Pop: React.FC<{ delay: number; children: React.ReactNode; style?: React.CS
     <div style={{ opacity: p, transform: `translateY(${(1 - p) * 20}px)`, ...style }}>
       {children}
     </div>
-  );
-};
-
-const GoldDisc: React.FC<{ icon: IconName; size?: number }> = ({ icon, size = 46 }) => (
-  <div
-    style={{
-      width: size,
-      height: size,
-      borderRadius: "50%",
-      background: A.gold,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      flexShrink: 0,
-    }}
-  >
-    <Icon name={icon} size={size * 0.5} color={A.header} />
-  </div>
-);
-
-const AYAH_2 = "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ";
-
-export const TafsirScreen: React.FC = () => {
-  const frame = useCurrentFrame();
-  const filters = ["مفسر", "مذهب", "زبان", "نوع تفسیر"];
-  const active = Math.floor(frame / 35) % 4;
-  const list = [
-    ["المیزان", "علامه طباطبایی", "شیعه"],
-    ["مجمع البیان", "شیخ طبرسی", "شیعه"],
-    ["تفسیر نمونه", "آیت‌الله مکارم شیرازی", "شیعه"],
-    ["الکشاف", "زمخشری", "سنی"],
-    ["التبیان", "شیخ طوسی", "شیعه"],
-  ];
-  return (
-    <AppScreen title="تفاسیر منتخب">
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <Pop
-          delay={8}
-          style={{ ...card, display: "flex", alignItems: "center", gap: 10, borderRadius: 999, padding: "12px 18px" }}
-        >
-          <span style={{ flex: 1, fontSize: 17, color: A.muted }}>جستجو در تفاسیر</span>
-          <Icon name="search" size={22} color={A.gold} />
-        </Pop>
-        <Pop delay={12} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {filters.map((f, i) => (
-            <MiniChip key={f} active={i === active}>
-              {f}
-            </MiniChip>
-          ))}
-        </Pop>
-        {list.map(([name, author, madhab], i) => (
-          <Pop key={name} delay={14 + i * 4} style={{ ...card, display: "flex", alignItems: "center", gap: 14 }}>
-            <GoldDisc icon="layers" />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 20, fontWeight: 800 }}>{name}</div>
-              <div style={{ fontSize: 15, color: A.muted }}>{author}</div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: madhab === "شیعه" ? A.blue : "#8fd19e" }}>
-                {madhab}
-              </span>
-              <span
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: A.gold,
-                  background: "rgba(220,186,89,0.15)",
-                  padding: "2px 8px",
-                  borderRadius: 8,
-                }}
-              >
-                آفلاین
-              </span>
-            </div>
-          </Pop>
-        ))}
-      </div>
-    </AppScreen>
-  );
-};
-
-export const WordsScreen: React.FC = () => {
-  const frame = useCurrentFrame();
-  const at = useAt();
-  const words = [
-    ["الْحَمْدُ", "ستایش"],
-    ["لِلَّهِ", "برای خدا"],
-    ["رَبِّ", "پروردگار"],
-    ["الْعَالَمِينَ", "جهانیان"],
-  ];
-  const active = Math.floor(frame / 30) % 4;
-  return (
-    <AppScreen title="واژه‌نامه">
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <Pop
-          delay={8}
-          style={{ ...card, fontFamily: QURAN, fontSize: 30, textAlign: "center", border: `1.5px solid ${A.gold}` }}
-        >
-          {AYAH_2}
-        </Pop>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {words.map(([ar, mean], i) => {
-            const on = i === active;
-            return (
-              <Pop
-                key={ar}
-                delay={12 + i * 5}
-                style={{
-                  ...card,
-                  textAlign: "center",
-                  padding: "18px 10px",
-                  border: `2.5px solid ${on ? A.blue : "transparent"}`,
-                }}
-              >
-                <div style={{ fontFamily: QURAN, fontSize: 34 }}>{ar}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: A.gold, marginTop: 4 }}>{mean}</div>
-                <div style={{ marginTop: 8, display: "flex", justifyContent: "center", opacity: on ? 1 : 0.3 }}>
-                  <Icon name="speaker" size={22} color={on ? A.blue : A.muted} />
-                </div>
-              </Pop>
-            );
-          })}
-        </div>
-        <Pop
-          delay={at(3)}
-          style={{ ...card, display: "flex", alignItems: "center", gap: 12, border: `1.5px solid ${A.gold}` }}
-        >
-          <GoldDisc icon="library" />
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 800 }}>قاموس نور</div>
-            <div style={{ fontSize: 14, color: A.muted }}>توضیحات تکمیلی واژه‌ی «{words[active][1]}»</div>
-          </div>
-        </Pop>
-      </div>
-    </AppScreen>
   );
 };
 
@@ -504,7 +369,88 @@ export const StepShot: React.FC<{ shot: Shot; boxes: (Box | null)[] }> = ({ shot
   return <ShotScreen shot={shot} marks={marks} />;
 };
 
-export const SearchStepScreen: React.FC = () => {
+// Screen recordings supplied by the user (480 × 1040, status bar 50px), re-encoded at 30fps
+const REC = { v1: "rec/v1.mp4", v2: "rec/v2.mp4", v3: "rec/v3.mp4" };
+const REC_W = 480;
+const REC_STATUS = 50;
+export type Seg = { v: keyof typeof REC; from: number; to: number; rate?: number };
+
+// Plays one recording segment per click step (null keeps the previous segment) and holds its
+// last frame until the next segment; a segment longer than its step is sped up to fit
+export const RecSteps: React.FC<{ segs: (Seg | null)[] }> = ({ segs }) => {
+  const frame = useCurrentFrame();
   const at = useAt();
-  return <SearchScreen typeAt={at(1)} resultsAt={at(2)} favAt={at(3)} />;
+  const { lens } = React.useContext(StepCtx);
+  let idx = -1;
+  segs.forEach((seg, i) => {
+    if (seg && frame >= at(i)) idx = i;
+  });
+  if (idx < 0) return null;
+  const seg = segs[idx] as Seg;
+  let next = idx + 1;
+  while (next < segs.length && !segs[next]) next++;
+  const span = (next < segs.length ? at(next) : at(lens.length)) - at(idx);
+  const srcFrames = (seg.to - seg.from) * 30;
+  const rate = Math.max(seg.rate ?? 1, srcFrames / Math.max(1, span - 6));
+  const local = Math.min(frame - at(idx), Math.floor(srcFrames / rate) - 1);
+  const k = SCREEN_W / REC_W;
+  return (
+    <div style={{ position: "absolute", inset: 0, background: A.header }}>
+      <Freeze frame={local}>
+        <OffthreadVideo
+          src={staticFile(REC[seg.v])}
+          trimBefore={Math.round(seg.from * 30)}
+          playbackRate={rate}
+          muted
+          style={{ position: "absolute", top: NOTCH_H - REC_STATUS * k, left: 0, width: SCREEN_W }}
+        />
+      </Freeze>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: NOTCH_H, background: A.header }} />
+    </div>
+  );
+};
+
+// Home-screen screenshot with spotlights, except for the related-verses step, which is recorded
+export const AIScreen: React.FC = () => {
+  const at = useAt();
+  const shot = (
+    <ShotScreen
+      shot={SHOTS.homeScroll}
+      marks={[
+        { at: at(1), box: { x: 54, y: 512, w: 814, h: 183 } },
+        { at: at(3), box: { x: 54, y: 777, w: 814, h: 150 } },
+        { at: at(4), box: { x: 0, y: 1470, w: 923, h: 340 } },
+      ]}
+    />
+  );
+  return (
+    <StepSwitch
+      screens={[
+        { from: 0, el: shot },
+        { from: at(2), el: <RecSteps segs={[null, null, { v: "v3", from: 81.5, to: 90, rate: 1.6 }]} /> },
+        { from: at(3), el: shot },
+      ]}
+    />
+  );
+};
+
+// Crossfades between whole phone screens at the given frames
+export const StepSwitch: React.FC<{ screens: { from: number; el: React.ReactNode }[] }> = ({ screens }) => {
+  const frame = useCurrentFrame();
+  return (
+    <>
+      {screens.map((s, i) => {
+        const next = screens[i + 1];
+        const fadeIn = i === 0 ? 1 : interpolate(frame, [s.from, s.from + 10], [0, 1], clamp);
+        const fadeOut = next ? interpolate(frame, [next.from, next.from + 10], [1, 0], clamp) : 1;
+        const o = Math.min(fadeIn, fadeOut);
+        if (o <= 0) return null;
+        return (
+          <div key={i} style={{ position: "absolute", inset: 0, opacity: o }}>
+            {s.el}
+          </div>
+        );
+      })}
+    </>
+  );
 };
