@@ -2,6 +2,7 @@ import { Composition, Folder } from "remotion";
 import { HelloWorld } from "./HelloWorld";
 import { Logo } from "./HelloWorld/Logo";
 import { Title } from "./HelloWorld/Title";
+import { NOOR_DURATION, NoorVideo } from "./Noor/NoorVideo";
 
 // Each <Composition> is an entry in the sidebar!
 
@@ -50,7 +51,14 @@ export const RemotionRoot: React.FC = () => {
           titleColor: "#000000",
         }}
       />
-
+      <Composition
+        id="NoorApp"
+        component={NoorVideo}
+        durationInFrames={NOOR_DURATION}
+        fps={30}
+        width={1920}
+        height={1080}
+      />
     </>
   );
 };
