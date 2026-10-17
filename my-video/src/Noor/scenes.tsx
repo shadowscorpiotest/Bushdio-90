@@ -132,6 +132,7 @@ export type Feature = {
   screenTitle: string;
   screen: React.ReactNode;
   stat?: { value: string; label: string };
+  label?: string;
 };
 
 export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) => {
@@ -147,13 +148,13 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
           </div>
         </div>
       </Reveal>
-      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 26, width: 1600 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 24, width: 1620 }}>
         {features.map((f, i) => (
           <Reveal key={f.title} delay={18 + i * 8} scale>
             <Glass
               style={{
-                width: 360,
-                height: 200,
+                width: 300,
+                height: 190,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -162,7 +163,7 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
               }}
             >
               <IconBadge name={f.icon} size={74} />
-              <div style={{ fontSize: 30, fontWeight: 800 }}>{f.short}</div>
+              <div style={{ fontSize: 28, fontWeight: 800 }}>{f.short}</div>
             </Glass>
           </Reveal>
         ))}
@@ -178,12 +179,14 @@ export const FeatureScene: React.FC<{ feature: Feature; index: number }> = ({ fe
     <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 150px", gap: 80 }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>
         <Reveal delay={0} x={60} y={0}>
-          <Pill>قابلیت {fa(String(index + 1).padStart(2, "0"))}</Pill>
+          <Pill>{feature.label ?? `قابلیت ${fa(String(index + 1).padStart(2, "0"))}`}</Pill>
         </Reveal>
         <Reveal delay={8} x={60} y={0}>
           <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
             <IconBadge name={feature.icon} size={110} />
-            <div style={{ fontSize: 82, fontWeight: 900, lineHeight: 1.2 }}>{feature.title}</div>
+            <div style={{ fontSize: feature.title.length > 16 ? 64 : 80, fontWeight: 900, lineHeight: 1.25 }}>
+              {feature.title}
+            </div>
           </div>
         </Reveal>
         <Reveal delay={16} x={60} y={0}>
@@ -208,7 +211,7 @@ export const FeatureScene: React.FC<{ feature: Feature; index: number }> = ({ fe
                 >
                   <Icon name="check" size={26} color={C.gold} stroke={3} />
                 </div>
-                <div style={{ fontSize: 36, fontWeight: 500, lineHeight: 1.5 }}>{b}</div>
+                <div style={{ fontSize: 34, fontWeight: 500, lineHeight: 1.5 }}>{b}</div>
               </div>
             </Reveal>
           ))}
@@ -251,19 +254,19 @@ export const FeatureScene: React.FC<{ feature: Feature; index: number }> = ({ fe
 export const ThematicScene: React.FC = () => {
   const frame = useCurrentFrame();
   const steps: { icon: IconName; title: string; desc: string }[] = [
-    { icon: "search", title: "جستجوی موضوع", desc: "یافتن آیاتی که واژه‌ی «صبر» در آن‌ها آمده است" },
-    { icon: "bookmark", title: "گردآوری آیات", desc: "نشانه‌گذاری و یادداشت‌نویسی روی آیات منتخب" },
-    { icon: "layers", title: "مطالعه‌ی تفاسیر", desc: "مقایسه‌ی دیدگاه مفسران شیعه و سنی" },
-    { icon: "library", title: "بررسی روایات", desc: "مراجعه به احادیث تفسیری و منابع کتابخانه‌ی نور" },
+    { icon: "search", title: "یافتن آیات", desc: "جستجوی هوشمند «صبر» و مراجعه به «فرهنگ موضوعی»" },
+    { icon: "star", title: "گردآوری آیات", desc: "دسته‌بندی آیات در «علاقه‌مندی‌ها» و یادداشت‌نویسی" },
+    { icon: "layers", title: "مطالعه‌ی تفاسیر", desc: `مقایسه‌ی ${fa(11)} تفسیر شیعه و سنی، حتی بدون اینترنت` },
+    { icon: "sparkles", title: "روایات و آیات مرتبط", desc: "احادیث تفسیری و پیشنهادهای هوش مصنوعی" },
   ];
   const line = interpolate(frame, [40, 150], [0, 1], clamp);
   return (
-    <Scene style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 44 }}>
+    <Scene style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 30 }}>
       <Reveal delay={0}>
         <Pill>ویژه‌ی درس تفسیر موضوعی</Pill>
       </Reveal>
       <Reveal delay={8}>
-        <div style={{ fontSize: 70, fontWeight: 900, textAlign: "center" }}>
+        <div style={{ fontSize: 64, fontWeight: 900, textAlign: "center" }}>
           کاربرد <span style={{ color: C.gold }}>«قرآن نور»</span> در تفسیر موضوعی
         </div>
       </Reveal>
@@ -272,20 +275,20 @@ export const ThematicScene: React.FC = () => {
           نمونه: بررسی موضوع <span style={{ color: C.goldSoft, fontWeight: 800 }}>«صبر»</span> در قرآن کریم
         </div>
       </Reveal>
-      <div style={{ position: "relative", display: "flex", gap: 40, marginTop: 20 }}>
+      <div style={{ position: "relative", display: "flex", gap: 40, marginTop: 10 }}>
         <div
           style={{
             position: "absolute",
             top: 46,
-            right: 170,
-            width: `calc((100% - 340px) * ${line})`,
+            right: 195,
+            width: `calc((100% - 390px) * ${line})`,
             height: 3,
             background: `linear-gradient(to left, ${C.gold}, ${C.blue})`,
           }}
         />
         {steps.map((s, i) => (
           <Reveal key={s.title} delay={40 + i * 28} y={50}>
-            <div style={{ width: 340, display: "flex", flexDirection: "column", alignItems: "center", gap: 22 }}>
+            <div style={{ width: 390, display: "flex", flexDirection: "column", alignItems: "center", gap: 22 }}>
               <div
                 style={{
                   width: 92,
@@ -304,12 +307,12 @@ export const ThematicScene: React.FC = () => {
               >
                 {fa(i + 1)}
               </div>
-              <Glass style={{ padding: "28px 24px", textAlign: "center", width: "100%", minHeight: 250 }}>
+              <Glass style={{ padding: "24px 22px", textAlign: "center", width: "100%", minHeight: 230 }}>
                 <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
                   <IconBadge name={s.icon} size={72} />
                 </div>
                 <div style={{ fontSize: 34, fontWeight: 800 }}>{s.title}</div>
-                <div style={{ fontSize: 25, color: C.muted, marginTop: 10, lineHeight: 1.6 }}>{s.desc}</div>
+                <div style={{ fontSize: 24, color: C.muted, marginTop: 10, lineHeight: 1.6 }}>{s.desc}</div>
               </Glass>
             </div>
           </Reveal>
@@ -363,9 +366,87 @@ export const OutroScene: React.FC = () => {
       </Reveal>
       <Reveal delay={50}>
         <div style={{ fontSize: 22, color: C.muted, marginTop: 20 }}>
-          منبع اطلاعات: سایت رسمی نرم‌افزارهای نور (noorsoft.org)
+          منابع: فصلنامه‌ی ره‌آورد نور، شماره‌ی {fa(83)}؛ سایت رسمی نرم‌افزارهای نور (noorsoft.org)
         </div>
       </Reveal>
     </Scene>
   );
 };
+
+export const PlatformsScene: React.FC = () => {
+  const devices: { icon: IconName; name: string; en: string }[] = [
+    { icon: "smartphone", name: "اندروید", en: "Android" },
+    { icon: "tablet", name: "آی‌اواس", en: "iOS" },
+    { icon: "tv", name: "تلویزیون هوشمند", en: "Smart TV" },
+  ];
+  const langs = ["فارسی", "العربية", "English", "Türkçe", "اردو"];
+  return (
+    <Scene style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 40 }}>
+      <Reveal delay={0}>
+        <Pill>در دسترس همه</Pill>
+      </Reveal>
+      <Reveal delay={8}>
+        <div style={{ fontSize: 72, fontWeight: 900 }}>
+          یک برنامه، <span style={{ color: C.gold }}>سه بستر</span>
+        </div>
+      </Reveal>
+      <div style={{ display: "flex", gap: 40 }}>
+        {devices.map((d, i) => (
+          <Reveal key={d.en} delay={22 + i * 12} y={50}>
+            <Glass
+              style={{
+                width: 340,
+                padding: "34px 0",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 16,
+              }}
+            >
+              <IconBadge name={d.icon} size={100} />
+              <div style={{ fontSize: 36, fontWeight: 800 }}>{d.name}</div>
+              <div style={{ fontSize: 24, color: C.muted, direction: "ltr" }}>{d.en}</div>
+            </Glass>
+          </Reveal>
+        ))}
+      </div>
+      <Reveal delay={70}>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <Icon name="globe" size={40} color={C.gold} />
+          <span style={{ fontSize: 32, fontWeight: 700 }}>رابط کاربری به {fa(5)} زبان:</span>
+          {langs.map((l, i) => (
+            <Reveal key={l} delay={80 + i * 7} scale y={0}>
+              <Glass style={{ padding: "8px 22px", fontSize: 28, fontWeight: 700, borderRadius: 999 }}>{l}</Glass>
+            </Reveal>
+          ))}
+        </div>
+      </Reveal>
+      <Reveal delay={125}>
+        <div style={{ fontSize: 30, color: C.muted }}>
+          امکان استفاده‌ی آنلاین از محتوا، بدون نیاز به دانلود فایل
+        </div>
+      </Reveal>
+    </Scene>
+  );
+};
+
+export const QuoteScene: React.FC = () => (
+  <Scene style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 34 }}>
+    <Reveal delay={0}>
+      <Pill>جمع‌بندی</Pill>
+    </Reveal>
+    <Reveal delay={10}>
+      <Glass style={{ maxWidth: 1450, padding: "60px 90px", position: "relative", border: `1.5px solid rgba(226,189,107,0.5)` }}>
+        <div style={{ position: "absolute", top: -50, right: 50, fontSize: 160, color: C.gold, lineHeight: 1 }}>«</div>
+        <div style={{ fontSize: 48, fontWeight: 700, lineHeight: 1.8, textAlign: "center" }}>
+          ساختار این نرم‌افزار به گونه‌ای طراحی شده که هم{" "}
+          <span style={{ color: C.goldSoft }}>کاربران عمومی</span> بتوانند به‌راحتی از آن استفاده کنند و هم
+          امکان تحقیق را برای <span style={{ color: C.goldSoft }}>علاقه‌مندان و پژوهشگران</span> فراهم کرده باشد.
+        </div>
+      </Glass>
+    </Reveal>
+    <Reveal delay={30}>
+      <div style={{ fontSize: 28, color: C.muted }}>فصلنامه‌ی ره‌آورد نور، شماره‌ی {fa(83)}</div>
+    </Reveal>
+  </Scene>
+);

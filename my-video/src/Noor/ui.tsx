@@ -120,7 +120,16 @@ export type IconName =
   | "prev"
   | "speaker"
   | "note"
-  | "download";
+  | "download"
+  | "repeat"
+  | "sparkles"
+  | "info"
+  | "smartphone"
+  | "tablet"
+  | "tv"
+  | "star"
+  | "globe"
+  | "home";
 
 const paths: Record<IconName, React.ReactNode> = {
   book: (
@@ -209,6 +218,64 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <path d="m7 10 5 5 5-5" />
       <path d="M12 15V3" />
+    </>
+  ),
+  repeat: (
+    <>
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </>
+  ),
+  sparkles: (
+    <>
+      <path d="M9.9 15.5A2 2 0 0 0 8.5 14.1l-6.1-1.6a.5.5 0 0 1 0-1l6.1-1.6A2 2 0 0 0 9.9 8.5l1.6-6.1a.5.5 0 0 1 1 0l1.6 6.1a2 2 0 0 0 1.4 1.4l6.1 1.6a.5.5 0 0 1 0 1l-6.1 1.6a2 2 0 0 0-1.4 1.4l-1.6 6.1a.5.5 0 0 1-1 0z" />
+      <path d="M20 3v4" />
+      <path d="M22 5h-4" />
+    </>
+  ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 16v-4" />
+      <path d="M12 8h.01" />
+    </>
+  ),
+  smartphone: (
+    <>
+      <rect x="5" y="2" width="14" height="20" rx="2" />
+      <path d="M12 18h.01" />
+    </>
+  ),
+  tablet: (
+    <>
+      <rect x="3" y="2" width="18" height="20" rx="2" />
+      <path d="M12 18h.01" />
+    </>
+  ),
+  tv: (
+    <>
+      <rect x="2" y="7" width="20" height="15" rx="2" />
+      <path d="m17 2-5 5-5-5" />
+    </>
+  ),
+  star: (
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
+    </>
+  ),
+  home: (
+    <>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
     </>
   ),
 };
