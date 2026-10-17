@@ -303,8 +303,8 @@ const StatChip: React.FC<{ value: string; label: string; delay: number }> = ({ v
     <div
       style={{
         position: "absolute",
-        bottom: 150,
-        right: -70,
+        bottom: 130,
+        right: -60,
         transform: `scale(${p}) translateY(${Math.sin(frame / 25) * 6}px)`,
         opacity: p,
       }}
@@ -324,16 +324,21 @@ const StatChip: React.FC<{ value: string; label: string; delay: number }> = ({ v
   );
 };
 
+// Phone drawn near full slide height so the app screen stays legible when projected
+const PHONE_SCALE = 1.11;
+
 // Text column on the right, phone on the left; the phone screen is passed in
 const PhoneLayout: React.FC<{ children: React.ReactNode; screen: React.ReactNode; stat?: React.ReactNode }> = ({
   children,
   screen,
   stat,
 }) => (
-  <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 150px", gap: 80 }}>
+  <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 120px", gap: 70 }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>{children}</div>
-    <div style={{ position: "relative", width: 560, display: "flex", justifyContent: "center" }}>
-      <Phone delay={4}>{screen}</Phone>
+    <div style={{ position: "relative", width: 620, display: "flex", justifyContent: "center" }}>
+      <div style={{ transform: `scale(${PHONE_SCALE})` }}>
+        <Phone delay={4}>{screen}</Phone>
+      </div>
       {stat}
     </div>
   </Scene>

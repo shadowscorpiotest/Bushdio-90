@@ -86,9 +86,9 @@ const features: Feature[] = [
     screen: (
       <RecSteps
         segs={[
-          { v: "v2", from: 25, to: 30, rate: 1.25 },
+          { v: "v2", from: 25, to: 30 },
           { v: "v2", from: 34.5, to: 37.2 },
-          { v: "v2", from: 63.6, to: 69.4, rate: 1.5 },
+          { v: "v2", from: 63.6, to: 69.4 },
           { v: "v2", from: 70.6, to: 72.2 },
           { v: "v2", from: 72.6, to: 75.5 },
         ]}
@@ -129,8 +129,8 @@ const features: Feature[] = [
         segs={[
           { v: "v6", from: 43.8, to: 47 },
           { v: "v6", from: 47, to: 50.5 },
-          { v: "v6", from: 55.5, to: 61, rate: 1.3 },
-          { v: "v5", from: 82.5, to: 91, rate: 1.5 },
+          { v: "v6", from: 55.5, to: 61 },
+          { v: "v5", from: 82.5, to: 91 },
         ]}
       />
     ),
@@ -151,7 +151,7 @@ const features: Feature[] = [
         segs={[
           { v: "v2", from: 77, to: 81 },
           { v: "v2", from: 81, to: 83 },
-          { v: "v2", from: 86.5, to: 93.5, rate: 1.6 },
+          { v: "v2", from: 86.5, to: 93.5 },
           { v: "v2", from: 29.5, to: 33.5 },
         ]}
       />
@@ -172,10 +172,10 @@ const features: Feature[] = [
     screen: (
       <RecSteps
         segs={[
-          { v: "v2", from: 95, to: 98.8, rate: 1.2 },
-          { v: "v2", from: 99.6, to: 106.5, rate: 1.6 },
-          { v: "v3", from: 0, to: 7, rate: 1.5 },
-          { v: "v3", from: 14.5, to: 22, rate: 1.6 },
+          { v: "v2", from: 95, to: 98.8 },
+          { v: "v2", from: 99.6, to: 106.5 },
+          { v: "v3", from: 0, to: 7 },
+          { v: "v3", from: 14.5, to: 22 },
         ]}
       />
     ),
@@ -197,10 +197,10 @@ const features: Feature[] = [
       <RecSteps
         segs={[
           { v: "v3", from: 39, to: 41.5 },
-          { v: "v3", from: 41.5, to: 46.5, rate: 1.3 },
-          { v: "v3", from: 47, to: 55, rate: 1.6 },
-          { v: "v3", from: 69.5, to: 80.5, rate: 2 },
-          { v: "v6", from: 18.5, to: 30, rate: 1.8 },
+          { v: "v3", from: 41.5, to: 46.5 },
+          { v: "v3", from: 47, to: 55 },
+          { v: "v3", from: 70, to: 78 },
+          { v: "v6", from: 18.5, to: 30 },
         ]}
       />
     ),
@@ -222,8 +222,8 @@ const features: Feature[] = [
         segs={[
           { v: "v5", from: 31.5, to: 34.5 },
           { v: "v5", from: 34.5, to: 36.6 },
-          { v: "v5", from: 36.6, to: 48.5, rate: 1.8 },
-          { v: "v5", from: 48.5, to: 58.5, rate: 1.8 },
+          { v: "v5", from: 36.6, to: 48.5 },
+          { v: "v5", from: 48.5, to: 58.5 },
           { v: "v5", from: 58.5, to: 62 },
         ]}
       />
@@ -244,9 +244,9 @@ const features: Feature[] = [
       <RecSteps
         segs={[
           { v: "v4", from: 35.5, to: 39 },
-          { v: "v4", from: 39, to: 45, rate: 1.4 },
-          { v: "v4", from: 45.5, to: 53, rate: 1.6 },
-          { v: "v4", from: 75.5, to: 85, rate: 1.8 },
+          { v: "v4", from: 39, to: 45 },
+          { v: "v4", from: 45.5, to: 53 },
+          { v: "v4", from: 75.5, to: 85 },
         ]}
       />
     ),
@@ -281,7 +281,7 @@ const features: Feature[] = [
         segs={[
           { v: "v1", from: 49.5, to: 50.5 },
           { v: "v1", from: 50.5, to: 52.6 },
-          { v: "v1", from: 52.6, to: 55.6, rate: 1.1 },
+          { v: "v1", from: 52.6, to: 55.6 },
           { v: "v1", from: 55.6, to: 59.6 },
         ]}
       />

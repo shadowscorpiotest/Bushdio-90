@@ -445,7 +445,7 @@ export const Phone: React.FC<{ children: React.ReactNode; delay?: number }> = ({
 }) => {
   const frame = useCurrentFrame();
   const p = useSpring(delay, 18);
-  const float = Math.sin(frame / 30) * 8;
+  const float = Math.sin(frame / 30) * 4;
   return (
     <div
       style={{
