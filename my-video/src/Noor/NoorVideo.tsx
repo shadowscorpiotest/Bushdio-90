@@ -21,7 +21,7 @@ import {
   QuoteScene,
   WhyScene,
 } from "./scenes";
-import { AIScreen, Box, RecSteps, SHOTS, StepShot, SuraNamehScreen } from "./screens";
+import { AIScreen, Box, RecSteps, SHOTS, StepShot } from "./screens";
 import deck from "./deck.json";
 
 // Sources: the user's screenshots and screen recordings of the current app (v5.8.3) and
@@ -114,6 +114,28 @@ const features: Feature[] = [
     stat: { value: fa(4), label: "حالت پخش" },
   },
   {
+    id: "multimedia",
+    icon: "speaker",
+    title: "چندرسانه و ختم قرآن",
+    short: "چندرسانه",
+    subtitle: "شنیدن، آموختن و ختم قرآن",
+    bullets: [
+      "تفسیر گویای استاد قرائتی",
+      "تلاوت‌های مجلسی، آموزشی، ترتیل، تحقیق و تحدیر؛ ترجمه‌ی گویا و سخنرانی",
+      "ختم قرآن شخصی و گروهی، با برنامه‌ی زمان‌بندی",
+    ],
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v6", from: 43.8, to: 47 },
+          { v: "v6", from: 47, to: 50.5 },
+          { v: "v6", from: 55.5, to: 61, rate: 1.3 },
+          { v: "v5", from: 82.5, to: 91, rate: 1.5 },
+        ]}
+      />
+    ),
+  },
+  {
     id: "translate",
     icon: "languages",
     title: "ترجمه",
@@ -162,14 +184,14 @@ const features: Feature[] = [
   {
     id: "words",
     icon: "type",
-    title: "واژگان و اعراب",
+    title: "واژگان، اعراب و واژه‌نامه",
     short: "واژگان و اعراب",
     subtitle: "تحلیل تک‌تک کلمات آیه",
     bullets: [
       "ترجمه‌ی کلمه‌به‌کلمه، با قرائت هر واژه",
       "توصیف واژگان از منابع لغت، مانند مجمع البحرین",
-      "اعراب قرآن: ترکیب نحوی آیه",
-      "تحلیل صرفی هر واژه",
+      "اعراب قرآن: ترکیب نحوی و تحلیل صرفی",
+      "«واژه‌نامه»: جستجوی ریشه، مدخل و کلمه‌ی قرآنی، مانند «الرحمن»",
     ],
     screen: (
       <RecSteps
@@ -177,25 +199,57 @@ const features: Feature[] = [
           { v: "v3", from: 39, to: 41.5 },
           { v: "v3", from: 41.5, to: 46.5, rate: 1.3 },
           { v: "v3", from: 47, to: 55, rate: 1.6 },
-          { v: "v3", from: 67.5, to: 72.5, rate: 1.3 },
-          { v: "v3", from: 73, to: 80.5, rate: 1.6 },
+          { v: "v3", from: 69.5, to: 80.5, rate: 2 },
+          { v: "v6", from: 18.5, to: 30, rate: 1.8 },
         ]}
       />
     ),
   },
   {
-    id: "suranameh",
-    icon: "info",
-    title: "فهرست سوره‌ها و سوره‌نامه",
-    short: "سوره‌نامه",
-    subtitle: "شناسنامه‌ی کامل هر سوره",
+    id: "farhang",
+    icon: "tag",
+    title: "فرهنگ موضوعی",
+    short: "فرهنگ موضوعی",
+    subtitle: "قرآن، دسته‌بندی‌شده بر اساس موضوع",
     bullets: [
-      "فهرست سوره‌ها، جزءها و علاقه‌مندی‌ها",
-      "نماد سوره‌های مکی و مدنی",
-      "مفهوم، نام‌ها، محل و ترتیب نزول هر سوره",
-      "اهداف، محتوا، فضائل و ارتباط با سوره‌ی قبل",
+      "دسته‌های اصلی: مفاهیم، اشخاص، مکان‌ها، وقایع و …",
+      "زیرموضوع‌ها به ترتیب الفبا، به فارسی و عربی",
+      "فهرست همه‌ی آیات هر موضوع، یک‌جا",
+      "رفتن به آیه و مطالعه‌ی ترجمه و تفسیر آن",
     ],
-    screen: <SuraNamehScreen />,
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v5", from: 31.5, to: 34.5 },
+          { v: "v5", from: 34.5, to: 36.6 },
+          { v: "v5", from: 36.6, to: 48.5, rate: 1.8 },
+          { v: "v5", from: 48.5, to: 58.5, rate: 1.8 },
+          { v: "v5", from: 58.5, to: 62 },
+        ]}
+      />
+    ),
+  },
+  {
+    id: "alam",
+    icon: "library",
+    title: "اعلام و اسماء",
+    short: "اعلام و اسماء",
+    subtitle: "نام‌های قرآنی و آیات مربوط به آن‌ها",
+    bullets: [
+      "اشخاص، مکان‌ها، جانوران، رنگ‌ها و دیگر نام‌های قرآنی",
+      "توضیح هر عَلَم؛ برای نمونه «سبز»",
+      "آیات مرتبط و «اعلام مرتبط»، مانند «درخت ممنوعه»",
+    ],
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v4", from: 35.5, to: 39 },
+          { v: "v4", from: 39, to: 45, rate: 1.4 },
+          { v: "v4", from: 45.5, to: 53, rate: 1.6 },
+          { v: "v4", from: 75.5, to: 85, rate: 1.8 },
+        ]}
+      />
+    ),
   },
   {
     id: "ai",
@@ -206,7 +260,7 @@ const features: Feature[] = [
     bullets: [
       "«گفتگوی هوشمند با تفاسیر»",
       "«آیات مرتبط» با نوع ارتباط و میزان مشابهت",
-      "«با کتاب گفتگو کن» و کتابخانه‌ی دیجیتال نور",
+      "«با کتاب گفتگو کن»: پرسش از کتاب‌های کتابخانه‌ی دیجیتال نور",
       "دسترسی به برنامه‌های دیگر نور، مانند قاموس نور",
     ],
     screen: <AIScreen />,

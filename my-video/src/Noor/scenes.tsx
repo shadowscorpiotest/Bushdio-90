@@ -21,6 +21,7 @@ import {
   SHOTS,
   SearchScreen,
   ShotScreen,
+  RecSteps,
   StepShot,
   StepSwitch,
   TafsirReadScreen,
@@ -249,13 +250,13 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
       }
       subtitle="یک برنامه برای تلاوت، فهم و پژوهش در قرآن کریم"
     />
-    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 24, width: 1620 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 22, width: 1640 }}>
       {features.map((f, i) => (
-        <Reveal key={f.id} delay={16 + i * 7} scale>
+        <Reveal key={f.id} delay={16 + i * 6} scale>
           <Glass
             style={{
-              width: 300,
-              height: 190,
+              width: 254,
+              height: 180,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
@@ -263,8 +264,8 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
               gap: 14,
             }}
           >
-            <IconBadge name={f.icon} size={74} />
-            <div style={{ fontSize: 28, fontWeight: 800 }}>{f.short}</div>
+            <IconBadge name={f.icon} size={68} />
+            <div style={{ fontSize: 26, fontWeight: 800 }}>{f.short}</div>
           </Glass>
         </Reveal>
       ))}
@@ -380,7 +381,16 @@ export const PlatformsScene: React.FC = () => {
   const langs = ["فارسی", "العربية", "English", "Türkçe", "اردو"];
   const popup: Box = { x: 148, y: 612, w: 627, h: 740 };
   return (
-    <PhoneLayout screen={<StepShot shot={SHOTS.language} boxes={[null, popup, null]} />}>
+    <PhoneLayout
+      screen={
+        <StepSwitch
+          screens={[
+            { from: 0, el: <StepShot shot={SHOTS.language} boxes={[null, popup]} /> },
+            { from: at(3), el: <RecSteps segs={[null, null, null, { v: "v1", from: 12.5, to: 14.4 }]} /> },
+          ]}
+        />
+      }
+    >
       <Reveal delay={0} x={60} y={0}>
         <Pill>در دسترس همه</Pill>
       </Reveal>
@@ -416,7 +426,9 @@ export const PlatformsScene: React.FC = () => {
         ))}
       </div>
       <Reveal delay={at(3)} x={60} y={0}>
-        <div style={{ fontSize: 30, color: C.muted }}>امکان استفاده‌ی آنلاین از محتوا، بدون نیاز به دانلود فایل</div>
+        <div style={{ fontSize: 30, color: C.muted }}>
+          بیش از {fa(420)} هزار نصب و امتیاز ۴٫۸ در فروشگاه اپلیکیشن
+        </div>
       </Reveal>
     </PhoneLayout>
   );

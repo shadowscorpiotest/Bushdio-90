@@ -123,87 +123,6 @@ const Pop: React.FC<{ delay: number; children: React.ReactNode; style?: React.CS
   );
 };
 
-const SuraInfoScreen: React.FC<{ from: number }> = ({ from }) => {
-  const facts: [string, string][] = [
-    ["سوره", fa(1)],
-    ["تعداد آیات", fa(7)],
-    ["محل نزول", "مکی"],
-    ["ترتیب نزول", fa(5)],
-  ];
-  const names = ["فاتحة الکتاب", "ام الکتاب", "ام القرآن", "سبع المثانی", "حمد", "صلاة", "شفاء", "اساس"];
-  const content = [
-    "مفهوم کلی سوره",
-    "علت نام‌گذاری",
-    "اهداف و آموزه‌ها",
-    "محتوا و موضوعات",
-    "فضائل و ثواب قرائت",
-    "فضای نزول",
-    "ترتیب در مصحف",
-    "ارتباط با سوره‌ی قبلی",
-  ];
-  return (
-    <AppScreen title="سوره‌نامه: حمد">
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          {facts.map(([k, v], i) => (
-            <Pop key={k} delay={from + 4 + i * 3} style={{ ...card, padding: "12px 14px" }}>
-              <div style={{ fontSize: 13, color: A.muted }}>{k}</div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: A.gold }}>{v}</div>
-            </Pop>
-          ))}
-        </div>
-        <Pop delay={from + 10} style={card}>
-          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>نام‌ها</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {names.map((n) => (
-              <div
-                key={n}
-                style={{ padding: "4px 12px", borderRadius: 999, background: A.panel, fontSize: 14, fontWeight: 700 }}
-              >
-                {n}
-              </div>
-            ))}
-          </div>
-        </Pop>
-        <Pop delay={from + 14} style={card}>
-          <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>محتوا</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 10px" }}>
-            {content.map((c) => (
-              <div key={c} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: A.gold, flexShrink: 0 }} />
-                {c}
-              </div>
-            ))}
-          </div>
-        </Pop>
-      </div>
-    </AppScreen>
-  );
-};
-
-// Real sura list for the first two steps, then the sura-info view opened from its ⓘ button
-export const SuraNamehScreen: React.FC = () => {
-  const frame = useCurrentFrame();
-  const at = useAt();
-  const swap = interpolate(frame, [at(3), at(3) + 12], [0, 1], clamp);
-  return (
-    <>
-      <div style={{ position: "absolute", inset: 0, opacity: 1 - swap }}>
-        <ShotScreen
-          shot={SHOTS.suraList}
-          marks={[
-            { at: at(1), box: { x: 0, y: 215, w: 923, h: 100 } },
-            { at: at(2), box: { x: 676, y: 545, w: 100, h: 1380 } },
-          ]}
-        />
-      </div>
-      <div style={{ position: "absolute", inset: 0, opacity: swap, transform: `translateX(${(1 - swap) * -60}px)` }}>
-        <SuraInfoScreen from={at(3)} />
-      </div>
-    </>
-  );
-};
-
 const SABR_RESULTS = [
   ["بقره، آیه‌ی ۱۵۳", "اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ"],
   ["آل‌عمران، آیه‌ی ۲۰۰", "اصْبِرُوا وَصَابِرُوا وَرَابِطُوا"],
@@ -370,7 +289,14 @@ export const StepShot: React.FC<{ shot: Shot; boxes: (Box | null)[] }> = ({ shot
 };
 
 // Screen recordings supplied by the user (480 × 1040, status bar 50px), re-encoded at 30fps
-const REC = { v1: "rec/v1.mp4", v2: "rec/v2.mp4", v3: "rec/v3.mp4" };
+const REC = {
+  v1: "rec/v1.mp4",
+  v2: "rec/v2.mp4",
+  v3: "rec/v3.mp4",
+  v4: "rec/v4.mp4",
+  v5: "rec/v5.mp4",
+  v6: "rec/v6.mp4",
+};
 const REC_W = 480;
 const REC_STATUS = 50;
 export type Seg = { v: keyof typeof REC; from: number; to: number; rate?: number };
@@ -410,7 +336,7 @@ export const RecSteps: React.FC<{ segs: (Seg | null)[] }> = ({ segs }) => {
   );
 };
 
-// Home-screen screenshot with spotlights, except for the related-verses step, which is recorded
+// Home-screen screenshot with spotlights; related verses and the noorlib.ir chat page are recorded
 export const AIScreen: React.FC = () => {
   const at = useAt();
   const shot = (
@@ -418,7 +344,6 @@ export const AIScreen: React.FC = () => {
       shot={SHOTS.homeScroll}
       marks={[
         { at: at(1), box: { x: 54, y: 512, w: 814, h: 183 } },
-        { at: at(3), box: { x: 54, y: 777, w: 814, h: 150 } },
         { at: at(4), box: { x: 0, y: 1470, w: 923, h: 340 } },
       ]}
     />
@@ -427,8 +352,15 @@ export const AIScreen: React.FC = () => {
     <StepSwitch
       screens={[
         { from: 0, el: shot },
-        { from: at(2), el: <RecSteps segs={[null, null, { v: "v3", from: 81.5, to: 90, rate: 1.6 }]} /> },
-        { from: at(3), el: shot },
+        {
+          from: at(2),
+          el: (
+            <RecSteps
+              segs={[null, null, { v: "v3", from: 81.5, to: 90, rate: 1.6 }, { v: "v6", from: 101.8, to: 104.8 }]}
+            />
+          ),
+        },
+        { from: at(4), el: shot },
       ]}
     />
   );

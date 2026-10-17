@@ -139,7 +139,8 @@ export type IconName =
   | "globe"
   | "home"
   | "mic"
-  | "back";
+  | "back"
+  | "tag";
 
 const paths: Record<IconName, React.ReactNode> = {
   book: (
@@ -285,6 +286,12 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
       <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
       <path d="M12 19v3" />
+    </>
+  ),
+  tag: (
+    <>
+      <path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4z" />
+      <circle cx="7.5" cy="7.5" r="1" />
     </>
   ),
   back: (
