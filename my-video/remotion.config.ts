@@ -7,4 +7,6 @@ import { Config } from "@remotion/cli/config";
 
 Config.setRspack(true);
 Config.setVideoImageFormat("jpeg");
+// JPEG frames otherwise produce full-range yuvj420p, which many phone players reject
+Config.setPixelFormat("yuv420p");
 Config.setOverwriteOutput(true);
