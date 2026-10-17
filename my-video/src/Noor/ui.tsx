@@ -75,6 +75,14 @@ export const Scene: React.FC<{ children: React.ReactNode; style?: React.CSSPrope
   </AbsoluteFill>
 );
 
+// Each scene is an entry animation followed by click steps; the deck is cut at step starts,
+// so anything a step animates must settle before the next step begins
+export const StepCtx = React.createContext({ entry: 55, step: 26 });
+export const useAt = () => {
+  const { entry, step } = React.useContext(StepCtx);
+  return (i: number) => (i === 0 ? 0 : entry + (i - 1) * step);
+};
+
 export const useSpring = (delay = 0, damping = 200) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();

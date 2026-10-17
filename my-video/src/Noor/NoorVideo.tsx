@@ -4,33 +4,41 @@ import { TransitionSeries, linearTiming } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
 import "./theme";
 import { fa } from "./theme";
-import { Background } from "./ui";
+import { Background, StepCtx } from "./ui";
 import {
+  AgendaScene,
+  CritiqueScene,
   DeveloperScene,
+  ExampleScene,
   Feature,
   FeatureScene,
+  FindingsScene,
   IntroScene,
+  MethodScene,
   OutroScene,
   OverviewScene,
   PlatformsScene,
   QuoteScene,
-  ThematicScene,
+  WhyScene,
 } from "./scenes";
 import {
+  Box,
   SHOTS,
-  SearchScreen,
-  ShotScreen,
+  SearchStepScreen,
+  StepShot,
   SuraNamehScreen,
   TafsirScreen,
   WordsScreen,
 } from "./screens";
+import deck from "./deck.json";
 
 // Sources: the user's screenshots of the current app, Rahavard-e Noor no. 83
 // ("New features of the Quran Noor mobile app") and noorsoft.org (translation count).
-// Highlight boxes are in each screenshot's basis units (see SHOTS).
-const row = (y: number, h = 112) => ({ x: 30, y, w: 865, h });
+// Spotlight boxes are in each screenshot's basis units (see SHOTS); one per bullet, null keeps the last.
+const row = (y: number, h = 112): Box => ({ x: 30, y, w: 865, h });
 
 const home: Feature = {
+  id: "home",
   icon: "home",
   label: "نگاه اول",
   title: "صفحه‌ی اصلی",
@@ -43,13 +51,13 @@ const home: Feature = {
     "ختم قرآن، نشان‌ها و بخش چندرسانه",
   ],
   screen: (
-    <ShotScreen
+    <StepShot
       shot={SHOTS.home}
-      marks={[
-        { at: 30, box: { x: 28, y: 245, w: 867, h: 98 } },
-        { at: 70, box: { x: 54, y: 540, w: 814, h: 440 } },
-        { at: 115, box: { x: 54, y: 1007, w: 814, h: 413 } },
-        { at: 160, box: { x: 28, y: 388, w: 240, h: 62 } },
+      boxes={[
+        { x: 28, y: 245, w: 867, h: 98 },
+        { x: 54, y: 540, w: 814, h: 440 },
+        { x: 54, y: 1007, w: 814, h: 413 },
+        { x: 28, y: 388, w: 240, h: 62 },
       ]}
     />
   ),
@@ -57,6 +65,7 @@ const home: Feature = {
 
 const features: Feature[] = [
   {
+    id: "mushaf",
     icon: "book",
     title: "شیوه‌های نمایش مصحف",
     short: "نمایش مصحف",
@@ -67,20 +76,11 @@ const features: Feature[] = [
       "نمایش متن به‌تنهایی یا همراه ترجمه",
       "تنظیم ترازبندی، قلم و اندازه‌ی متن",
     ],
-    screen: (
-      <ShotScreen
-        shot={SHOTS.settingsText}
-        marks={[
-          { at: 30, box: row(354) },
-          { at: 72, box: row(497) },
-          { at: 114, box: row(784) },
-          { at: 156, box: row(641) },
-        ]}
-      />
-    ),
+    screen: <StepShot shot={SHOTS.settingsText} boxes={[row(354), row(497), row(784), row(641)]} />,
     stat: { value: fa(3), label: "شیوه‌ی نمایش" },
   },
   {
+    id: "reciters",
     icon: "headphones",
     title: "قاریان و قرائت‌ها",
     short: "قاریان",
@@ -91,19 +91,11 @@ const features: Feature[] = [
       "دانلود یک‌جا یا تک‌تک سوره‌ها",
       "امکان حذف قرائت‌های دانلودشده",
     ],
-    screen: (
-      <ShotScreen
-        shot={SHOTS.readingSheet}
-        marks={[
-          { at: 34, box: row(1310, 120) },
-          { at: 100, box: row(1042) },
-          { at: 150, box: row(1167) },
-        ]}
-      />
-    ),
+    screen: <StepShot shot={SHOTS.readingSheet} boxes={[row(1310, 120), null, row(1042), null]} />,
     stat: { value: fa(28), label: "دوره‌ی قرائت" },
   },
   {
+    id: "recite",
     icon: "repeat",
     title: "تنظیمات قرائت و حفظ",
     short: "قرائت و حفظ",
@@ -115,20 +107,12 @@ const features: Feature[] = [
       "پخش دعای آیات سجده‌دار",
     ],
     screen: (
-      <ShotScreen
-        shot={SHOTS.settingsRecite}
-        marks={[
-          { at: 30, box: row(497) },
-          { at: 70, box: row(835, 120) },
-          { at: 110, box: row(1000, 256) },
-          { at: 150, box: row(1287) },
-          { at: 185, box: row(1425, 130) },
-        ]}
-      />
+      <StepShot shot={SHOTS.settingsRecite} boxes={[row(497), row(835, 120), row(1000, 400), row(1425, 130)]} />
     ),
     stat: { value: fa(4), label: "حالت پخش" },
   },
   {
+    id: "translate",
     icon: "languages",
     title: "ترجمه",
     short: "ترجمه‌ها",
@@ -139,18 +123,19 @@ const features: Feature[] = [
       "پخش تلاوت همراه با متن و ترجمه",
     ],
     screen: (
-      <ShotScreen
+      <StepShot
         shot={SHOTS.readingNahl}
-        marks={[
-          { at: 34, box: { x: 18, y: 450, w: 555, h: 175 } },
-          { at: 90, box: { x: 18, y: 770, w: 555, h: 115 } },
-          { at: 145, box: { x: 0, y: 1075, w: 591, h: 165 } },
+        boxes={[
+          { x: 18, y: 545, w: 555, h: 80 },
+          { x: 18, y: 665, w: 555, h: 225 },
+          { x: 0, y: 1075, w: 591, h: 165 },
         ]}
       />
     ),
     stat: { value: fa(122), label: "ترجمه" },
   },
   {
+    id: "tafsir",
     icon: "layers",
     title: "تفسیر",
     short: "تفاسیر",
@@ -164,18 +149,16 @@ const features: Feature[] = [
     stat: { value: fa(11), label: "تفسیر آفلاین" },
   },
   {
+    id: "words",
     icon: "type",
     title: "واژگان و واژه‌نامه",
     short: "واژه‌نامه",
     subtitle: "معنای تک‌تک کلمات آیات",
-    bullets: [
-      "ترجمه‌ی دقیق‌تر کلمه‌به‌کلمه",
-      "بخش «واژه‌نامه» در صفحه‌ی اصلی",
-      "اتصال به لغت‌نامه‌ی «قاموس نور»",
-    ],
+    bullets: ["ترجمه‌ی دقیق‌تر کلمه‌به‌کلمه", "بخش «واژه‌نامه» در صفحه‌ی اصلی", "اتصال به لغت‌نامه‌ی «قاموس نور»"],
     screen: <WordsScreen />,
   },
   {
+    id: "suranameh",
     icon: "info",
     title: "فهرست سوره‌ها و سوره‌نامه",
     short: "سوره‌نامه",
@@ -189,6 +172,7 @@ const features: Feature[] = [
     screen: <SuraNamehScreen />,
   },
   {
+    id: "ai",
     icon: "sparkles",
     title: "هوش مصنوعی و منابع",
     short: "هوش مصنوعی",
@@ -200,17 +184,19 @@ const features: Feature[] = [
       "دسترسی به برنامه‌های دیگر نور، مانند قاموس نور",
     ],
     screen: (
-      <ShotScreen
+      <StepShot
         shot={SHOTS.homeScroll}
-        marks={[
-          { at: 30, box: { x: 54, y: 512, w: 814, h: 183 } },
-          { at: 105, box: { x: 54, y: 777, w: 814, h: 150 } },
-          { at: 160, box: { x: 0, y: 1470, w: 923, h: 340 } },
+        boxes={[
+          { x: 54, y: 512, w: 814, h: 183 },
+          null,
+          { x: 54, y: 777, w: 814, h: 150 },
+          { x: 0, y: 1470, w: 923, h: 340 },
         ]}
       />
     ),
   },
   {
+    id: "search",
     icon: "search",
     title: "جستجو و علاقه‌مندی‌ها",
     short: "جستجو",
@@ -220,41 +206,49 @@ const features: Feature[] = [
       "جستجوی هوشمند در سوره، آیه، ترجمه و تفسیر",
       "دسته‌بندی آیات در «علاقه‌مندی‌ها» و نشان‌ها",
     ],
-    screen: <SearchScreen />,
+    screen: <SearchStepScreen />,
   },
 ];
 
-const T = 20;
-const scenes: { d: number; el: React.ReactNode }[] = [
-  { d: 270, el: <IntroScene /> },
-  { d: 190, el: <DeveloperScene /> },
-  { d: 240, el: <FeatureScene feature={home} index={0} /> },
-  { d: 250, el: <OverviewScene features={features} /> },
-  ...features.map((f, i) => ({ d: 230, el: <FeatureScene feature={f} index={i} /> })),
-  { d: 230, el: <PlatformsScene /> },
-  { d: 330, el: <ThematicScene /> },
-  { d: 210, el: <QuoteScene /> },
-  { d: 240, el: <OutroScene /> },
-];
+const sceneEls: Record<string, React.ReactNode> = {
+  intro: <IntroScene />,
+  agenda: <AgendaScene />,
+  why: <WhyScene />,
+  developer: <DeveloperScene />,
+  home: <FeatureScene feature={home} index={0} />,
+  overview: <OverviewScene features={features} />,
+  ...Object.fromEntries(features.map((f, i) => [f.id, <FeatureScene key={f.id} feature={f} index={i} />])),
+  platforms: <PlatformsScene />,
+  method: <MethodScene />,
+  example: <ExampleScene />,
+  findings: <FindingsScene />,
+  critique: <CritiqueScene />,
+  quote: <QuoteScene />,
+  outro: <OutroScene />,
+};
 
-export const NOOR_DURATION = scenes.reduce((s, x) => s + x.d, 0) - T * (scenes.length - 1);
+// Every scene but the last carries the crossfade into the next one after its final step
+const durations = deck.scenes.map(
+  (s, i) => s.entry + s.steps * s.step + (i < deck.scenes.length - 1 ? deck.fade : 0),
+);
+export const DECK_DURATION = durations.reduce((a, b) => a + b, 0) - deck.fade * (deck.scenes.length - 1);
 
-export const NoorVideo: React.FC = () => (
+export const NoorDeck: React.FC = () => (
   <AbsoluteFill>
     <Background />
     <TransitionSeries>
-      {scenes.flatMap((s, i) => [
+      {deck.scenes.flatMap((s, i) => [
         ...(i > 0
           ? [
               <TransitionSeries.Transition
                 key={`t${i}`}
                 presentation={fade()}
-                timing={linearTiming({ durationInFrames: T })}
+                timing={linearTiming({ durationInFrames: deck.fade })}
               />,
             ]
           : []),
-        <TransitionSeries.Sequence key={`s${i}`} durationInFrames={s.d}>
-          {s.el}
+        <TransitionSeries.Sequence key={s.id} durationInFrames={durations[i]}>
+          <StepCtx.Provider value={{ entry: s.entry, step: s.step }}>{sceneEls[s.id]}</StepCtx.Provider>
         </TransitionSeries.Sequence>,
       ])}
     </TransitionSeries>

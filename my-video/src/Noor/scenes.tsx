@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { C, QURAN, fa } from "./theme";
 import {
   AppIcon,
@@ -12,11 +12,48 @@ import {
   Pill,
   Reveal,
   Scene,
+  useAt,
   useSpring,
 } from "./ui";
-import { SHOTS, ShotScreen } from "./screens";
+import {
+  AIChatScreen,
+  Box,
+  SHOTS,
+  SearchScreen,
+  ShotScreen,
+  StepShot,
+  TafsirReadScreen,
+} from "./screens";
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
+
+const Header: React.FC<{ pill: string; title: React.ReactNode; subtitle?: React.ReactNode }> = ({
+  pill,
+  title,
+  subtitle,
+}) => (
+  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18 }}>
+    <Reveal delay={0}>
+      <Pill>{pill}</Pill>
+    </Reveal>
+    <Reveal delay={6}>
+      <div style={{ fontSize: 68, fontWeight: 900, textAlign: "center" }}>{title}</div>
+    </Reveal>
+    {subtitle ? (
+      <Reveal delay={12}>
+        <div style={{ fontSize: 32, color: C.muted, textAlign: "center" }}>{subtitle}</div>
+      </Reveal>
+    ) : null}
+  </div>
+);
+
+const CenterScene: React.FC<{ children: React.ReactNode; gap?: number }> = ({ children, gap = 44 }) => (
+  <Scene
+    style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap }}
+  >
+    {children}
+  </Scene>
+);
 
 const RotatingRing: React.FC<{ size: number }> = ({ size }) => {
   const frame = useCurrentFrame();
@@ -42,7 +79,7 @@ export const IntroScene: React.FC = () => {
     ["تاریخ", `${fa(27)} مهر ${fa(1405)}`],
   ];
   return (
-    <Scene style={{ alignItems: "center", justifyContent: "center", gap: 26, display: "flex", flexDirection: "column" }}>
+    <CenterScene gap={26}>
       <Reveal delay={4} y={-20}>
         <div style={{ fontFamily: QURAN, fontSize: 52, color: C.goldSoft }}>
           بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
@@ -71,9 +108,7 @@ export const IntroScene: React.FC = () => {
         </div>
       </Reveal>
       <Reveal delay={56}>
-        <div style={{ fontSize: 44, fontWeight: 500, color: C.muted, marginTop: -10 }}>
-          و قابلیت‌های آن
-        </div>
+        <div style={{ fontSize: 44, fontWeight: 500, color: C.muted, marginTop: -10 }}>و قابلیت‌های آن</div>
       </Reveal>
       <Divider delay={70} width={520} />
       <div style={{ display: "flex", gap: 22, marginTop: 6 }}>
@@ -86,45 +121,112 @@ export const IntroScene: React.FC = () => {
           </Reveal>
         ))}
       </div>
-    </Scene>
+    </CenterScene>
+  );
+};
+
+export const AgendaScene: React.FC = () => {
+  const items: [IconName, string][] = [
+    ["sparkles", "چرا نرم‌افزار قرآنی؟"],
+    ["info", "سازنده و نگاه کلی به برنامه"],
+    ["layers", "قابلیت‌های اصلی برنامه"],
+    ["search", "کاربرد در تفسیر موضوعی: «صبر»"],
+    ["check", "نقد و ارزیابی"],
+    ["star", "جمع‌بندی و پرسش و پاسخ"],
+  ];
+  return (
+    <CenterScene gap={50}>
+      <Header pill="فهرست ارائه" title="آنچه خواهیم دید" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "22px 30px" }}>
+        {items.map(([icon, label], i) => (
+          <Reveal key={label} delay={18 + i * 8} x={40} y={0}>
+            <Glass style={{ width: 640, padding: "20px 28px", display: "flex", alignItems: "center", gap: 22 }}>
+              <div style={{ fontSize: 44, fontWeight: 900, color: C.gold, width: 40, textAlign: "center" }}>
+                {fa(i + 1)}
+              </div>
+              <IconBadge name={icon} size={64} />
+              <div style={{ fontSize: 34, fontWeight: 700 }}>{label}</div>
+            </Glass>
+          </Reveal>
+        ))}
+      </div>
+    </CenterScene>
+  );
+};
+
+export const WhyScene: React.FC = () => {
+  const at = useAt();
+  const cards: [IconName, string, string][] = [
+    ["search", "گردآوری آیات", "تفسیر موضوعی با گردآوری همه‌ی آیات مرتبط با یک موضوع در سراسر قرآن آغاز می‌شود"],
+    ["layers", "مراجعه به تفاسیر و روایات", "فهم دقیق آیات به مطالعه و مقایسه‌ی تفاسیر و روایات تفسیری نیاز دارد"],
+    ["sparkles", "سرعت و دقت", "نرم‌افزار جستجو و مقایسه را سریع و دقیق می‌کند و منابع را در دسترس همه قرار می‌دهد"],
+  ];
+  return (
+    <CenterScene gap={56}>
+      <Header pill="مقدمه" title="چرا نرم‌افزار قرآنی؟" subtitle="تفسیر موضوعی و نیاز به ابزارهای پژوهشی" />
+      <div style={{ display: "flex", gap: 34 }}>
+        {cards.map(([icon, title, desc], i) => (
+          <Reveal key={title} delay={at(i + 1)} y={50}>
+            <Glass
+              style={{
+                width: 480,
+                minHeight: 380,
+                padding: "40px 34px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 22,
+                textAlign: "center",
+              }}
+            >
+              <IconBadge name={icon} size={96} />
+              <div style={{ fontSize: 38, fontWeight: 800 }}>{title}</div>
+              <div style={{ fontSize: 28, color: C.muted, lineHeight: 1.7 }}>{desc}</div>
+            </Glass>
+          </Reveal>
+        ))}
+      </div>
+    </CenterScene>
   );
 };
 
 export const DeveloperScene: React.FC = () => {
-  const products = ["جامع التفاسیر", "جامع الاحادیث", "کتابخانه‌ی دیجیتال نور"];
+  const at = useAt();
+  const products = ["جامع التفاسیر", "جامع الاحادیث", "کتابخانه‌ی دیجیتال نور", "قاموس نور"];
   return (
-    <Scene style={{ alignItems: "center", justifyContent: "center", display: "flex", flexDirection: "column", gap: 30 }}>
+    <CenterScene gap={30}>
       <Reveal delay={0}>
         <Pill>سازنده‌ی نرم‌افزار</Pill>
       </Reveal>
-      <Reveal delay={10}>
+      <Reveal delay={8}>
         <div style={{ fontSize: 76, fontWeight: 900, textAlign: "center", lineHeight: 1.35 }}>
           مرکز تحقیقات کامپیوتری علوم اسلامی
           <br />
           <span style={{ color: C.gold }}>(نور)</span>
         </div>
       </Reveal>
-      <Reveal delay={24}>
+      <Reveal delay={16}>
         <div style={{ fontSize: 36, color: C.muted, textAlign: "center", maxWidth: 1300, lineHeight: 1.7 }}>
           مرکزی در قم که سال‌هاست نرم‌افزارهای تخصصی علوم اسلامی تولید می‌کند
         </div>
       </Reveal>
-      <Divider delay={34} />
-      <Reveal delay={40}>
+      <Divider delay={22} />
+      <Reveal delay={at(1)}>
         <div style={{ fontSize: 28, color: C.muted, textAlign: "center" }}>از دیگر محصولات این مرکز:</div>
       </Reveal>
       <div style={{ display: "flex", gap: 22 }}>
         {products.map((p, i) => (
-          <Reveal key={p} delay={50 + i * 10} scale>
+          <Reveal key={p} delay={at(1) + 4 + i * 5} scale>
             <Glass style={{ padding: "18px 36px", fontSize: 32, fontWeight: 700 }}>{p}</Glass>
           </Reveal>
         ))}
       </div>
-    </Scene>
+    </CenterScene>
   );
 };
 
 export type Feature = {
+  id: string;
   icon: IconName;
   title: string;
   short: string;
@@ -135,162 +237,232 @@ export type Feature = {
   label?: string;
 };
 
-export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) => {
+export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) => (
+  <CenterScene gap={50}>
+    <Header
+      pill="نگاه کلی"
+      title={
+        <>
+          قابلیت‌ها <span style={{ color: C.gold }}>در یک نگاه</span>
+        </>
+      }
+      subtitle="یک برنامه برای تلاوت، فهم و پژوهش در قرآن کریم"
+    />
+    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 24, width: 1620 }}>
+      {features.map((f, i) => (
+        <Reveal key={f.id} delay={16 + i * 7} scale>
+          <Glass
+            style={{
+              width: 300,
+              height: 190,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 14,
+            }}
+          >
+            <IconBadge name={f.icon} size={74} />
+            <div style={{ fontSize: 28, fontWeight: 800 }}>{f.short}</div>
+          </Glass>
+        </Reveal>
+      ))}
+    </div>
+  </CenterScene>
+);
+
+const Bullet: React.FC<{ delay: number; children: React.ReactNode }> = ({ delay, children }) => (
+  <Reveal delay={delay} x={50} y={0}>
+    <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+      <div
+        style={{
+          width: 46,
+          height: 46,
+          borderRadius: 14,
+          background: "rgba(226,189,107,0.15)",
+          border: "1.5px solid rgba(226,189,107,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <Icon name="check" size={26} color={C.gold} stroke={3} />
+      </div>
+      <div style={{ fontSize: 34, fontWeight: 500, lineHeight: 1.5 }}>{children}</div>
+    </div>
+  </Reveal>
+);
+
+const StatChip: React.FC<{ value: string; label: string; delay: number }> = ({ value, label, delay }) => {
+  const frame = useCurrentFrame();
+  const p = useSpring(delay, 14);
   return (
-    <Scene style={{ alignItems: "center", justifyContent: "center", display: "flex", flexDirection: "column", gap: 50 }}>
-      <Reveal delay={0}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 72, fontWeight: 900 }}>
-            قابلیت‌ها <span style={{ color: C.gold }}>در یک نگاه</span>
-          </div>
-          <div style={{ fontSize: 32, color: C.muted, marginTop: 10 }}>
-            یک برنامه برای تلاوت، فهم و پژوهش در قرآن کریم
+    <div
+      style={{
+        position: "absolute",
+        bottom: 150,
+        right: -70,
+        transform: `scale(${p}) translateY(${Math.sin(frame / 25) * 6}px)`,
+        opacity: p,
+      }}
+    >
+      <Glass
+        style={{
+          padding: "18px 30px",
+          background: "rgba(10,25,80,0.85)",
+          border: `1.5px solid ${C.gold}`,
+          textAlign: "center",
+        }}
+      >
+        <div style={{ fontSize: 64, fontWeight: 900, color: C.gold, lineHeight: 1.1 }}>{value}</div>
+        <div style={{ fontSize: 24, fontWeight: 700 }}>{label}</div>
+      </Glass>
+    </div>
+  );
+};
+
+// Text column on the right, phone on the left; the phone screen is passed in
+const PhoneLayout: React.FC<{ children: React.ReactNode; screen: React.ReactNode; stat?: React.ReactNode }> = ({
+  children,
+  screen,
+  stat,
+}) => (
+  <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 150px", gap: 80 }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>{children}</div>
+    <div style={{ position: "relative", width: 560, display: "flex", justifyContent: "center" }}>
+      <Phone delay={4}>{screen}</Phone>
+      {stat}
+    </div>
+  </Scene>
+);
+
+export const FeatureScene: React.FC<{ feature: Feature; index: number }> = ({ feature, index }) => {
+  const at = useAt();
+  return (
+    <PhoneLayout
+      screen={feature.screen}
+      stat={feature.stat ? <StatChip {...feature.stat} delay={16} /> : null}
+    >
+      <Reveal delay={0} x={60} y={0}>
+        <Pill>{feature.label ?? `قابلیت ${fa(String(index + 1).padStart(2, "0"))}`}</Pill>
+      </Reveal>
+      <Reveal delay={6} x={60} y={0}>
+        <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
+          <IconBadge name={feature.icon} size={110} />
+          <div style={{ fontSize: feature.title.length > 16 ? 64 : 80, fontWeight: 900, lineHeight: 1.25 }}>
+            {feature.title}
           </div>
         </div>
       </Reveal>
-      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 24, width: 1620 }}>
-        {features.map((f, i) => (
-          <Reveal key={f.title} delay={18 + i * 8} scale>
+      <Reveal delay={12} x={60} y={0}>
+        <div style={{ fontSize: 36, color: C.muted, lineHeight: 1.6 }}>{feature.subtitle}</div>
+      </Reveal>
+      <div style={{ display: "flex", flexDirection: "column", gap: 20, marginTop: 10 }}>
+        {feature.bullets.map((b, i) => (
+          <Bullet key={b} delay={at(i + 1)}>
+            {b}
+          </Bullet>
+        ))}
+      </div>
+    </PhoneLayout>
+  );
+};
+
+export const PlatformsScene: React.FC = () => {
+  const at = useAt();
+  const devices: { icon: IconName; name: string; en: string }[] = [
+    { icon: "smartphone", name: "اندروید", en: "Android" },
+    { icon: "tablet", name: "آی‌اواس", en: "iOS" },
+    { icon: "tv", name: "تلویزیون هوشمند", en: "Smart TV" },
+  ];
+  const langs = ["فارسی", "العربية", "English", "Türkçe", "اردو"];
+  const popup: Box = { x: 148, y: 612, w: 627, h: 740 };
+  return (
+    <PhoneLayout screen={<StepShot shot={SHOTS.language} boxes={[null, popup, null]} />}>
+      <Reveal delay={0} x={60} y={0}>
+        <Pill>در دسترس همه</Pill>
+      </Reveal>
+      <Reveal delay={6} x={60} y={0}>
+        <div style={{ fontSize: 72, fontWeight: 900 }}>
+          یک برنامه، <span style={{ color: C.gold }}>سه بستر</span>
+        </div>
+      </Reveal>
+      <div style={{ display: "flex", gap: 24, marginTop: 8 }}>
+        {devices.map((d, i) => (
+          <Reveal key={d.en} delay={at(1) + i * 6} y={50}>
             <Glass
-              style={{
-                width: 300,
-                height: 190,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 14,
-              }}
+              style={{ width: 290, padding: "28px 0", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}
             >
-              <IconBadge name={f.icon} size={74} />
-              <div style={{ fontSize: 28, fontWeight: 800 }}>{f.short}</div>
+              <IconBadge name={d.icon} size={90} />
+              <div style={{ fontSize: 32, fontWeight: 800 }}>{d.name}</div>
+              <div style={{ fontSize: 22, color: C.muted, direction: "ltr" }}>{d.en}</div>
             </Glass>
           </Reveal>
         ))}
       </div>
-    </Scene>
-  );
-};
-
-export const FeatureScene: React.FC<{ feature: Feature; index: number }> = ({ feature, index }) => {
-  const frame = useCurrentFrame();
-  const statP = useSpring(70, 12);
-  return (
-    <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 150px", gap: 80 }}>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>
-        <Reveal delay={0} x={60} y={0}>
-          <Pill>{feature.label ?? `قابلیت ${fa(String(index + 1).padStart(2, "0"))}`}</Pill>
-        </Reveal>
-        <Reveal delay={8} x={60} y={0}>
-          <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-            <IconBadge name={feature.icon} size={110} />
-            <div style={{ fontSize: feature.title.length > 16 ? 64 : 80, fontWeight: 900, lineHeight: 1.25 }}>
-              {feature.title}
-            </div>
-          </div>
-        </Reveal>
-        <Reveal delay={16} x={60} y={0}>
-          <div style={{ fontSize: 36, color: C.muted, lineHeight: 1.6 }}>{feature.subtitle}</div>
-        </Reveal>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20, marginTop: 10 }}>
-          {feature.bullets.map((b, i) => (
-            <Reveal key={b} delay={30 + i * 14} x={50} y={0}>
-              <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-                <div
-                  style={{
-                    width: 46,
-                    height: 46,
-                    borderRadius: 14,
-                    background: "rgba(226,189,107,0.15)",
-                    border: `1.5px solid rgba(226,189,107,0.5)`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  <Icon name="check" size={26} color={C.gold} stroke={3} />
-                </div>
-                <div style={{ fontSize: 34, fontWeight: 500, lineHeight: 1.5 }}>{b}</div>
-              </div>
-            </Reveal>
-          ))}
+      <Reveal delay={at(2)} x={60} y={0}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <Icon name="globe" size={40} color={C.gold} />
+          <span style={{ fontSize: 34, fontWeight: 700 }}>رابط کاربری به {fa(5)} زبان</span>
         </div>
+      </Reveal>
+      <div style={{ display: "flex", gap: 14 }}>
+        {langs.map((l, i) => (
+          <Reveal key={l} delay={at(2) + 4 + i * 3} scale y={0}>
+            <Glass style={{ padding: "8px 24px", fontSize: 28, fontWeight: 700, borderRadius: 999 }}>{l}</Glass>
+          </Reveal>
+        ))}
       </div>
-      <div style={{ position: "relative", width: 560, display: "flex", justifyContent: "center" }}>
-        <Phone delay={6}>
-          {feature.screen}
-        </Phone>
-        {feature.stat ? (
-          <div
-            style={{
-              position: "absolute",
-              bottom: 150,
-              right: -70,
-              transform: `scale(${statP}) translateY(${Math.sin(frame / 25) * 6}px)`,
-              opacity: statP,
-            }}
-          >
-            <Glass
-              style={{
-                padding: "18px 30px",
-                background: "rgba(10,25,80,0.85)",
-                border: `1.5px solid ${C.gold}`,
-                textAlign: "center",
-              }}
-            >
-              <div style={{ fontSize: 64, fontWeight: 900, color: C.gold, lineHeight: 1.1 }}>
-                {feature.stat.value}
-              </div>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>{feature.stat.label}</div>
-            </Glass>
-          </div>
-        ) : null}
-      </div>
-    </Scene>
+      <Reveal delay={at(3)} x={60} y={0}>
+        <div style={{ fontSize: 30, color: C.muted }}>امکان استفاده‌ی آنلاین از محتوا، بدون نیاز به دانلود فایل</div>
+      </Reveal>
+    </PhoneLayout>
   );
 };
 
-export const ThematicScene: React.FC = () => {
+const STEP_W = 390;
+
+export const MethodScene: React.FC = () => {
   const frame = useCurrentFrame();
+  const at = useAt();
   const steps: { icon: IconName; title: string; desc: string }[] = [
-    { icon: "search", title: "یافتن آیات", desc: "جستجوی هوشمند «صبر» و مراجعه به «فرهنگ موضوعی»" },
+    { icon: "search", title: "یافتن آیات", desc: "جستجوی هوشمند و مراجعه به «فرهنگ موضوعی»" },
     { icon: "star", title: "گردآوری آیات", desc: "دسته‌بندی آیات در «علاقه‌مندی‌ها» و یادداشت‌نویسی" },
     { icon: "layers", title: "مطالعه‌ی تفاسیر", desc: `مقایسه‌ی ${fa(11)} تفسیر شیعه و سنی، حتی بدون اینترنت` },
     { icon: "sparkles", title: "هوش مصنوعی", desc: "گفتگوی هوشمند با تفاسیر و کشف روایات مرتبط" },
   ];
-  const line = interpolate(frame, [40, 150], [0, 1], clamp);
+  const line = interpolate(
+    frame,
+    [at(2), at(2) + 20, at(3), at(3) + 20, at(4), at(4) + 20],
+    [0, 1 / 3, 1 / 3, 2 / 3, 2 / 3, 1],
+    clamp,
+  );
   return (
-    <Scene style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 30 }}>
-      <Reveal delay={0}>
-        <Pill>ویژه‌ی درس تفسیر موضوعی</Pill>
-      </Reveal>
-      <Reveal delay={8}>
-        <div style={{ fontSize: 64, fontWeight: 900, textAlign: "center" }}>
-          کاربرد <span style={{ color: C.gold }}>«قرآن نور»</span> در تفسیر موضوعی
-        </div>
-      </Reveal>
-      <Reveal delay={18}>
-        <div style={{ fontSize: 34, color: C.muted }}>
-          نمونه: بررسی موضوع <span style={{ color: C.goldSoft, fontWeight: 800 }}>«صبر»</span> در قرآن کریم —{" "}
-          <span style={{ fontFamily: QURAN, color: C.goldSoft }}>وَاصْبِرْ وَمَا صَبْرُكَ إِلَّا بِاللَّهِ</span>{" "}
-          <span style={{ fontSize: 26 }}>(نحل، {fa(127)})</span>
-        </div>
-      </Reveal>
+    <CenterScene gap={36}>
+      <Header
+        pill="ویژه‌ی درس تفسیر موضوعی"
+        title={
+          <>
+            روش کار با <span style={{ color: C.gold }}>«قرآن نور»</span> در تفسیر موضوعی
+          </>
+        }
+        subtitle="چهار گام، از یافتن آیات تا جمع‌بندی"
+      />
       <div style={{ position: "relative", display: "flex", gap: 40, marginTop: 10 }}>
         <div
           style={{
             position: "absolute",
             top: 46,
-            right: 195,
-            width: `calc((100% - 390px) * ${line})`,
+            right: STEP_W / 2,
+            width: `calc((100% - ${STEP_W}px) * ${line})`,
             height: 3,
             background: `linear-gradient(to left, ${C.gold}, ${C.blue})`,
           }}
         />
         {steps.map((s, i) => (
-          <Reveal key={s.title} delay={40 + i * 28} y={50}>
-            <div style={{ width: 390, display: "flex", flexDirection: "column", alignItems: "center", gap: 22 }}>
+          <Reveal key={s.title} delay={at(i + 1)} y={50}>
+            <div style={{ width: STEP_W, display: "flex", flexDirection: "column", alignItems: "center", gap: 22 }}>
               <div
                 style={{
                   width: 92,
@@ -304,7 +476,6 @@ export const ThematicScene: React.FC = () => {
                   fontSize: 40,
                   fontWeight: 900,
                   color: C.gold,
-                  position: "relative",
                 }}
               >
                 {fa(i + 1)}
@@ -320,43 +491,281 @@ export const ThematicScene: React.FC = () => {
           </Reveal>
         ))}
       </div>
-      <Reveal delay={170}>
+      <Reveal delay={at(5)}>
         <Glass style={{ padding: "18px 40px", border: `1.5px solid ${C.gold}`, fontSize: 32, fontWeight: 700 }}>
           نتیجه: دستیابی سریع و دقیق به دیدگاه جامع قرآن درباره‌ی یک موضوع
         </Glass>
       </Reveal>
-    </Scene>
+    </CenterScene>
   );
 };
 
-export const OutroScene: React.FC = () => {
+// Phone screens that crossfade at each click of the practical example
+const ScreenSwitch: React.FC<{ screens: { from: number; el: React.ReactNode }[] }> = ({ screens }) => {
   const frame = useCurrentFrame();
-  const { durationInFrames } = useVideoConfig();
-  const fadeOut = interpolate(frame, [durationInFrames - 25, durationInFrames], [1, 0], clamp);
   return (
-    <Scene
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 30,
-        opacity: fadeOut,
-      }}
+    <>
+      {screens.map((s, i) => {
+        const next = screens[i + 1];
+        const fadeIn = i === 0 ? 1 : interpolate(frame, [s.from, s.from + 12], [0, 1], clamp);
+        const fadeOut = next ? interpolate(frame, [next.from, next.from + 12], [1, 0], clamp) : 1;
+        const o = Math.min(fadeIn, fadeOut);
+        if (o <= 0) return null;
+        return (
+          <div key={i} style={{ position: "absolute", inset: 0, opacity: o }}>
+            {s.el}
+          </div>
+        );
+      })}
+    </>
+  );
+};
+
+export const ExampleScene: React.FC = () => {
+  const frame = useCurrentFrame();
+  const at = useAt();
+  const steps: [string, string][] = [
+    ["جستجوی هوشمند", "جستجوی متنی یا صوتی «صبر» در سوره، آیه، ترجمه و تفسیر"],
+    ["گردآوری آیات", "افزودن آیات منتخب به دسته‌ی «صبر» در علاقه‌مندی‌ها"],
+    ["مطالعه‌ی تفاسیر", "مقایسه‌ی تفسیر آیات در تفاسیر مختلف و روایات تفسیری"],
+    ["گفتگوی هوشمند", "پرسش از هوش مصنوعی و سنجیدن پاسخ با منابع"],
+  ];
+  const current = steps.reduce((c, _, i) => (frame >= at(i + 1) ? i : c), -1);
+  return (
+    <PhoneLayout
+      screen={
+        <ScreenSwitch
+          screens={[
+            {
+              from: 0,
+              el: <ShotScreen shot={SHOTS.home} marks={[{ at: 24, box: { x: 28, y: 245, w: 867, h: 98 } }]} />,
+            },
+            {
+              from: at(1),
+              el: <SearchScreen typeAt={at(1) + 4} resultsAt={at(1) + 30} favAt={at(2)} />,
+            },
+            { from: at(3), el: <TafsirReadScreen from={at(3) + 4} /> },
+            { from: at(4), el: <AIChatScreen from={at(4) + 4} /> },
+          ]}
+        />
+      }
     >
-      <Reveal delay={0} scale>
-        <div style={{ boxShadow: "0 0 70px rgba(47,107,255,0.55)", borderRadius: 40 }}>
-          <AppIcon size={160} />
+      <Reveal delay={0} x={60} y={0}>
+        <Pill>نمونه‌ی عملی</Pill>
+      </Reveal>
+      <Reveal delay={6} x={60} y={0}>
+        <div style={{ fontSize: 72, fontWeight: 900 }}>
+          بررسی موضوع <span style={{ color: C.gold }}>«صبر»</span>
         </div>
       </Reveal>
-      <Reveal delay={12}>
-        <div style={{ fontSize: 96, fontWeight: 900 }}>
+      <Reveal delay={12} x={60} y={0}>
+        <div style={{ fontSize: 34, color: C.muted }}>با «قرآن نور»، قدم به قدم</div>
+      </Reveal>
+      <div style={{ display: "flex", flexDirection: "column", gap: 18, marginTop: 10 }}>
+        {steps.map(([title, desc], i) => {
+          const on = i === current;
+          return (
+            <Reveal key={title} delay={at(i + 1)} x={50} y={0}>
+              <Glass
+                style={{
+                  padding: "18px 26px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 22,
+                  border: `1.5px solid ${on ? C.gold : C.glassBorder}`,
+                  opacity: on ? 1 : 0.6,
+                }}
+              >
+                <div
+                  style={{
+                    width: 60,
+                    height: 60,
+                    borderRadius: "50%",
+                    border: `2.5px solid ${C.gold}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 30,
+                    fontWeight: 900,
+                    color: C.gold,
+                    flexShrink: 0,
+                  }}
+                >
+                  {fa(i + 1)}
+                </div>
+                <div>
+                  <div style={{ fontSize: 34, fontWeight: 800 }}>{title}</div>
+                  <div style={{ fontSize: 26, color: C.muted, marginTop: 4 }}>{desc}</div>
+                </div>
+              </Glass>
+            </Reveal>
+          );
+        })}
+      </div>
+    </PhoneLayout>
+  );
+};
+
+export const FindingsScene: React.FC = () => {
+  const at = useAt();
+  const verses: [string, string, string][] = [
+    ["بقره، ۱۵۳", "اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ ۚ إِنَّ اللَّهَ مَعَ الصَّابِرِينَ", "صبر و نماز، دو تکیه‌گاه مؤمن؛ خداوند با صابران است"],
+    ["آل‌عمران، ۲۰۰", "اصْبِرُوا وَصَابِرُوا وَرَابِطُوا وَاتَّقُوا اللَّهَ لَعَلَّكُمْ تُفْلِحُونَ", "صبر فردی و پایداری جمعی، راه رستگاری"],
+    ["نحل، ۱۲۷", "وَاصْبِرْ وَمَا صَبْرُكَ إِلَّا بِاللَّهِ", "صبر، به توفیق و یاری خداست"],
+    ["زمر، ۱۰", "إِنَّمَا يُوَفَّى الصَّابِرُونَ أَجْرَهُمْ بِغَيْرِ حِسَابٍ", "پاداش صابران، بی‌حساب است"],
+  ];
+  return (
+    <CenterScene gap={44}>
+      <Header
+        pill="یافته‌ها"
+        title={
+          <>
+            <span style={{ color: C.gold }}>صبر</span> در آیات قرآن
+          </>
+        }
+        subtitle="نمونه‌ای از نتایج بررسی موضوعی"
+      />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
+        {verses.map(([ref, ayah, point], i) => (
+          <Reveal key={ref} delay={at(i + 1)} y={40}>
+            <Glass
+              style={{
+                width: 780,
+                minHeight: 230,
+                padding: "26px 34px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+              }}
+            >
+              <div style={{ alignSelf: "flex-start" }}>
+                <Pill>{ref}</Pill>
+              </div>
+              <div style={{ fontFamily: QURAN, fontSize: 36, color: C.goldSoft, lineHeight: 1.7 }}>{ayah}</div>
+              <div style={{ fontSize: 32, fontWeight: 800 }}>{point}</div>
+            </Glass>
+          </Reveal>
+        ))}
+      </div>
+    </CenterScene>
+  );
+};
+
+export const CritiqueScene: React.FC = () => {
+  const at = useAt();
+  const columns: { title: string; icon: IconName; color: string; items: string[] }[] = [
+    {
+      title: "نقاط قوت",
+      icon: "check",
+      color: "#7fd8a4",
+      items: [
+        `محتوای جامع: ${fa(28)} دوره‌ی قرائت، ${fa(11)} تفسیر آفلاین، ${fa(122)} ترجمه`,
+        "ابزارهای پژوهشی: جستجوی هوشمند، فرهنگ موضوعی، هوش مصنوعی",
+        "تولید مرکزی معتبر و باسابقه در علوم اسلامی",
+        "سه بستر و پنج زبان؛ مناسب عموم و پژوهشگران",
+      ],
+    },
+    {
+      title: "نیازمند بهبود",
+      icon: "info",
+      color: "#f2b866",
+      items: [
+        "هوش مصنوعی و کتابخانه‌ی دیجیتال به اینترنت نیاز دارند",
+        "فایل‌های صوتی قرائت، حافظه‌ی زیادی از گوشی می‌گیرند",
+        "پاسخ‌های هوش مصنوعی باید با منابع اصلی سنجیده شوند",
+        "گزارش برخی کاربران از اشکال پس از به‌روزرسانی‌ها",
+      ],
+    },
+  ];
+  return (
+    <CenterScene gap={44}>
+      <Header pill="نقد و ارزیابی" title="ارزیابی برنامه" />
+      <div style={{ display: "flex", gap: 36 }}>
+        {columns.map((col, c) => (
+          <Reveal key={col.title} delay={at(c + 1)} y={40}>
+            <Glass style={{ width: 790, padding: "30px 36px", display: "flex", flexDirection: "column", gap: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <div
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 20,
+                    background: col.color,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Icon name={col.icon} size={34} color={C.bg1} stroke={3} />
+                </div>
+                <div style={{ fontSize: 44, fontWeight: 900, color: col.color }}>{col.title}</div>
+              </div>
+              {col.items.map((item, i) => (
+                <Reveal key={item} delay={at(c + 1) + 6 + i * 5} x={30} y={0}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+                    <div
+                      style={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: "50%",
+                        background: col.color,
+                        marginTop: 18,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <div style={{ fontSize: 30, lineHeight: 1.6 }}>{item}</div>
+                  </div>
+                </Reveal>
+              ))}
+            </Glass>
+          </Reveal>
+        ))}
+      </div>
+    </CenterScene>
+  );
+};
+
+export const QuoteScene: React.FC = () => (
+  <CenterScene gap={34}>
+    <Reveal delay={0}>
+      <Pill>جمع‌بندی</Pill>
+    </Reveal>
+    <Reveal delay={10}>
+      <Glass
+        style={{
+          maxWidth: 1450,
+          padding: "60px 90px",
+          position: "relative",
+          border: "1.5px solid rgba(226,189,107,0.5)",
+        }}
+      >
+        <div style={{ position: "absolute", top: -50, right: 50, fontSize: 160, color: C.gold, lineHeight: 1 }}>«</div>
+        <div style={{ fontSize: 48, fontWeight: 700, lineHeight: 1.8, textAlign: "center" }}>
+          ساختار این نرم‌افزار به گونه‌ای طراحی شده که هم{" "}
+          <span style={{ color: C.goldSoft }}>کاربران عمومی</span> بتوانند به‌راحتی از آن استفاده کنند و هم
+          امکان تحقیق را برای <span style={{ color: C.goldSoft }}>علاقه‌مندان و پژوهشگران</span> فراهم کرده باشد.
+        </div>
+      </Glass>
+    </Reveal>
+    <Reveal delay={26}>
+      <div style={{ fontSize: 28, color: C.muted }}>فصلنامه‌ی ره‌آورد نور، شماره‌ی {fa(83)}</div>
+    </Reveal>
+  </CenterScene>
+);
+
+export const OutroScene: React.FC = () => (
+  <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 170px", gap: 90 }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>
+      <Reveal delay={0} x={60} y={0}>
+        <Pill gold>پرسش و پاسخ</Pill>
+      </Reveal>
+      <Reveal delay={8} x={60} y={0}>
+        <div style={{ fontSize: 92, fontWeight: 900 }}>
           با سپاس از <span style={{ color: C.gold }}>توجه شما</span>
         </div>
       </Reveal>
-      <Divider delay={24} width={520} />
-      <Reveal delay={32}>
-        <div style={{ fontSize: 38, textAlign: "center", lineHeight: 1.9 }}>
+      <Reveal delay={18} x={60} y={0}>
+        <div style={{ fontSize: 36, lineHeight: 1.9 }}>
           <span style={{ color: C.gold }}>تهیه‌کنندگان: </span>فوژان صفای روح و مریم نظریه
           <br />
           <span style={{ color: C.gold }}>مدرس: </span>استاد محب پور حقیقی
@@ -366,98 +775,24 @@ export const OutroScene: React.FC = () => {
           </span>
         </div>
       </Reveal>
-      <Reveal delay={50}>
-        <div style={{ fontSize: 22, color: C.muted, marginTop: 20 }}>
-          منابع: فصلنامه‌ی ره‌آورد نور، شماره‌ی {fa(83)}؛ سایت رسمی نرم‌افزارهای نور (noorsoft.org)
+      <Reveal delay={34} x={60} y={0}>
+        <div style={{ fontSize: 22, color: C.muted, lineHeight: 1.7 }}>
+          منابع: فصلنامه‌ی ره‌آورد نور، شماره‌ی {fa(83)}؛ سایت رسمی نرم‌افزارهای نور (noorsoft.org)؛
+          <br />
+          اسکرین‌شات‌ها از نسخه‌ی فعلی برنامه
         </div>
       </Reveal>
-    </Scene>
-  );
-};
-
-export const PlatformsScene: React.FC = () => {
-  const devices: { icon: IconName; name: string; en: string }[] = [
-    { icon: "smartphone", name: "اندروید", en: "Android" },
-    { icon: "tablet", name: "آی‌اواس", en: "iOS" },
-    { icon: "tv", name: "تلویزیون هوشمند", en: "Smart TV" },
-  ];
-  const langs = ["فارسی", "العربية", "English", "Türkçe", "اردو"];
-  return (
-    <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 150px", gap: 80 }}>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 34 }}>
-        <Reveal delay={0} x={60} y={0}>
-          <Pill>در دسترس همه</Pill>
-        </Reveal>
-        <Reveal delay={8} x={60} y={0}>
-          <div style={{ fontSize: 72, fontWeight: 900 }}>
-            یک برنامه، <span style={{ color: C.gold }}>سه بستر</span>
-          </div>
-        </Reveal>
-        <div style={{ display: "flex", gap: 24 }}>
-          {devices.map((d, i) => (
-            <Reveal key={d.en} delay={22 + i * 12} y={50}>
-              <Glass
-                style={{
-                  width: 290,
-                  padding: "28px 0",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 14,
-                }}
-              >
-                <IconBadge name={d.icon} size={90} />
-                <div style={{ fontSize: 32, fontWeight: 800 }}>{d.name}</div>
-                <div style={{ fontSize: 22, color: C.muted, direction: "ltr" }}>{d.en}</div>
-              </Glass>
-            </Reveal>
-          ))}
+    </div>
+    <Reveal delay={24} scale y={0}>
+      <Glass style={{ padding: 34, display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+        <div style={{ background: "white", borderRadius: 24, padding: 18 }}>
+          <Img src={staticFile("qr-myket.svg")} style={{ width: 340, height: 340, display: "block" }} />
         </div>
-        <Reveal delay={66} x={60} y={0}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Icon name="globe" size={40} color={C.gold} />
-            <span style={{ fontSize: 34, fontWeight: 700 }}>رابط کاربری به {fa(5)} زبان</span>
-          </div>
-        </Reveal>
-        <div style={{ display: "flex", gap: 14 }}>
-          {langs.map((l, i) => (
-            <Reveal key={l} delay={76 + i * 7} scale y={0}>
-              <Glass style={{ padding: "8px 24px", fontSize: 28, fontWeight: 700, borderRadius: 999 }}>{l}</Glass>
-            </Reveal>
-          ))}
-        </div>
-        <Reveal delay={120} x={60} y={0}>
-          <div style={{ fontSize: 30, color: C.muted }}>
-            امکان استفاده‌ی آنلاین از محتوا، بدون نیاز به دانلود فایل
-          </div>
-        </Reveal>
-      </div>
-      <div style={{ width: 560, display: "flex", justifyContent: "center" }}>
-        <Phone delay={6}>
-          <ShotScreen shot={SHOTS.language} marks={[{ at: 70, box: { x: 148, y: 612, w: 627, h: 740 } }]} />
-        </Phone>
-      </div>
-    </Scene>
-  );
-};
-
-export const QuoteScene: React.FC = () => (
-  <Scene style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 34 }}>
-    <Reveal delay={0}>
-      <Pill>جمع‌بندی</Pill>
-    </Reveal>
-    <Reveal delay={10}>
-      <Glass style={{ maxWidth: 1450, padding: "60px 90px", position: "relative", border: `1.5px solid rgba(226,189,107,0.5)` }}>
-        <div style={{ position: "absolute", top: -50, right: 50, fontSize: 160, color: C.gold, lineHeight: 1 }}>«</div>
-        <div style={{ fontSize: 48, fontWeight: 700, lineHeight: 1.8, textAlign: "center" }}>
-          ساختار این نرم‌افزار به گونه‌ای طراحی شده که هم{" "}
-          <span style={{ color: C.goldSoft }}>کاربران عمومی</span> بتوانند به‌راحتی از آن استفاده کنند و هم
-          امکان تحقیق را برای <span style={{ color: C.goldSoft }}>علاقه‌مندان و پژوهشگران</span> فراهم کرده باشد.
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <AppIcon size={56} />
+          <div style={{ fontSize: 30, fontWeight: 800 }}>دریافت «قرآن نور» از مایکت</div>
         </div>
       </Glass>
-    </Reveal>
-    <Reveal delay={30}>
-      <div style={{ fontSize: 28, color: C.muted }}>فصلنامه‌ی ره‌آورد نور، شماره‌ی {fa(83)}</div>
     </Reveal>
   </Scene>
 );

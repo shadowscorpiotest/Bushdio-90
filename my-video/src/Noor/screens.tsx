@@ -1,7 +1,7 @@
 import React from "react";
 import { Easing, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { A, QURAN, fa } from "./theme";
-import { Icon, IconName, MiniChip, useSpring } from "./ui";
+import { Icon, IconName, MiniChip, Skeleton, useAt, useSpring } from "./ui";
 
 const SCREEN_W = 412;
 const NOTCH_H = 40;
@@ -21,7 +21,7 @@ export const SHOTS = {
   readingSheet: { src: "screens/reading-sheet.jpg", basis: 923, crop: 100 },
 } satisfies Record<string, Shot>;
 
-type Box = { x: number; y: number; w: number; h: number };
+export type Box = { x: number; y: number; w: number; h: number };
 export type Mark = { at: number; box: Box };
 
 // Spotlight that moves between boxes, dimming the rest of the screen
@@ -157,13 +157,13 @@ export const TafsirScreen: React.FC = () => {
     <AppScreen title="تفاسیر منتخب">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <Pop
-          delay={15}
+          delay={8}
           style={{ ...card, display: "flex", alignItems: "center", gap: 10, borderRadius: 999, padding: "12px 18px" }}
         >
           <span style={{ flex: 1, fontSize: 17, color: A.muted }}>جستجو در تفاسیر</span>
           <Icon name="search" size={22} color={A.gold} />
         </Pop>
-        <Pop delay={25} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Pop delay={12} style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {filters.map((f, i) => (
             <MiniChip key={f} active={i === active}>
               {f}
@@ -171,11 +171,7 @@ export const TafsirScreen: React.FC = () => {
           ))}
         </Pop>
         {list.map(([name, author, madhab], i) => (
-          <Pop
-            key={name}
-            delay={45 + i * 14}
-            style={{ ...card, display: "flex", alignItems: "center", gap: 14 }}
-          >
+          <Pop key={name} delay={14 + i * 4} style={{ ...card, display: "flex", alignItems: "center", gap: 14 }}>
             <GoldDisc icon="layers" />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 20, fontWeight: 800 }}>{name}</div>
@@ -207,18 +203,19 @@ export const TafsirScreen: React.FC = () => {
 
 export const WordsScreen: React.FC = () => {
   const frame = useCurrentFrame();
+  const at = useAt();
   const words = [
     ["الْحَمْدُ", "ستایش"],
     ["لِلَّهِ", "برای خدا"],
     ["رَبِّ", "پروردگار"],
     ["الْعَالَمِينَ", "جهانیان"],
   ];
-  const active = Math.floor(interpolate(frame, [50, 200], [0, 4], clamp)) % 4;
+  const active = Math.floor(frame / 30) % 4;
   return (
     <AppScreen title="واژه‌نامه">
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <Pop
-          delay={15}
+          delay={8}
           style={{ ...card, fontFamily: QURAN, fontSize: 30, textAlign: "center", border: `1.5px solid ${A.gold}` }}
         >
           {AYAH_2}
@@ -229,25 +226,17 @@ export const WordsScreen: React.FC = () => {
             return (
               <Pop
                 key={ar}
-                delay={28 + i * 10}
+                delay={12 + i * 5}
                 style={{
                   ...card,
                   textAlign: "center",
                   padding: "18px 10px",
                   border: `2.5px solid ${on ? A.blue : "transparent"}`,
-                  transform: on ? "scale(1.04)" : undefined,
                 }}
               >
                 <div style={{ fontFamily: QURAN, fontSize: 34 }}>{ar}</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: A.gold, marginTop: 4 }}>{mean}</div>
-                <div
-                  style={{
-                    marginTop: 8,
-                    display: "flex",
-                    justifyContent: "center",
-                    opacity: on ? 0.6 + Math.abs(Math.sin(frame / 5)) * 0.4 : 0.3,
-                  }}
-                >
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "center", opacity: on ? 1 : 0.3 }}>
                   <Icon name="speaker" size={22} color={on ? A.blue : A.muted} />
                 </div>
               </Pop>
@@ -255,7 +244,7 @@ export const WordsScreen: React.FC = () => {
           })}
         </div>
         <Pop
-          delay={90}
+          delay={at(3)}
           style={{ ...card, display: "flex", alignItems: "center", gap: 12, border: `1.5px solid ${A.gold}` }}
         >
           <GoldDisc icon="library" />
@@ -269,7 +258,7 @@ export const WordsScreen: React.FC = () => {
   );
 };
 
-const SuraInfoScreen: React.FC = () => {
+const SuraInfoScreen: React.FC<{ from: number }> = ({ from }) => {
   const facts: [string, string][] = [
     ["سوره", fa(1)],
     ["تعداد آیات", fa(7)],
@@ -287,19 +276,18 @@ const SuraInfoScreen: React.FC = () => {
     "ترتیب در مصحف",
     "ارتباط با سوره‌ی قبلی",
   ];
-  const d = 125;
   return (
     <AppScreen title="سوره‌نامه: حمد">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {facts.map(([k, v], i) => (
-            <Pop key={k} delay={d + i * 6} style={{ ...card, padding: "12px 14px" }}>
+            <Pop key={k} delay={from + 4 + i * 3} style={{ ...card, padding: "12px 14px" }}>
               <div style={{ fontSize: 13, color: A.muted }}>{k}</div>
               <div style={{ fontSize: 22, fontWeight: 900, color: A.gold }}>{v}</div>
             </Pop>
           ))}
         </div>
-        <Pop delay={d + 25} style={card}>
+        <Pop delay={from + 10} style={card}>
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>نام‌ها</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {names.map((n) => (
@@ -312,14 +300,14 @@ const SuraInfoScreen: React.FC = () => {
             ))}
           </div>
         </Pop>
-        <Pop delay={d + 40} style={card}>
+        <Pop delay={from + 14} style={card}>
           <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>محتوا</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 10px" }}>
-            {content.map((c, i) => (
-              <Pop key={c} delay={d + 48 + i * 4} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
+            {content.map((c) => (
+              <div key={c} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
                 <div style={{ width: 7, height: 7, borderRadius: "50%", background: A.gold, flexShrink: 0 }} />
                 {c}
-              </Pop>
+              </div>
             ))}
           </div>
         </Pop>
@@ -328,40 +316,46 @@ const SuraInfoScreen: React.FC = () => {
   );
 };
 
-// Real sura list first, then the sura-info view opened from its ⓘ button
+// Real sura list for the first two steps, then the sura-info view opened from its ⓘ button
 export const SuraNamehScreen: React.FC = () => {
   const frame = useCurrentFrame();
-  const swap = interpolate(frame, [112, 126], [0, 1], clamp);
+  const at = useAt();
+  const swap = interpolate(frame, [at(3), at(3) + 12], [0, 1], clamp);
   return (
     <>
       <div style={{ position: "absolute", inset: 0, opacity: 1 - swap }}>
         <ShotScreen
           shot={SHOTS.suraList}
           marks={[
-            { at: 25, box: { x: 0, y: 215, w: 923, h: 100 } },
-            { at: 55, box: { x: 676, y: 545, w: 100, h: 1380 } },
-            { at: 85, box: { x: 128, y: 545, w: 64, h: 1380 } },
+            { at: at(1), box: { x: 0, y: 215, w: 923, h: 100 } },
+            { at: at(2), box: { x: 676, y: 545, w: 100, h: 1380 } },
           ]}
         />
       </div>
       <div style={{ position: "absolute", inset: 0, opacity: swap, transform: `translateX(${(1 - swap) * -60}px)` }}>
-        <SuraInfoScreen />
+        <SuraInfoScreen from={at(3)} />
       </div>
     </>
   );
 };
 
-export const SearchScreen: React.FC = () => {
+const SABR_RESULTS = [
+  ["بقره، آیه‌ی ۱۵۳", "اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ"],
+  ["آل‌عمران، آیه‌ی ۲۰۰", "اصْبِرُوا وَصَابِرُوا وَرَابِطُوا"],
+  ["نحل، آیه‌ی ۱۲۷", "وَاصْبِرْ وَمَا صَبْرُكَ إِلَّا بِاللَّهِ"],
+];
+
+// Voice search for «صبر»: mic, typing, results, then starring results into a favourites category
+export const SearchScreen: React.FC<{ typeAt: number; resultsAt: number; favAt: number }> = ({
+  typeAt,
+  resultsAt,
+  favAt,
+}) => {
   const frame = useCurrentFrame();
   const query = "صبر";
-  const typed = Math.floor(interpolate(frame, [40, 64], [0, query.length], clamp));
-  const listening = frame >= 12 && frame < 40;
-  const results = [
-    ["بقره، آیه‌ی ۱۵۳", "اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ"],
-    ["آل‌عمران، آیه‌ی ۲۰۰", "اصْبِرُوا وَصَابِرُوا وَرَابِطُوا"],
-    ["نحل، آیه‌ی ۱۲۷", "وَاصْبِرْ وَمَا صَبْرُكَ إِلَّا بِاللَّهِ"],
-  ];
-  const starred = (i: number) => frame > 120 + i * 15;
+  const typed = Math.floor(interpolate(frame, [typeAt + 14, typeAt + 26], [0, query.length], clamp));
+  const listening = frame >= typeAt && frame < typeAt + 14;
+  const starred = (i: number) => frame >= favAt + 4 + i * 5;
   return (
     <AppScreen title="جستجو">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -385,17 +379,17 @@ export const SearchScreen: React.FC = () => {
             style={{
               borderRadius: "50%",
               padding: 4,
-              boxShadow: listening ? `0 0 0 ${6 + Math.sin(frame / 3) * 4}px rgba(220,186,89,0.3)` : "none",
+              boxShadow: listening ? "0 0 0 8px rgba(220,186,89,0.3)" : "none",
             }}
           >
             <Icon name="mic" size={22} color={A.gold} />
           </div>
         </div>
-        <Pop delay={66} style={{ fontSize: 15, color: A.muted, fontWeight: 700 }}>
+        <Pop delay={resultsAt} style={{ fontSize: 15, color: A.muted, fontWeight: 700 }}>
           نتایج در سوره، آیه، ترجمه و تفسیر
         </Pop>
-        {results.map(([ref, ayah], i) => (
-          <Pop key={ref} delay={70 + i * 12} style={{ ...card, position: "relative" }}>
+        {SABR_RESULTS.map(([ref, ayah], i) => (
+          <Pop key={ref} delay={resultsAt + 3 + i * 4} style={{ ...card, position: "relative" }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: A.blue }}>{ref}</div>
             <div style={{ fontFamily: QURAN, fontSize: 24, marginTop: 4 }}>{ayah}</div>
             <div style={{ position: "absolute", top: 14, left: 14 }}>
@@ -403,7 +397,7 @@ export const SearchScreen: React.FC = () => {
             </div>
           </Pop>
         ))}
-        <Pop delay={170} style={{ ...card, border: `1.5px dashed ${A.gold}` }}>
+        <Pop delay={favAt + 16} style={{ ...card, border: `1.5px dashed ${A.gold}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <Icon name="star" size={20} color={A.gold} fill={A.gold} />
             <span style={{ fontSize: 15, fontWeight: 800, color: A.gold }}>علاقه‌مندی‌ها</span>
@@ -417,4 +411,100 @@ export const SearchScreen: React.FC = () => {
       </div>
     </AppScreen>
   );
+};
+
+// Reading the tafsir of Baqarah 153 side by side; tafsir text is shown as placeholder lines
+export const TafsirReadScreen: React.FC<{ from: number }> = ({ from }) => {
+  const tabs = ["المیزان", "نمونه", "مجمع البیان"];
+  return (
+    <AppScreen title="تفسیر: بقره، آیه‌ی ۱۵۳">
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <Pop delay={from + 2} style={{ ...card, border: `1.5px solid ${A.gold}`, textAlign: "center" }}>
+          <div style={{ fontFamily: QURAN, fontSize: 25, lineHeight: 1.9 }}>
+            اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ ۚ إِنَّ اللَّهَ مَعَ الصَّابِرِينَ
+          </div>
+          <div style={{ fontSize: 14, color: A.muted }}>از صبر و نماز یاری جویید؛ خداوند با صابران است</div>
+        </Pop>
+        <Pop delay={from + 6} style={{ display: "flex", gap: 8 }}>
+          {tabs.map((t, i) => (
+            <MiniChip key={t} active={i === 0}>
+              {t}
+            </MiniChip>
+          ))}
+        </Pop>
+        {[0, 1].map((i) => (
+          <Pop key={i} delay={from + 9 + i * 4} style={{ ...card, display: "flex", flexDirection: "column", gap: 9 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="layers" size={18} color={A.gold} />
+              <span style={{ fontSize: 15, fontWeight: 800 }}>{i === 0 ? "تفسیر المیزان" : "روایات تفسیری"}</span>
+            </div>
+            <Skeleton width="100%" />
+            <Skeleton width="94%" />
+            <Skeleton width="88%" />
+            <Skeleton width={i === 0 ? "60%" : "45%"} />
+          </Pop>
+        ))}
+        <Pop delay={from + 16} style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
+          <Icon name="note" size={20} color={A.gold} />
+          <span style={{ fontSize: 15 }}>یادداشت: صبر و نماز، دو تکیه‌گاه در سختی‌ها</span>
+        </Pop>
+      </div>
+    </AppScreen>
+  );
+};
+
+// «گفتگوی هوشمند با تفاسیر»; the answer is shown as placeholder lines, not real output
+export const AIChatScreen: React.FC<{ from: number }> = ({ from }) => {
+  const bubble: React.CSSProperties = { borderRadius: 18, padding: "12px 16px", maxWidth: "88%" };
+  return (
+    <AppScreen title="گفتگوی هوشمند با تفاسیر">
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <Pop delay={from + 2} style={{ display: "flex", justifyContent: "flex-start" }}>
+          <div style={{ ...bubble, background: A.blue, color: A.blueInk, fontSize: 17, fontWeight: 700 }}>
+            دیدگاه قرآن درباره‌ی صبر چیست و چه جایگاهی دارد؟
+          </div>
+        </Pop>
+        <Pop delay={from + 10} style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ ...bubble, background: A.card, display: "flex", flexDirection: "column", gap: 9, width: "88%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Icon name="sparkles" size={18} color={A.gold} />
+              <span style={{ fontSize: 14, fontWeight: 800, color: A.gold }}>پاسخ بر پایه‌ی تفاسیر</span>
+            </div>
+            <Skeleton width="100%" />
+            <Skeleton width="96%" />
+            <Skeleton width="90%" />
+            <Skeleton width="98%" />
+            <Skeleton width="70%" />
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+              {["بقره ۱۵۳", "آل‌عمران ۲۰۰", "زمر ۱۰"].map((r) => (
+                <MiniChip key={r}>{r}</MiniChip>
+              ))}
+            </div>
+          </div>
+        </Pop>
+        <Pop
+          delay={from + 18}
+          style={{ ...card, display: "flex", alignItems: "center", gap: 10, border: `1.5px dashed ${A.gold}` }}
+        >
+          <Icon name="info" size={20} color={A.gold} />
+          <span style={{ fontSize: 14, color: A.muted }}>پاسخ را با متن تفاسیر و منابع اصلی بسنجید</span>
+        </Pop>
+      </div>
+    </AppScreen>
+  );
+};
+
+// Screenshot whose spotlight follows the scene's click steps; null keeps the previous box
+export const StepShot: React.FC<{ shot: Shot; boxes: (Box | null)[] }> = ({ shot, boxes }) => {
+  const at = useAt();
+  const marks: Mark[] = [];
+  boxes.forEach((box, i) => {
+    if (box) marks.push({ at: at(i + 1), box });
+  });
+  return <ShotScreen shot={shot} marks={marks} />;
+};
+
+export const SearchStepScreen: React.FC = () => {
+  const at = useAt();
+  return <SearchScreen typeAt={at(1)} resultsAt={at(2)} favAt={at(3)} />;
 };

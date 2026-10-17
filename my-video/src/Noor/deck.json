@@ -1,0 +1,28 @@
+{
+  "fps": 30,
+  "fade": 15,
+  "scenes": [
+    { "id": "intro", "entry": 140, "steps": 0, "step": 24 },
+    { "id": "agenda", "entry": 95, "steps": 0, "step": 24 },
+    { "id": "why", "entry": 50, "steps": 3, "step": 30 },
+    { "id": "developer", "entry": 55, "steps": 1, "step": 45 },
+    { "id": "home", "entry": 55, "steps": 4, "step": 26 },
+    { "id": "overview", "entry": 105, "steps": 0, "step": 24 },
+    { "id": "mushaf", "entry": 55, "steps": 4, "step": 26 },
+    { "id": "reciters", "entry": 55, "steps": 4, "step": 26 },
+    { "id": "recite", "entry": 55, "steps": 4, "step": 26 },
+    { "id": "translate", "entry": 55, "steps": 3, "step": 26 },
+    { "id": "tafsir", "entry": 55, "steps": 3, "step": 26 },
+    { "id": "words", "entry": 55, "steps": 3, "step": 26 },
+    { "id": "suranameh", "entry": 55, "steps": 4, "step": 40 },
+    { "id": "ai", "entry": 55, "steps": 4, "step": 26 },
+    { "id": "search", "entry": 55, "steps": 3, "step": 45 },
+    { "id": "platforms", "entry": 55, "steps": 3, "step": 40 },
+    { "id": "method", "entry": 50, "steps": 5, "step": 30 },
+    { "id": "example", "entry": 55, "steps": 4, "step": 70 },
+    { "id": "findings", "entry": 50, "steps": 4, "step": 32 },
+    { "id": "critique", "entry": 50, "steps": 2, "step": 50 },
+    { "id": "quote", "entry": 70, "steps": 0, "step": 24 },
+    { "id": "outro", "entry": 95, "steps": 0, "step": 24 }
+  ]
+}
