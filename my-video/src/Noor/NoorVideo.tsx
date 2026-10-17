@@ -17,21 +17,19 @@ import {
   ThematicScene,
 } from "./scenes";
 import {
-  HadithScreen,
-  HomeScreen,
-  MemorizeScreen,
-  MushafScreen,
-  PlaybackScreen,
-  ReciterScreen,
+  SHOTS,
   SearchScreen,
-  SuraInfoScreen,
+  ShotScreen,
+  SuraNamehScreen,
   TafsirScreen,
-  TranslateScreen,
   WordsScreen,
 } from "./screens";
 
-// Facts from Rahavard-e Noor no. 83 ("New features of the Quran Noor mobile app")
-// and noorsoft.org (translation count)
+// Sources: the user's screenshots of the current app, Rahavard-e Noor no. 83
+// ("New features of the Quran Noor mobile app") and noorsoft.org (translation count).
+// Highlight boxes are in each screenshot's basis units (see SHOTS).
+const row = (y: number, h = 112) => ({ x: 30, y, w: 865, h });
+
 const home: Feature = {
   icon: "home",
   label: "نگاه اول",
@@ -39,13 +37,22 @@ const home: Feature = {
   short: "صفحه‌ی اصلی",
   subtitle: "همه‌ی بخش‌های برنامه در یک نگاه",
   bullets: [
-    "جستجوی سوره، آیه، ترجمه و تفسیر",
+    "جستجوی متنی و صوتی سوره، آیه، ترجمه و تفسیر",
     "قرآن کریم، تفسیر و ترجمه، اعراب قرآن",
-    "فرهنگ موضوعی، اعلام و اسماء",
-    "نشانک‌ها و ختم قرآن",
+    "فرهنگ موضوعی، اعلام و اسماء، واژه‌نامه",
+    "ختم قرآن، نشان‌ها و بخش چندرسانه",
   ],
-  screenTitle: "صفحه‌ی اصلی",
-  screen: <HomeScreen />,
+  screen: (
+    <ShotScreen
+      shot={SHOTS.home}
+      marks={[
+        { at: 30, box: { x: 28, y: 245, w: 867, h: 98 } },
+        { at: 70, box: { x: 54, y: 540, w: 814, h: 440 } },
+        { at: 115, box: { x: 54, y: 1007, w: 814, h: 413 } },
+        { at: 160, box: { x: 28, y: 388, w: 240, h: 62 } },
+      ]}
+    />
+  ),
 };
 
 const features: Feature[] = [
@@ -53,15 +60,24 @@ const features: Feature[] = [
     icon: "book",
     title: "شیوه‌های نمایش مصحف",
     short: "نمایش مصحف",
-    subtitle: "سه حالت نمایش، متناسب با نیاز هر کاربر",
+    subtitle: "نمایش متن قرآن، متناسب با نیاز هر کاربر",
     bullets: [
-      "نمایش املایی با رسم‌الخط عثمان‌طه یا نیریزی",
-      `مصحف ${fa(15)} خطی استاندارد، ویژه‌ی حافظان`,
-      "مصحف تجویدی با رنگ‌بندی قواعد تجوید",
-      "تنظیم اندازه‌ی قلم، فاصله‌ی خطوط و رنگ متن",
+      "نمایش متنی، مصحف ۱۵ خطی و مصحف تجویدی",
+      "رسم‌الخط عثمان‌طه یا نیریزی",
+      "نمایش متن به‌تنهایی یا همراه ترجمه",
+      "تنظیم ترازبندی، قلم و اندازه‌ی متن",
     ],
-    screenTitle: "مصحف",
-    screen: <MushafScreen />,
+    screen: (
+      <ShotScreen
+        shot={SHOTS.settingsText}
+        marks={[
+          { at: 30, box: row(354) },
+          { at: 72, box: row(497) },
+          { at: 114, box: row(784) },
+          { at: 156, box: row(641) },
+        ]}
+      />
+    ),
     stat: { value: fa(3), label: "شیوه‌ی نمایش" },
   },
   {
@@ -75,37 +91,42 @@ const features: Feature[] = [
       "دانلود یک‌جا یا تک‌تک سوره‌ها",
       "امکان حذف قرائت‌های دانلودشده",
     ],
-    screenTitle: "قاری منتخب",
-    screen: <ReciterScreen />,
+    screen: (
+      <ShotScreen
+        shot={SHOTS.readingSheet}
+        marks={[
+          { at: 34, box: row(1310, 120) },
+          { at: 100, box: row(1042) },
+          { at: 150, box: row(1167) },
+        ]}
+      />
+    ),
     stat: { value: fa(28), label: "دوره‌ی قرائت" },
   },
   {
-    icon: "speaker",
-    title: "حالت‌های پخش و ترجمه‌ی گویا",
-    short: "ترجمه‌ی گویا",
-    subtitle: "شنیدن ترجمه‌ی فارسی در کنار تلاوت",
-    bullets: [
-      "پخش متن، متن و ترجمه، ترجمه، یا ترجمه و متن",
-      `${fa(2)} دوره‌ی کامل ترجمه‌ی گویای فارسی`,
-      "نمایش تصویر گوینده در کنار قاری",
-    ],
-    screenTitle: "حالت پخش",
-    screen: <PlaybackScreen />,
-    stat: { value: fa(4), label: "حالت پخش" },
-  },
-  {
     icon: "repeat",
-    title: "ابزارهای حفظ قرآن",
-    short: "حفظ و تمرکز",
+    title: "تنظیمات قرائت و حفظ",
+    short: "قرائت و حفظ",
     subtitle: "امکانات ویژه برای حافظان و تمرکز بر آیات",
     bullets: [
-      `سرعت پخش از ${fa("0.5")} تا ${fa(2)} برابر`,
-      `تکرار هر آیه از ${fa(1)} تا ${fa(100)} بار`,
-      `تکرار هر سوره از ${fa(1)} تا ${fa(100)} بار`,
-      "حرکت خودکار متن هنگام تلاوت",
+      "۴ حالت پخش: متن، ترجمه یا هر دو به‌ترتیب دلخواه",
+      `ترجمه‌ی گویای فارسی (${fa(2)} دوره‌ی کامل)`,
+      `سرعت پخش ${fa("0.5")} تا ${fa(2)} برابر و تکرار آیه تا ${fa(100)} بار`,
+      "پخش دعای آیات سجده‌دار",
     ],
-    screenTitle: "تنظیمات قرائت",
-    screen: <MemorizeScreen />,
+    screen: (
+      <ShotScreen
+        shot={SHOTS.settingsRecite}
+        marks={[
+          { at: 30, box: row(497) },
+          { at: 70, box: row(835, 120) },
+          { at: 110, box: row(1000, 256) },
+          { at: 150, box: row(1287) },
+          { at: 185, box: row(1425, 130) },
+        ]}
+      />
+    ),
+    stat: { value: fa(4), label: "حالت پخش" },
   },
   {
     icon: "languages",
@@ -115,10 +136,18 @@ const features: Feature[] = [
     bullets: [
       `${fa(122)} ترجمه به بیش از ${fa(30)} زبان زنده`,
       "نمایش ترجمه‌ی منتخب زیر هر آیه",
-      "ترجمه‌های فارسی، انگلیسی، ترکی و …",
+      "پخش تلاوت همراه با متن و ترجمه",
     ],
-    screenTitle: "ترجمه",
-    screen: <TranslateScreen />,
+    screen: (
+      <ShotScreen
+        shot={SHOTS.readingNahl}
+        marks={[
+          { at: 34, box: { x: 18, y: 450, w: 555, h: 175 } },
+          { at: 90, box: { x: 18, y: 770, w: 555, h: 115 } },
+          { at: 145, box: { x: 0, y: 1075, w: 591, h: 165 } },
+        ]}
+      />
+    ),
     stat: { value: fa(122), label: "ترجمه" },
   },
   {
@@ -129,50 +158,57 @@ const features: Feature[] = [
     bullets: [
       `${fa(11)} تفسیر شیعه و سنی، بدون نیاز به اینترنت`,
       "فیلتر بر اساس مفسر، مذهب، زبان و نوع تفسیر",
-      "انتخاب تفاسیر منتخب در تنظیمات",
+      "انتخاب «تفاسیر منتخب» در تنظیمات",
     ],
-    screenTitle: "تفسیر",
     screen: <TafsirScreen />,
     stat: { value: fa(11), label: "تفسیر آفلاین" },
   },
   {
     icon: "type",
-    title: "واژگان و قاموس",
-    short: "واژگان",
+    title: "واژگان و واژه‌نامه",
+    short: "واژه‌نامه",
     subtitle: "معنای تک‌تک کلمات آیات",
     bullets: [
       "ترجمه‌ی دقیق‌تر کلمه‌به‌کلمه",
-      "قرائت جداگانه‌ی هر کلمه",
+      "بخش «واژه‌نامه» در صفحه‌ی اصلی",
       "اتصال به لغت‌نامه‌ی «قاموس نور»",
     ],
-    screenTitle: "واژگان",
     screen: <WordsScreen />,
   },
   {
     icon: "info",
-    title: "سوره‌نامه",
+    title: "فهرست سوره‌ها و سوره‌نامه",
     short: "سوره‌نامه",
     subtitle: "شناسنامه‌ی کامل هر سوره",
     bullets: [
-      "مفهوم کلی، نام‌ها و علت نام‌گذاری",
-      "تعداد آیات، محل و ترتیب نزول",
+      "فهرست سوره‌ها، جزءها و علاقه‌مندی‌ها",
+      "نماد سوره‌های مکی و مدنی",
+      "مفهوم، نام‌ها، محل و ترتیب نزول هر سوره",
       "اهداف، محتوا، فضائل و ارتباط با سوره‌ی قبل",
     ],
-    screenTitle: "سوره‌نامه",
-    screen: <SuraInfoScreen />,
+    screen: <SuraNamehScreen />,
   },
   {
     icon: "sparkles",
-    title: "حدیث و هوش مصنوعی",
-    short: "حدیث و هوش مصنوعی",
-    subtitle: "روایات تفسیری و آیات مرتبط",
+    title: "هوش مصنوعی و منابع",
+    short: "هوش مصنوعی",
+    subtitle: "پژوهش هوشمند در تفاسیر و منابع اسلامی",
     bullets: [
-      "دسترسی به احادیث تفسیری آیات",
+      "«گفتگوی هوشمند با تفاسیر»",
       "کشف آیات و احادیث مرتبط با هوش مصنوعی",
-      "اتصال به کتابخانه‌ی دیجیتال نور (noorlib.ir)",
+      "«با کتاب گفتگو کن» و کتابخانه‌ی دیجیتال نور",
+      "دسترسی به برنامه‌های دیگر نور، مانند قاموس نور",
     ],
-    screenTitle: "حدیث",
-    screen: <HadithScreen />,
+    screen: (
+      <ShotScreen
+        shot={SHOTS.homeScroll}
+        marks={[
+          { at: 30, box: { x: 54, y: 512, w: 814, h: 183 } },
+          { at: 105, box: { x: 54, y: 777, w: 814, h: 150 } },
+          { at: 160, box: { x: 0, y: 1470, w: 923, h: 340 } },
+        ]}
+      />
+    ),
   },
   {
     icon: "search",
@@ -180,11 +216,10 @@ const features: Feature[] = [
     short: "جستجو",
     subtitle: "ابزارهای پژوهش و مطالعه‌ی شخصی",
     bullets: [
-      "جستجوی هوشمند و سریع در کل محتوا",
-      "دسته‌بندی آیات در «علاقه‌مندی‌ها»",
-      "نشانک‌ها و یادداشت‌نویسی روی آیات",
+      "جستجوی متنی و صوتی (با میکروفون)",
+      "جستجوی هوشمند در سوره، آیه، ترجمه و تفسیر",
+      "دسته‌بندی آیات در «علاقه‌مندی‌ها» و نشان‌ها",
     ],
-    screenTitle: "جستجو",
     screen: <SearchScreen />,
   },
 ];

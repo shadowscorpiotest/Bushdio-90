@@ -7,7 +7,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { C, FONT } from "./theme";
+import { A, C, FONT } from "./theme";
 
 export const Background: React.FC = () => {
   const frame = useCurrentFrame();
@@ -129,7 +129,9 @@ export type IconName =
   | "tv"
   | "star"
   | "globe"
-  | "home";
+  | "home"
+  | "mic"
+  | "back";
 
 const paths: Record<IconName, React.ReactNode> = {
   book: (
@@ -270,6 +272,19 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M2 12h20" />
     </>
   ),
+  mic: (
+    <>
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <path d="M12 19v3" />
+    </>
+  ),
+  back: (
+    <>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </>
+  ),
   home: (
     <>
       <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -408,9 +423,8 @@ export const Divider: React.FC<{ delay?: number; width?: number }> = ({
   );
 };
 
-// Stylised phone; its screen content is an illustration, not a real screenshot
-export const Phone: React.FC<{ title: string; children: React.ReactNode; delay?: number }> = ({
-  title,
+// Phone frame; the screen (412 × 888) is filled by a ShotScreen or an AppScreen
+export const Phone: React.FC<{ children: React.ReactNode; delay?: number }> = ({
   children,
   delay = 0,
 }) => {
@@ -421,12 +435,12 @@ export const Phone: React.FC<{ title: string; children: React.ReactNode; delay?:
     <div
       style={{
         width: 440,
-        height: 900,
+        height: 916,
         borderRadius: 64,
         padding: 14,
-        background: "linear-gradient(145deg, #222b4a, #080c1a)",
+        background: "linear-gradient(145deg, #2a3350, #080c1a)",
         boxShadow:
-          "0 50px 120px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.08), 0 0 90px rgba(47,107,255,0.35)",
+          "0 50px 120px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1), 0 0 90px rgba(47,107,255,0.35)",
         transform: `translateY(${(1 - p) * 220 + float}px) rotate(${(1 - p) * -8}deg)`,
         opacity: Math.min(1, p * 1.5),
       }}
@@ -437,43 +451,26 @@ export const Phone: React.FC<{ title: string; children: React.ReactNode; delay?:
           height: "100%",
           borderRadius: 52,
           overflow: "hidden",
-          background: "#f5f7ff",
-          display: "flex",
-          flexDirection: "column",
+          background: A.header,
           position: "relative",
           direction: "rtl",
           fontFamily: FONT,
-          color: C.ink,
+          color: A.text,
         }}
       >
+        {children}
         <div
           style={{
-            background: `linear-gradient(135deg, ${C.blueDeep}, ${C.blue})`,
-            padding: "56px 26px 22px",
-            color: "white",
+            position: "absolute",
+            top: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 116,
+            height: 28,
+            borderRadius: 20,
+            background: "#05080f",
           }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              top: 14,
-              left: "50%",
-              transform: "translateX(-50%)",
-              width: 120,
-              height: 30,
-              borderRadius: 20,
-              background: "#080c1a",
-            }}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <AppIcon size={48} radius={13} />
-            <div>
-              <div style={{ fontSize: 24, fontWeight: 800 }}>قرآن نور</div>
-              <div style={{ fontSize: 17, opacity: 0.85 }}>{title}</div>
-            </div>
-          </div>
-        </div>
-        <div style={{ flex: 1, padding: 22, position: "relative" }}>{children}</div>
+        />
       </div>
     </div>
   );
@@ -489,8 +486,8 @@ export const MiniChip: React.FC<{ children: React.ReactNode; active?: boolean }>
       borderRadius: 999,
       fontSize: 16,
       fontWeight: 700,
-      background: active ? C.blue : "#e6ebfa",
-      color: active ? "white" : C.ink,
+      background: active ? A.blue : A.card,
+      color: active ? A.blueInk : A.text,
       whiteSpace: "nowrap",
     }}
   >
@@ -501,4 +498,4 @@ export const MiniChip: React.FC<{ children: React.ReactNode; active?: boolean }>
 export const Skeleton: React.FC<{ width: string | number; height?: number }> = ({
   width,
   height = 10,
-}) => <div style={{ width, height, borderRadius: 6, background: "#dfe4f3" }} />;
+}) => <div style={{ width, height, borderRadius: 6, background: "#555" }} />;

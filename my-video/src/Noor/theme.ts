@@ -16,7 +16,20 @@ export const C = {
   inkMuted: "#6b7699",
 };
 
-export const FONT = "Vazirmatn, VazirLatin, sans-serif";
+// Colours sampled from the app's own (dark) screenshots
+export const A = {
+  header: "#111e27",
+  panel: "#2d2d2d",
+  card: "#3d3d3d",
+  line: "#4a4a4a",
+  text: "#ececec",
+  muted: "#a6a6a6",
+  gold: "#dcba59",
+  blue: "#7cc4f7",
+  blueInk: "#0f1d27",
+};
+
+export const FONT ="Vazirmatn, VazirLatin, sans-serif";
 export const QURAN = "Amiri, Vazirmatn, serif";
 
 // Western digits -> Persian digits
