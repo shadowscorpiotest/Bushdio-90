@@ -1,14 +1,16 @@
 """Turns the rendered NoorDeck master into a click-through PowerPoint.
 
     npx remotion render NoorDeck out/deck-master.mp4 ...
-    python3 deck/build.py
+    python3 deck/build.py [--reuse]
 
 Cuts one clip per click step (see steps.py), builds the deck with build_pptx.js, then sets
-every video to start automatically when its slide appears.
+every video to start automatically when its slide appears. --reuse keeps clips already in
+out/deck, so a slide re-rendered on its own can be swapped in without recutting the rest.
 """
 import json
 import re
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -58,9 +60,11 @@ def run(*cmd):
     subprocess.run(cmd, check=True, capture_output=True)
 
 
-def cut(i, start, end):
+def cut(i, start, end, reuse=False):
     clip = WORK / f"clip{i:02d}.mp4"
     poster = WORK / f"clip{i:02d}.jpg"
+    if reuse and clip.exists() and poster.exists():
+        return clip, poster
     run(
         "ffmpeg", "-y", "-ss", f"{start / FPS:.4f}", "-i", str(MASTER), "-frames:v", str(end - start),
         "-c:v", "libx264", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
@@ -108,7 +112,7 @@ def main():
     notes = json.loads((Path(__file__).parent / "notes.json").read_text())
     slides, durations = [], []
     for i, (scene_id, step, start, end) in enumerate(clips()):
-        clip, poster = cut(i, start, end)
+        clip, poster = cut(i, start, end, reuse="--reuse" in sys.argv)
         section = SECTIONS.get(scene_id) if step == 0 else None
         current = section or (slides[-1]["sectionTitle"] if slides else None)
         slides.append(

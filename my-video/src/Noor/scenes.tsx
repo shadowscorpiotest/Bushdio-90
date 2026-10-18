@@ -685,13 +685,13 @@ export const QuoteScene: React.FC = () => (
 );
 
 export const OutroScene: React.FC = () => (
-  <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 170px", gap: 90 }}>
+  <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 130px", gap: 70 }}>
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>
       <Reveal delay={0} x={60} y={0}>
         <Pill gold>پرسش و پاسخ</Pill>
       </Reveal>
       <Reveal delay={8} x={60} y={0}>
-        <div style={{ fontSize: 92, fontWeight: 900 }}>
+        <div style={{ fontSize: 84, fontWeight: 900 }}>
           با سپاس از <span style={{ color: C.gold }}>توجه شما</span>
         </div>
       </Reveal>
@@ -715,13 +715,23 @@ export const OutroScene: React.FC = () => (
       </Reveal>
     </div>
     <Reveal delay={24} scale y={0}>
-      <Glass style={{ padding: 34, display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
-        <div style={{ background: "white", borderRadius: 24, padding: 18 }}>
-          <Img src={staticFile("qr-myket.svg")} style={{ width: 340, height: 340, display: "block" }} />
-        </div>
+      <Glass style={{ padding: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 22 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <AppIcon size={56} />
-          <div style={{ fontSize: 30, fontWeight: 800 }}>دریافت «قرآن نور» از مایکت</div>
+          <AppIcon size={52} />
+          <div style={{ fontSize: 30, fontWeight: 800 }}>دریافت «قرآن نور»</div>
+        </div>
+        <div style={{ display: "flex", gap: 28 }}>
+          {[
+            ["qr-myket.svg", "مایکت"],
+            ["qr-bazaar.svg", "کافه‌بازار"],
+          ].map(([src, store]) => (
+            <div key={src} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+              <div style={{ background: "white", borderRadius: 22, padding: 16 }}>
+                <Img src={staticFile(src)} style={{ width: 270, height: 270, display: "block" }} />
+              </div>
+              <div style={{ fontSize: 30, fontWeight: 800, color: C.goldSoft }}>{store}</div>
+            </div>
+          ))}
         </div>
       </Glass>
     </Reveal>
