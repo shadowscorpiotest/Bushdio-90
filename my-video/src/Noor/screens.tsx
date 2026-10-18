@@ -127,6 +127,11 @@ const SABR_RESULTS = [
   ["بقره، آیه‌ی ۱۵۳", "اسْتَعِينُوا بِالصَّبْرِ وَالصَّلَاةِ"],
   ["آل‌عمران، آیه‌ی ۲۰۰", "اصْبِرُوا وَصَابِرُوا وَرَابِطُوا"],
   ["نحل، آیه‌ی ۱۲۷", "وَاصْبِرْ وَمَا صَبْرُكَ إِلَّا بِاللَّهِ"],
+  ["بقره، آیه‌ی ۱۵۵", "وَبَشِّرِ الصَّابِرِينَ"],
+  ["آل‌عمران، آیه‌ی ۱۴۶", "وَاللَّهُ يُحِبُّ الصَّابِرِينَ"],
+  ["انفال، آیه‌ی ۴۶", "وَاصْبِرُوا ۚ إِنَّ اللَّهَ مَعَ الصَّابِرِينَ"],
+  ["یوسف، آیه‌ی ۱۸", "فَصَبْرٌ جَمِيلٌ"],
+  ["عصر، آیه‌ی ۳", "وَتَوَاصَوْا بِالصَّبْرِ"],
 ];
 
 // Voice search for «صبر»: mic, typing, results, then starring results into a favourites category
@@ -173,14 +178,19 @@ export const SearchScreen: React.FC<{ typeAt: number; resultsAt: number; favAt: 
           نتایج در سوره، آیه، ترجمه و تفسیر
         </Pop>
         {SABR_RESULTS.map(([ref, ayah], i) => (
-          <Pop key={ref} delay={resultsAt + 3 + i * 4} style={{ ...card, position: "relative" }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: A.blue }}>{ref}</div>
-            <div style={{ fontFamily: QURAN, fontSize: 24, marginTop: 4 }}>{ayah}</div>
-            <div style={{ position: "absolute", top: 14, left: 14 }}>
-              <Icon name="star" size={24} color={A.gold} fill={starred(i) ? A.gold : "none"} />
-            </div>
+          <Pop
+            key={ref}
+            delay={resultsAt + 3 + i * 3}
+            style={{ ...card, position: "relative", padding: "8px 14px", display: "flex", alignItems: "center", gap: 10 }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 800, color: A.blue, width: 112, flexShrink: 0 }}>{ref}</div>
+            <div style={{ fontFamily: QURAN, fontSize: 20, flex: 1 }}>{ayah}</div>
+            <Icon name="star" size={20} color={A.gold} fill={i < 3 && starred(i) ? A.gold : "none"} />
           </Pop>
         ))}
+        <Pop delay={resultsAt + 30} style={{ fontSize: 14, color: A.muted, fontWeight: 700, textAlign: "center" }}>
+          … و ده‌ها آیه‌ی دیگر
+        </Pop>
         <Pop delay={favAt + 16} style={{ ...card, border: `1.5px dashed ${A.gold}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <Icon name="star" size={20} color={A.gold} fill={A.gold} />
@@ -300,7 +310,8 @@ const REC = {
 const REC_W = 480;
 const REC_STATUS = 50;
 // `mark` frames a tapped item (box in recording pixels, shown between `from` and `to` in source seconds);
-// a list of marks is shown one after another, so their windows must not overlap
+// a list of marks is shown one after another, so their windows must not overlap. Mark times run on past
+// `to`, so marks timed after it walk through the held last frame
 type RecMarkSpec = { box: Box; from?: number; to?: number };
 export type Seg = {
   v: keyof typeof REC;
@@ -365,14 +376,14 @@ export const RecSteps: React.FC<{ segs: (Seg | null)[] }> = ({ segs }) => {
       </Freeze>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: NOTCH_H, background: A.header }} />
       {[seg.mark ?? []].flat().map((m, i) => (
-        <RecMark key={i} mark={m} t={seg.from + (local * rate) / 30} />
+        <RecMark key={i} mark={m} t={seg.from + ((frame - at(idx)) * rate) / 30} />
       ))}
     </div>
   );
 };
 
 // The reading page's overflow menu (⋮), drawn from the user's photo of it over a recorded frame of the
-// page; the spotlight moves from the toolbar through the menu items, then to settings and auto-scroll
+// page; the spotlight moves from the toolbar to the ⋮, through the menu items, then to settings and auto-scroll
 const REC_SHOT: Shot = { src: "", basis: REC_W, crop: REC_STATUS };
 const MENU_ITEMS: [IconName, string][] = [
   ["info", "سوره‌نامه"],
@@ -389,12 +400,12 @@ export const ReadingToolsScreen: React.FC = () => {
   const at = useAt();
   const k = SCREEN_W / REC_W;
   const open = Math.min(
-    interpolate(frame, [at(1), at(1) + 8], [0, 1], clamp),
-    interpolate(frame, [at(4), at(4) + 8], [1, 0], clamp),
+    interpolate(frame, [at(2), at(2) + 8], [0, 1], clamp),
+    interpolate(frame, [at(5), at(5) + 8], [1, 0], clamp),
   );
   return (
     <>
-      <RecSteps segs={[{ v: "v2", from: 54.7, to: 54.8 }]} />
+      <RecSteps segs={[{ v: "v1", from: 59.4, to: 59.5 }]} />
       {open > 0 ? (
         <div
           style={{
@@ -427,8 +438,9 @@ export const ReadingToolsScreen: React.FC = () => {
         shot={REC_SHOT}
         marks={[
           { at: 10, box: { x: 4, y: 54, w: 180, h: 44 } },
-          ...[0, 1, 2].map((i) => ({ at: at(i + 1) + (i ? 0 : 6), box: menuRow(i) })),
-          { at: at(4), box: { x: 44, y: 54, w: 92, h: 44 } },
+          { at: at(1), box: { x: 4, y: 54, w: 40, h: 44 } },
+          ...[0, 1, 2].map((i) => ({ at: at(i + 2) + (i ? 0 : 6), box: menuRow(i) })),
+          { at: at(5), box: { x: 44, y: 54, w: 92, h: 44 } },
         ]}
       />
     </>

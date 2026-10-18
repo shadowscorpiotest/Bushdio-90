@@ -32,6 +32,11 @@ const SABZ: Box = { x: 16, y: 381, w: 448, h: 50 };
 const wide = (y: number, h: number): Box => ({ x: 14, y, w: 452, h });
 const PLAYER_SETTINGS: Box = { x: 424, y: 940, w: 52, h: 54 };
 const PLAYER_RECITER: Box = { x: 10, y: 936, w: 78, h: 62 };
+// Home screen: the settings gear (top right) and the «فرهنگ موضوعی» tile
+const HOME_SETTINGS: Box = { x: 428, y: 56, w: 48, h: 48 };
+const HOME_FARHANG: Box = { x: 244, y: 518, w: 212, h: 112 };
+// Ranged-play dialog and the player settings sheet
+const dlg = (y: number, h: number): Box => ({ x: 58, y, w: 364, h });
 
 const home: Feature = {
   id: "home",
@@ -85,6 +90,22 @@ const features: Feature[] = [
     ),
   },
   {
+    id: "pagetools",
+    pans: [-1, -1, -1, -1, -1, -1],
+    icon: "more",
+    title: "ابزارهای صفحه‌ی قرآن",
+    short: "ابزارهای صفحه",
+    subtitle: "دکمه‌های بالای صفحه‌ی نمایش آیات",
+    bullets: [
+      "دکمه‌ی سه‌نقطه: منوی گزینه‌های بیشتر",
+      "«سوره‌نامه»: مفهوم سوره، نام‌های آن، علت نام‌گذاری و تعداد آیات",
+      "«برو به»: فهرستی برای دسترسی سریع به بخش دلخواه قرآن",
+      "«نحوه نمایش»: متنی، مصحف ۱۵ خطی یا تجویدی",
+      "تنظیمات برنامه، و حرکت خودکار صفحه با سرعت دلخواه",
+    ],
+    screen: <ReadingToolsScreen />,
+  },
+  {
     id: "mushaf",
     pans: [-1, -1, -1, 0, 0, 0],
     icon: "book",
@@ -101,7 +122,7 @@ const features: Feature[] = [
     screen: (
       <RecSteps
         segs={[
-          { v: "v1", from: 65.9, to: 67.4 },
+          { v: "v1", from: 64.6, to: 67.4, mark: { box: HOME_SETTINGS, from: 64.9, to: 66.35 } },
           { v: "v1", from: 67.4, to: 68.4, mark: { box: wide(186, 130), from: 67.45 } },
           { v: "v1", from: 68.4, to: 69.2, mark: { box: wide(336, 204), from: 68.45 } },
           { v: "v1", from: 69.2, to: 70, mark: { box: wide(560, 310), from: 69.25 } },
@@ -197,7 +218,7 @@ const features: Feature[] = [
     bullets: [
       `${fa(28)} دوره‌ی کامل قرائت؛ متن، آیه‌به‌آیه همراه تلاوت پیش می‌رود`,
       "تنظیمات پخش: پخش بازه‌ای، سرعت پخش و تکرار آیه",
-      "پخش بازه‌ای: آیه، سوره، جزء، حزب یا صفحه، با تکرار دلخواه",
+      "پخش بازه‌ای: حالت پخش (آیه تا صفحه)، شروع، پایان و تکرار آیه",
       "«حالت پخش» و «مدیریت دانلودها»",
       "انتخاب قاری در قالب‌های ترتیل، تحقیق و تحدیر",
     ],
@@ -209,13 +230,26 @@ const features: Feature[] = [
           {
             v: "v2",
             from: 54.6,
-            to: 57.5,
+            to: 56.3,
             mark: [
               { box: PLAYER_SETTINGS, from: 54.6, to: 55.45 },
-              { box: wide(818, 50), from: 55.9 },
+              { box: wide(815, 56), from: 55.9, to: 57 },
+              { box: wide(879, 56), from: 57.1, to: 58.2 },
+              { box: wide(943, 56), from: 58.3 },
             ],
           },
-          { v: "v2", from: 72.6, to: 75.6, mark: { box: wide(818, 50), from: 73.15, to: 73.65 } },
+          {
+            v: "v2",
+            from: 72.6,
+            to: 74.2,
+            mark: [
+              { box: wide(818, 50), from: 73.15, to: 73.65 },
+              { box: dlg(334, 92), from: 74.3, to: 75.7 },
+              { box: dlg(434, 86), from: 75.8, to: 77 },
+              { box: dlg(524, 86), from: 77.1, to: 78.3 },
+              { box: dlg(614, 86), from: 78.4 },
+            ],
+          },
           {
             v: "v2",
             from: 62,
@@ -230,21 +264,6 @@ const features: Feature[] = [
       />
     ),
     stat: { value: fa(28), label: "دوره‌ی قرائت" },
-  },
-  {
-    id: "pagetools",
-    pans: [-1, -1, -1, -1, -1],
-    icon: "more",
-    title: "ابزارهای صفحه‌ی قرآن",
-    short: "ابزارهای صفحه",
-    subtitle: "دکمه‌های بالای صفحه‌ی نمایش آیات",
-    bullets: [
-      "«سوره‌نامه»: مفهوم سوره، نام‌های آن، علت نام‌گذاری و تعداد آیات",
-      "«برو به»: فهرستی برای دسترسی سریع به بخش دلخواه قرآن",
-      "«نحوه نمایش»: متنی، مصحف ۱۵ خطی یا تجویدی",
-      "تنظیمات برنامه، و حرکت خودکار صفحه با سرعت دلخواه",
-    ],
-    screen: <ReadingToolsScreen />,
   },
   {
     id: "translate",
@@ -362,7 +381,7 @@ const features: Feature[] = [
     screen: (
       <RecSteps
         segs={[
-          { v: "v5", from: 31.5, to: 34.5 },
+          { v: "v5", from: 29.8, to: 34.5, mark: { box: HOME_FARHANG, from: 30.3, to: 32.25 } },
           { v: "v5", from: 34.5, to: 36.6 },
           { v: "v5", from: 36.6, to: 44 },
           { v: "v5", from: 48.5, to: 56 },

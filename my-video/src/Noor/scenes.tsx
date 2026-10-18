@@ -468,7 +468,7 @@ export const ExampleScene: React.FC = () => {
   const current = steps.reduce((c, _, i) => (frame >= at(i + 1) ? i : c), -1);
   return (
     <PhoneLayout
-      pans={[-1, -1, 0, -1, -1]}
+      pans={[-1, -1, 1, -1, -1]}
       screen={
         <StepSwitch
           screens={[
@@ -559,7 +559,7 @@ export const FindingsScene: React.FC = () => {
             <span style={{ color: C.gold }}>صبر</span> در آیات قرآن
           </>
         }
-        subtitle="نمونه‌ای از نتایج بررسی موضوعی"
+        subtitle="«صبر» و مشتقات آن ۱۰۳ بار در قرآن آمده است؛ چند نمونه:"
       />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}>
         {verses.map(([ref, ayah, point], i) => (
