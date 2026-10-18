@@ -1,7 +1,7 @@
 import React from "react";
 import { Easing, Freeze, Img, OffthreadVideo, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { A, QURAN, fa } from "./theme";
-import { Icon, MiniChip, Skeleton, StepCtx, useAt, useSpring } from "./ui";
+import { Icon, IconName, MiniChip, Skeleton, StepCtx, useAt, useSpring } from "./ui";
 
 const SCREEN_W = 412;
 const NOTCH_H = 40;
@@ -299,16 +299,18 @@ const REC = {
 };
 const REC_W = 480;
 const REC_STATUS = 50;
-// `mark` frames a tapped item (box in recording pixels, shown between `from` and `to` in source seconds)
+// `mark` frames a tapped item (box in recording pixels, shown between `from` and `to` in source seconds);
+// a list of marks is shown one after another, so their windows must not overlap
+type RecMarkSpec = { box: Box; from?: number; to?: number };
 export type Seg = {
   v: keyof typeof REC;
   from: number;
   to: number;
   rate?: number;
-  mark?: { box: Box; from?: number; to?: number };
+  mark?: RecMarkSpec | RecMarkSpec[];
 };
 
-const RecMark: React.FC<{ mark: NonNullable<Seg["mark"]>; t: number }> = ({ mark, t }) => {
+const RecMark: React.FC<{ mark: RecMarkSpec; t: number }> = ({ mark, t }) => {
   const { box, from = 0, to } = mark;
   const fadeIn = interpolate(t, [from, from + 0.3], [0, 1], clamp);
   const fadeOut = to === undefined ? 1 : interpolate(t, [to - 0.2, to], [1, 0], clamp);
@@ -362,8 +364,74 @@ export const RecSteps: React.FC<{ segs: (Seg | null)[] }> = ({ segs }) => {
         />
       </Freeze>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: NOTCH_H, background: A.header }} />
-      {seg.mark ? <RecMark mark={seg.mark} t={seg.from + (local * rate) / 30} /> : null}
+      {[seg.mark ?? []].flat().map((m, i) => (
+        <RecMark key={i} mark={m} t={seg.from + (local * rate) / 30} />
+      ))}
     </div>
+  );
+};
+
+// The reading page's overflow menu (⋮), drawn from the user's photo of it over a recorded frame of the
+// page; the spotlight moves from the toolbar through the menu items, then to settings and auto-scroll
+const REC_SHOT: Shot = { src: "", basis: REC_W, crop: REC_STATUS };
+const MENU_ITEMS: [IconName, string][] = [
+  ["info", "سوره‌نامه"],
+  ["external", "برو به"],
+  ["book", "نحوه نمایش"],
+  ["repeat", "پخش بازه‌ای"],
+  ["download", "مدیریت دانلودها"],
+];
+const MENU = { x: 4, y: 56, w: 200, row: 57, pad: 8 };
+const menuRow = (i: number): Box => ({ x: MENU.x + 4, y: MENU.y + MENU.pad + i * MENU.row, w: MENU.w - 8, h: MENU.row });
+
+export const ReadingToolsScreen: React.FC = () => {
+  const frame = useCurrentFrame();
+  const at = useAt();
+  const k = SCREEN_W / REC_W;
+  const open = Math.min(
+    interpolate(frame, [at(1), at(1) + 8], [0, 1], clamp),
+    interpolate(frame, [at(4), at(4) + 8], [1, 0], clamp),
+  );
+  return (
+    <>
+      <RecSteps segs={[{ v: "v2", from: 54.7, to: 54.8 }]} />
+      {open > 0 ? (
+        <div
+          style={{
+            position: "absolute",
+            left: MENU.x * k,
+            top: NOTCH_H + (MENU.y - REC_STATUS) * k,
+            width: MENU.w * k,
+            padding: `${MENU.pad * k}px 0`,
+            background: "#4a4a4a",
+            borderRadius: 4,
+            boxShadow: "0 6px 18px rgba(0,0,0,0.5)",
+            opacity: open,
+            transform: `scale(${0.92 + 0.08 * open})`,
+            transformOrigin: "top left",
+            direction: "rtl",
+          }}
+        >
+          {MENU_ITEMS.map(([icon, label]) => (
+            <div
+              key={label}
+              style={{ height: MENU.row * k, display: "flex", alignItems: "center", gap: 12 * k, padding: `0 ${22 * k}px` }}
+            >
+              <Icon name={icon} size={24 * k} color="#f2f2f2" />
+              <span style={{ fontSize: 15 * k, fontWeight: 600, color: "#f2f2f2" }}>{label}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <Spotlight
+        shot={REC_SHOT}
+        marks={[
+          { at: 10, box: { x: 4, y: 54, w: 180, h: 44 } },
+          ...[0, 1, 2].map((i) => ({ at: at(i + 1) + (i ? 0 : 6), box: menuRow(i) })),
+          { at: at(4), box: { x: 44, y: 54, w: 92, h: 44 } },
+        ]}
+      />
+    </>
   );
 };
 

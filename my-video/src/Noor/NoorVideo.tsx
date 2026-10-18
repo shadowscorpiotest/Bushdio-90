@@ -20,15 +20,18 @@ import {
   QuoteScene,
   WhyScene,
 } from "./scenes";
-import { AIScreen, Box, RecSteps, SHOTS, StepShot } from "./screens";
+import { AIScreen, Box, ReadingToolsScreen, RecSteps, SHOTS, StepShot } from "./screens";
 import deck from "./deck.json";
 
 // Sources: the user's screenshots and screen recordings of the current app (v5.8.3) and
 // Rahavard-e Noor no. 83 ("New features of the Quran Noor mobile app").
 // Spotlight boxes are in each screenshot's basis units (see SHOTS); one per bullet, null keeps the last.
-const row = (y: number, h = 112): Box => ({ x: 30, y, w: 865, h });
 // «سبز» in the colour list of «اعلام و اسماء» (recording pixels)
 const SABZ: Box = { x: 16, y: 381, w: 448, h: 50 };
+// Rows of the settings tabs and player controls in the recordings (recording pixels)
+const wide = (y: number, h: number): Box => ({ x: 14, y, w: 452, h });
+const PLAYER_SETTINGS: Box = { x: 424, y: 940, w: 52, h: 54 };
+const PLAYER_RECITER: Box = { x: 10, y: 936, w: 78, h: 62 };
 
 const home: Feature = {
   id: "home",
@@ -83,41 +86,82 @@ const features: Feature[] = [
   },
   {
     id: "mushaf",
-    pans: [-1, -1, -1, -1, -1],
+    pans: [-1, -1, -1, 0, 0, 0],
     icon: "book",
     title: "شیوه‌های نمایش مصحف",
     short: "نمایش مصحف",
-    subtitle: "نمایش متن قرآن، متناسب با نیاز هر کاربر",
+    subtitle: "زبانه‌ی «متن» در تنظیمات برنامه",
     bullets: [
-      "نمایش متنی، مصحف ۱۵ خطی و مصحف تجویدی",
-      "رسم‌الخط عثمان‌طه یا نیریزی",
-      "نمایش متن به‌تنهایی یا همراه ترجمه",
-      "تنظیم ترازبندی، قلم و اندازه‌ی متن",
+      "متنی، مصحف ۱۵ خطی یا تجویدی؛ رسم‌الخط عثمان‌طه یا نیریزی",
+      "ترازبندی، و نمایش متن به‌تنهایی یا همراه ترجمه",
+      "حرکت خودکار صفحه، اندازه‌ی قلم، ترجمه‌ها و تفاسیر منتخب",
+      "شخصی‌سازی متن قرآن: قلم، اندازه و فاصله‌ی خطوط",
+      "شخصی‌سازی ترجمه و تفسیر، و رنگ متن و پس‌زمینه",
     ],
-    screen: <StepShot shot={SHOTS.settingsText} boxes={[row(354), row(497), row(784), row(641)]} />,
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v1", from: 65.9, to: 67.4 },
+          { v: "v1", from: 67.4, to: 68.4, mark: { box: wide(186, 130), from: 67.45 } },
+          { v: "v1", from: 68.4, to: 69.2, mark: { box: wide(336, 204), from: 68.45 } },
+          { v: "v1", from: 69.2, to: 70, mark: { box: wide(560, 310), from: 69.25 } },
+          { v: "v1", from: 70.4, to: 72.9, mark: { box: { x: 20, y: 512, w: 444, h: 396 }, from: 72.4 } },
+          { v: "v1", from: 72.9, to: 77.6, mark: { box: { x: 22, y: 386, w: 438, h: 608 }, from: 76.9 } },
+        ]}
+      />
+    ),
     stat: { value: fa(3), label: "شیوه‌ی نمایش" },
   },
   {
     id: "recite",
-    pans: [-1, -1, -0.5, 0, 0.5],
+    pans: [-1, -1, -1, -1, 0],
     icon: "repeat",
     title: "تنظیمات قرائت و حفظ",
     short: "قرائت و حفظ",
-    subtitle: "امکانات ویژه برای حافظان و تمرکز بر آیات",
+    subtitle: "زبانه‌ی «قرائت»؛ امکانات ویژه برای حافظان",
     bullets: [
-      "۴ حالت پخش: متن، ترجمه یا هر دو به‌ترتیب دلخواه",
-      `ترجمه‌ی گویای فارسی (${fa(2)} دوره‌ی کامل)`,
+      "۴ حالت پخش: متن، متن و ترجمه، ترجمه، ترجمه و متن",
+      `قاری منتخب و ترجمه‌ی گویای فارسی (${fa(2)} دوره‌ی کامل)`,
       `سرعت پخش ۰٫۵ تا ${fa(2)} برابر و تکرار آیه تا ${fa(100)} بار`,
       "پخش دعای آیات سجده‌دار",
     ],
     screen: (
-      <StepShot shot={SHOTS.settingsRecite} boxes={[row(497), row(835, 120), row(1000, 400), row(1425, 130)]} />
+      <RecSteps
+        segs={[
+          { v: "v1", from: 78.9, to: 80 },
+          { v: "v1", from: 82.4, to: 84.6, mark: { box: { x: 30, y: 262, w: 164, h: 288 }, from: 83.3 } },
+          { v: "v1", from: 86.3, to: 86.9, mark: { box: wide(330, 172), from: 86.35 } },
+          { v: "v1", from: 86.9, to: 87.5, mark: { box: wide(520, 208), from: 86.95 } },
+          { v: "v1", from: 87.5, to: 88.1, mark: { box: wide(745, 62), from: 87.55 } },
+        ]}
+      />
     ),
     stat: { value: fa(4), label: "حالت پخش" },
   },
   {
+    id: "general",
+    pans: [-1, -1, -1],
+    icon: "sliders",
+    title: "تنظیمات عمومی",
+    short: "تنظیمات عمومی",
+    subtitle: "زبانه‌ی «عمومی» در تنظیمات برنامه",
+    bullets: [
+      "پوسته‌ی برنامه و پوسته‌ی شب، روشن‌ماندن صفحه",
+      "یادآور «آیه‌ی روز»، زبان برنامه و به‌روزرسانی",
+    ],
+    screen: (
+      <RecSteps
+        segs={[
+          { v: "v1", from: 88.6, to: 89.6 },
+          { v: "v1", from: 89.6, to: 90.3, mark: { box: wide(186, 278), from: 89.65 } },
+          { v: "v1", from: 90.3, to: 91, mark: { box: wide(486, 278), from: 90.35 } },
+        ]}
+      />
+    ),
+  },
+  {
     id: "surahs",
-    pans: [-1, -1, 1, -1],
+    pans: [-1, -1, 1, -1, -1, -1],
     icon: "list",
     title: "قرآن کریم و فهرست سوره‌ها",
     short: "فهرست سوره‌ها",
@@ -125,7 +169,9 @@ const features: Feature[] = [
     bullets: [
       `فهرست ${fa(114)} سوره، با تعداد آیات و مکی یا مدنی بودن`,
       "افزودن سوره به «علاقه‌مندی‌ها»، در دسته‌ی دلخواه",
-      `فهرست ${fa(30)} جزء، با امکان نمایش حزب‌ها`,
+      `فهرست ${fa(30)} جزء`,
+      "نمایش حزب‌ها با کلید «نمایش حزب‌ها»",
+      "زبانه‌ی «علاقه‌مندی‌ها»: سوره، جزء و حزب‌های ذخیره‌شده",
     ],
     screen: (
       <RecSteps
@@ -134,6 +180,8 @@ const features: Feature[] = [
           { v: "v1", from: 111.2, to: 118.6 },
           { v: "v1", from: 119, to: 123.6 },
           { v: "v1", from: 123.7, to: 128.9 },
+          { v: "v2", from: 0, to: 2.6, mark: { box: { x: 12, y: 182, w: 168, h: 48 }, from: 0.1 } },
+          { v: "v2", from: 16.6, to: 21.2, mark: { box: { x: 6, y: 116, w: 150, h: 50 }, from: 16.6, to: 17.8 } },
         ]}
       />
     ),
@@ -141,29 +189,62 @@ const features: Feature[] = [
   },
   {
     id: "reciters",
-    pans: [0, 0.5, 0, 1, 0],
+    pans: [0, 0, 1, 0.5, 1, -1],
     icon: "headphones",
     title: "تلاوت و قاریان",
     short: "تلاوت و قاریان",
     subtitle: "تلاوت آیات با صدای قاریان برجسته",
     bullets: [
-      `${fa(28)} دوره‌ی کامل قرائت، با دنبال‌کردن هم‌زمان متن`,
+      `${fa(28)} دوره‌ی کامل قرائت؛ متن، آیه‌به‌آیه همراه تلاوت پیش می‌رود`,
+      "تنظیمات پخش: پخش بازه‌ای، سرعت پخش و تکرار آیه",
+      "پخش بازه‌ای: آیه، سوره، جزء، حزب یا صفحه، با تکرار دلخواه",
+      "«حالت پخش» و «مدیریت دانلودها»",
       "انتخاب قاری در قالب‌های ترتیل، تحقیق و تحدیر",
-      "دانلود یا حذف قرائت‌ها در «مدیریت دانلودها»",
-      "پخش بازه‌ای: آیه، سوره، جزء، حزب یا صفحه",
     ],
     screen: (
       <RecSteps
         segs={[
           { v: "v2", from: 26.5, to: 30 },
-          { v: "v2", from: 34.5, to: 37.2 },
-          { v: "v2", from: 64.5, to: 68.5 },
-          { v: "v2", from: 70.6, to: 72.2 },
-          { v: "v2", from: 72.6, to: 75.5 },
+          { v: "v2", from: 43.8, to: 54.6 },
+          {
+            v: "v2",
+            from: 54.6,
+            to: 57.5,
+            mark: [
+              { box: PLAYER_SETTINGS, from: 54.6, to: 55.45 },
+              { box: wide(818, 50), from: 55.9 },
+            ],
+          },
+          { v: "v2", from: 72.6, to: 75.6, mark: { box: wide(818, 50), from: 73.15, to: 73.65 } },
+          {
+            v: "v2",
+            from: 62,
+            to: 64.6,
+            mark: [
+              { box: PLAYER_RECITER, from: 62.05, to: 63.85 },
+              { box: wide(608, 56), from: 64.2 },
+            ],
+          },
+          { v: "v2", from: 64.6, to: 68.3, mark: { box: wide(682, 60), from: 64.6, to: 65.25 } },
         ]}
       />
     ),
     stat: { value: fa(28), label: "دوره‌ی قرائت" },
+  },
+  {
+    id: "pagetools",
+    pans: [-1, -1, -1, -1, -1],
+    icon: "more",
+    title: "ابزارهای صفحه‌ی قرآن",
+    short: "ابزارهای صفحه",
+    subtitle: "دکمه‌های بالای صفحه‌ی نمایش آیات",
+    bullets: [
+      "«سوره‌نامه»: مفهوم سوره، نام‌های آن، علت نام‌گذاری و تعداد آیات",
+      "«برو به»: فهرستی برای دسترسی سریع به بخش دلخواه قرآن",
+      "«نحوه نمایش»: متنی، مصحف ۱۵ خطی یا تجویدی",
+      "تنظیمات برنامه، و حرکت خودکار صفحه با سرعت دلخواه",
+    ],
+    screen: <ReadingToolsScreen />,
   },
   {
     id: "translate",
@@ -191,7 +272,7 @@ const features: Feature[] = [
   },
   {
     id: "tafsir",
-    pans: [1, 0, 0, 1],
+    pans: [1, 0, 0, 1, 1],
     icon: "layers",
     title: "تفسیر و حدیث",
     short: "تفسیر و حدیث",
@@ -200,6 +281,7 @@ const features: Feature[] = [
       `${fa(416)} تفسیر عربی و فارسی؛ قابل دانلود برای استفاده‌ی آفلاین`,
       "مطالعه‌ی متن کامل تفسیر، مانند تفسیر نمونه",
       "روایات تفسیری از منابعی مانند تفسیر عیاشی، قمی و البرهان",
+      "روایات شیعه و اهل سنت؛ مانند الدر المنثور سیوطی",
     ],
     screen: (
       <RecSteps
@@ -208,6 +290,7 @@ const features: Feature[] = [
           { v: "v2", from: 99.6, to: 104 },
           { v: "v3", from: 0, to: 5 },
           { v: "v3", from: 14.5, to: 19.5 },
+          { v: "v3", from: 21.4, to: 36.2 },
         ]}
       />
     ),

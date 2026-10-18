@@ -251,13 +251,13 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
       }
       subtitle="به ترتیب کار یک کاربر با برنامه؛ از جستجو تا پژوهش"
     />
-    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 20, width: 1640 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 16, width: 1640 }}>
       {features.map((f, i) => (
         <Reveal key={f.id} delay={16 + i * 6} scale>
           <Glass
             style={{
-              width: 212,
-              height: 176,
+              width: 190,
+              height: 172,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
@@ -266,7 +266,7 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
             }}
           >
             <IconBadge name={f.icon} size={68} />
-            <div style={{ fontSize: 25, fontWeight: 800 }}>{f.short}</div>
+            <div style={{ fontSize: 24, fontWeight: 800 }}>{f.short}</div>
           </Glass>
         </Reveal>
       ))}

@@ -142,7 +142,10 @@ export type IconName =
   | "back"
   | "tag"
   | "list"
-  | "calendar";
+  | "calendar"
+  | "sliders"
+  | "more"
+  | "external";
 
 const paths: Record<IconName, React.ReactNode> = {
   book: (
@@ -298,6 +301,33 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M3 6h.01" />
       <path d="M3 12h.01" />
       <path d="M3 18h.01" />
+    </>
+  ),
+  more: (
+    <>
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="19" r="1" />
+    </>
+  ),
+  external: (
+    <>
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </>
+  ),
+  sliders: (
+    <>
+      <path d="M21 4h-7" />
+      <path d="M10 4H3" />
+      <path d="M21 12h-9" />
+      <path d="M8 12H3" />
+      <path d="M21 20h-5" />
+      <path d="M12 20H3" />
+      <path d="M14 2v4" />
+      <path d="M8 10v4" />
+      <path d="M16 18v4" />
     </>
   ),
   calendar: (
