@@ -356,7 +356,7 @@ export const AIScreen: React.FC = () => {
           from: at(2),
           el: (
             <RecSteps
-              segs={[null, null, { v: "v3", from: 81.5, to: 90 }, { v: "v6", from: 101.8, to: 104.8 }]}
+              segs={[null, null, { v: "v3", from: 81.5, to: 87 }, { v: "v6", from: 101.8, to: 104.8 }]}
             />
           ),
         },

@@ -14,7 +14,6 @@ import {
   FeatureScene,
   FindingsScene,
   IntroScene,
-  MethodScene,
   OutroScene,
   OverviewScene,
   PlatformsScene,
@@ -89,9 +88,9 @@ const features: Feature[] = [
     screen: (
       <RecSteps
         segs={[
-          { v: "v2", from: 25, to: 30 },
+          { v: "v2", from: 26.5, to: 30 },
           { v: "v2", from: 34.5, to: 37.2 },
-          { v: "v2", from: 63.6, to: 69.4 },
+          { v: "v2", from: 64.5, to: 68.5 },
           { v: "v2", from: 70.6, to: 72.2 },
           { v: "v2", from: 72.6, to: 75.5 },
         ]}
@@ -133,9 +132,9 @@ const features: Feature[] = [
       <RecSteps
         segs={[
           { v: "v6", from: 43.8, to: 47 },
-          { v: "v6", from: 47, to: 50.5 },
-          { v: "v6", from: 55.5, to: 61 },
-          { v: "v5", from: 82.5, to: 91 },
+          { v: "v6", from: 47, to: 49.5 },
+          { v: "v6", from: 55.5, to: 59.5 },
+          { v: "v5", from: 85.5, to: 91 },
         ]}
       />
     ),
@@ -157,8 +156,8 @@ const features: Feature[] = [
         segs={[
           { v: "v2", from: 77, to: 81 },
           { v: "v2", from: 81, to: 83 },
-          { v: "v2", from: 86.5, to: 93.5 },
-          { v: "v2", from: 29.5, to: 33.5 },
+          { v: "v2", from: 86.5, to: 91 },
+          { v: "v2", from: 30, to: 33 },
         ]}
       />
     ),
@@ -180,9 +179,9 @@ const features: Feature[] = [
       <RecSteps
         segs={[
           { v: "v2", from: 95, to: 98.8 },
-          { v: "v2", from: 99.6, to: 106.5 },
-          { v: "v3", from: 0, to: 7 },
-          { v: "v3", from: 14.5, to: 22 },
+          { v: "v2", from: 99.6, to: 104 },
+          { v: "v3", from: 0, to: 5 },
+          { v: "v3", from: 14.5, to: 19.5 },
         ]}
       />
     ),
@@ -205,10 +204,10 @@ const features: Feature[] = [
       <RecSteps
         segs={[
           { v: "v3", from: 39, to: 41.5 },
-          { v: "v3", from: 41.5, to: 46.5 },
-          { v: "v3", from: 47, to: 55 },
-          { v: "v3", from: 70, to: 78 },
-          { v: "v6", from: 18.5, to: 30 },
+          { v: "v3", from: 41.5, to: 45 },
+          { v: "v3", from: 47, to: 52 },
+          { v: "v3", from: 70, to: 76 },
+          { v: "v6", from: 24.5, to: 30 },
         ]}
       />
     ),
@@ -231,8 +230,8 @@ const features: Feature[] = [
         segs={[
           { v: "v5", from: 31.5, to: 34.5 },
           { v: "v5", from: 34.5, to: 36.6 },
-          { v: "v5", from: 36.6, to: 48.5 },
-          { v: "v5", from: 48.5, to: 58.5 },
+          { v: "v5", from: 36.6, to: 44 },
+          { v: "v5", from: 48.5, to: 56 },
           { v: "v5", from: 58.5, to: 62 },
         ]}
       />
@@ -254,9 +253,9 @@ const features: Feature[] = [
       <RecSteps
         segs={[
           { v: "v4", from: 35.5, to: 39 },
-          { v: "v4", from: 39, to: 45 },
+          { v: "v4", from: 39, to: 43.5 },
           { v: "v4", from: 45.5, to: 53 },
-          { v: "v4", from: 75.5, to: 85 },
+          { v: "v4", from: 77, to: 84.5 },
         ]}
       />
     ),
@@ -310,7 +309,6 @@ const sceneEls: Record<string, React.ReactNode> = {
   overview: <OverviewScene features={features} />,
   ...Object.fromEntries(features.map((f, i) => [f.id, <FeatureScene key={f.id} feature={f} index={i} />])),
   platforms: <PlatformsScene />,
-  method: <MethodScene />,
   example: <ExampleScene />,
   findings: <FindingsScene />,
   critique: <CritiqueScene />,
