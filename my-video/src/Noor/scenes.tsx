@@ -157,7 +157,6 @@ export const AgendaScene: React.FC = () => {
 };
 
 export const WhyScene: React.FC = () => {
-  const at = useAt();
   const cards: [IconName, string, string][] = [
     ["search", "گردآوری آیات", "تفسیر موضوعی با گردآوری همه‌ی آیات مرتبط با یک موضوع در سراسر قرآن آغاز می‌شود"],
     ["layers", "مراجعه به تفاسیر و روایات", "فهم دقیق آیات به مطالعه و مقایسه‌ی تفاسیر و روایات تفسیری نیاز دارد"],
@@ -168,7 +167,7 @@ export const WhyScene: React.FC = () => {
       <Header pill="مقدمه" title="چرا نرم‌افزار قرآنی؟" subtitle="تفسیر موضوعی و نیاز به ابزارهای پژوهشی" />
       <div style={{ display: "flex", gap: 34 }}>
         {cards.map(([icon, title, desc], i) => (
-          <Reveal key={title} delay={at(i + 1)} y={50}>
+          <Reveal key={title} delay={20 + i * 12} y={50}>
             <Glass
               style={{
                 width: 480,

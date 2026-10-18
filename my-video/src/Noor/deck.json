@@ -4,7 +4,7 @@
   "scenes": [
     { "id": "intro", "lens": [140] },
     { "id": "agenda", "lens": [95] },
-    { "id": "why", "lens": [50, 30, 30, 30] },
+    { "id": "why", "lens": [95] },
     { "id": "developer", "lens": [55, 45] },
     { "id": "home", "lens": [55, 26, 26, 26, 26] },
     { "id": "overview", "lens": [115] },
