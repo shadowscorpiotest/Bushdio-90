@@ -25,8 +25,9 @@ FPS = DECK["fps"]
 SECTIONS = {
     "intro": "آغاز",
     "home": "قابلیت‌های برنامه",
-    "method": "کاربرد در تفسیر موضوعی",
-    "critique": "ارزیابی و جمع‌بندی",
+    "example": "نمونه‌ی عملی: صبر",
+    "alam": "ادامه‌ی قابلیت‌ها",
+    "quote": "جمع‌بندی و ارزیابی",
 }
 
 # PowerPoint's own markup for a video set to "Start: Automatically"

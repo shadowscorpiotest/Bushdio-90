@@ -130,11 +130,11 @@ export const IntroScene: React.FC = () => {
 export const AgendaScene: React.FC = () => {
   const items: [IconName, string][] = [
     ["sparkles", "چرا نرم‌افزار قرآنی؟"],
-    ["info", "سازنده و نگاه کلی به برنامه"],
+    ["info", "سازنده و دریافت برنامه"],
     ["layers", "قابلیت‌های اصلی برنامه"],
-    ["search", "کاربرد در تفسیر موضوعی: «صبر»"],
-    ["check", "نقد و ارزیابی"],
-    ["star", "جمع‌بندی و پرسش و پاسخ"],
+    ["tag", "نمونه‌ی عملی: «صبر»"],
+    ["check", "جمع‌بندی و ارزیابی"],
+    ["star", "پرسش و پاسخ"],
   ];
   return (
     <CenterScene gap={50}>
@@ -251,13 +251,13 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
       }
       subtitle="یک برنامه برای تلاوت، فهم و پژوهش در قرآن کریم"
     />
-    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 22, width: 1640 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 20, width: 1640 }}>
       {features.map((f, i) => (
         <Reveal key={f.id} delay={16 + i * 6} scale>
           <Glass
             style={{
-              width: 254,
-              height: 180,
+              width: 212,
+              height: 176,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
@@ -266,7 +266,7 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
             }}
           >
             <IconBadge name={f.icon} size={68} />
-            <div style={{ fontSize: 26, fontWeight: 800 }}>{f.short}</div>
+            <div style={{ fontSize: 25, fontWeight: 800 }}>{f.short}</div>
           </Glass>
         </Reveal>
       ))}
@@ -397,12 +397,15 @@ export const PlatformsScene: React.FC = () => {
   const popup: Box = { x: 148, y: 612, w: 627, h: 740 };
   return (
     <PhoneLayout
-      pans={[0, 0, 0, -1]}
+      pans={[-1, -1, -1, 0]}
       screen={
         <StepSwitch
           screens={[
-            { from: 0, el: <StepShot shot={SHOTS.language} boxes={[null, popup]} /> },
-            { from: at(3), el: <RecSteps segs={[null, null, null, { v: "v1", from: 12.5, to: 14.4 }]} /> },
+            {
+              from: 0,
+              el: <RecSteps segs={[{ v: "v1", from: 11.3, to: 11.5 }, null, { v: "v1", from: 11.5, to: 20.6, rate: 1.45 }]} />,
+            },
+            { from: at(3), el: <StepShot shot={SHOTS.language} boxes={[null, null, popup]} /> },
           ]}
         />
       }
@@ -430,22 +433,25 @@ export const PlatformsScene: React.FC = () => {
       </div>
       <Reveal delay={at(2)} x={60} y={0}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <Icon name="download" size={40} color={C.gold} />
+          <span style={{ fontSize: 34, fontWeight: 700 }}>
+            دریافت از فروشگاه‌ها؛ بیش از {fa(820)} هزار نصب و امتیاز ۴٫۸
+          </span>
+        </div>
+      </Reveal>
+      <Reveal delay={at(3)} x={60} y={0}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <Icon name="globe" size={40} color={C.gold} />
           <span style={{ fontSize: 34, fontWeight: 700 }}>رابط کاربری به {fa(5)} زبان</span>
         </div>
       </Reveal>
       <div style={{ display: "flex", gap: 14 }}>
         {langs.map((l, i) => (
-          <Reveal key={l} delay={at(2) + 4 + i * 3} scale y={0}>
+          <Reveal key={l} delay={at(3) + 4 + i * 3} scale y={0}>
             <Glass style={{ padding: "8px 24px", fontSize: 28, fontWeight: 700, borderRadius: 999 }}>{l}</Glass>
           </Reveal>
         ))}
       </div>
-      <Reveal delay={at(3)} x={60} y={0}>
-        <div style={{ fontSize: 30, color: C.muted }}>
-          بیش از {fa(420)} هزار نصب و امتیاز ۴٫۸ در فروشگاه اپلیکیشن
-        </div>
-      </Reveal>
     </PhoneLayout>
   );
 };
@@ -591,7 +597,7 @@ export const CritiqueScene: React.FC = () => {
       items: [
         `محتوای جامع: ${fa(28)} دوره‌ی قرائت، ${fa(152)} ترجمه، ${fa(416)} تفسیر`,
         "ابزارهای پژوهشی: پنل آیه، فرهنگ موضوعی، هوش مصنوعی",
-        `استقبال کاربران: بیش از ${fa(420)} هزار نصب و امتیاز ۴٫۸`,
+        `استقبال کاربران: بیش از ${fa(820)} هزار نصب و امتیاز ۴٫۸`,
         "تولید مرکز نور؛ سه بستر و پنج زبان",
       ],
     },
@@ -690,8 +696,10 @@ export const OutroScene: React.FC = () => (
         <Pill gold>پرسش و پاسخ</Pill>
       </Reveal>
       <Reveal delay={8} x={60} y={0}>
-        <div style={{ fontSize: 84, fontWeight: 900 }}>
-          با سپاس از <span style={{ color: C.gold }}>توجه شما</span>
+        <div style={{ fontSize: 76, fontWeight: 900, lineHeight: 1.35 }}>
+          با سپاس از توجه
+          <br />
+          <span style={{ color: C.gold, fontSize: 60 }}>استاد گرامی و دانشجویان عزیز</span>
         </div>
       </Reveal>
       <Reveal delay={18} x={60} y={0}>

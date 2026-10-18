@@ -140,7 +140,9 @@ export type IconName =
   | "home"
   | "mic"
   | "back"
-  | "tag";
+  | "tag"
+  | "list"
+  | "calendar";
 
 const paths: Record<IconName, React.ReactNode> = {
   book: (
@@ -286,6 +288,24 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
       <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
       <path d="M12 19v3" />
+    </>
+  ),
+  list: (
+    <>
+      <path d="M8 6h13" />
+      <path d="M8 12h13" />
+      <path d="M8 18h13" />
+      <path d="M3 6h.01" />
+      <path d="M3 12h.01" />
+      <path d="M3 18h.01" />
+    </>
+  ),
+  calendar: (
+    <>
+      <path d="M8 2v4" />
+      <path d="M16 2v4" />
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M3 10h18" />
     </>
   ),
   tag: (

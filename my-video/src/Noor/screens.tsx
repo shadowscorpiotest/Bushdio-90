@@ -299,7 +299,37 @@ const REC = {
 };
 const REC_W = 480;
 const REC_STATUS = 50;
-export type Seg = { v: keyof typeof REC; from: number; to: number; rate?: number };
+// `mark` frames a tapped item (box in recording pixels, shown between `from` and `to` in source seconds)
+export type Seg = {
+  v: keyof typeof REC;
+  from: number;
+  to: number;
+  rate?: number;
+  mark?: { box: Box; from?: number; to?: number };
+};
+
+const RecMark: React.FC<{ mark: NonNullable<Seg["mark"]>; t: number }> = ({ mark, t }) => {
+  const { box, from = 0, to } = mark;
+  const fadeIn = interpolate(t, [from, from + 0.3], [0, 1], clamp);
+  const fadeOut = to === undefined ? 1 : interpolate(t, [to - 0.2, to], [1, 0], clamp);
+  const o = Math.min(fadeIn, fadeOut);
+  if (o <= 0) return null;
+  const k = SCREEN_W / REC_W;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: box.x * k - 5,
+        top: NOTCH_H + (box.y - REC_STATUS) * k - 5,
+        width: box.w * k + 10,
+        height: box.h * k + 10,
+        borderRadius: 16,
+        border: `3px solid rgba(220,186,89,${o})`,
+        boxShadow: `0 0 0 2000px rgba(0,0,0,${0.42 * o}), 0 0 16px rgba(220,186,89,${0.9 * o})`,
+      }}
+    />
+  );
+};
 
 // Plays one recording segment per click step (null keeps the previous segment) and holds its
 // last frame until the next segment; a segment longer than its step is sped up to fit
@@ -332,11 +362,12 @@ export const RecSteps: React.FC<{ segs: (Seg | null)[] }> = ({ segs }) => {
         />
       </Freeze>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: NOTCH_H, background: A.header }} />
+      {seg.mark ? <RecMark mark={seg.mark} t={seg.from + (local * rate) / 30} /> : null}
     </div>
   );
 };
 
-// Home-screen screenshot with spotlights; related verses and the noorlib.ir chat page are recorded
+// Home-screen screenshot with spotlights; the noorlib.ir chat page is recorded
 export const AIScreen: React.FC = () => {
   const at = useAt();
   const shot = (
@@ -344,7 +375,7 @@ export const AIScreen: React.FC = () => {
       shot={SHOTS.homeScroll}
       marks={[
         { at: at(1), box: { x: 54, y: 512, w: 814, h: 183 } },
-        { at: at(4), box: { x: 0, y: 1470, w: 923, h: 340 } },
+        { at: at(3), box: { x: 0, y: 1470, w: 923, h: 340 } },
       ]}
     />
   );
@@ -352,15 +383,8 @@ export const AIScreen: React.FC = () => {
     <StepSwitch
       screens={[
         { from: 0, el: shot },
-        {
-          from: at(2),
-          el: (
-            <RecSteps
-              segs={[null, null, { v: "v3", from: 81.5, to: 87 }, { v: "v6", from: 101.8, to: 104.8 }]}
-            />
-          ),
-        },
-        { from: at(4), el: shot },
+        { from: at(2), el: <RecSteps segs={[null, null, { v: "v6", from: 101.8, to: 104.8 }]} /> },
+        { from: at(3), el: shot },
       ]}
     />
   );
