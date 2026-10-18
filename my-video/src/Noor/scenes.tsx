@@ -131,7 +131,7 @@ export const AgendaScene: React.FC = () => {
   const items: [IconName, string][] = [
     ["sparkles", "چرا نرم‌افزار قرآنی؟"],
     ["info", "سازنده و دریافت برنامه"],
-    ["layers", "قابلیت‌های اصلی برنامه"],
+    ["layers", "قابلیت‌ها: از نصب تا پژوهش"],
     ["tag", "نمونه‌ی عملی: «صبر»"],
     ["check", "جمع‌بندی و ارزیابی"],
     ["star", "پرسش و پاسخ"],
@@ -249,7 +249,7 @@ export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) =
           قابلیت‌ها <span style={{ color: C.gold }}>در یک نگاه</span>
         </>
       }
-      subtitle="یک برنامه برای تلاوت، فهم و پژوهش در قرآن کریم"
+      subtitle="به ترتیب کار یک کاربر با برنامه؛ از جستجو تا پژوهش"
     />
     <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 20, width: 1640 }}>
       {features.map((f, i) => (
