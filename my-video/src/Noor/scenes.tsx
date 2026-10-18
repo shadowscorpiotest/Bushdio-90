@@ -1,5 +1,5 @@
 import React from "react";
-import { Img, interpolate, staticFile, useCurrentFrame } from "remotion";
+import { Easing, Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { C, QURAN, fa } from "./theme";
 import {
   AppIcon,
@@ -237,6 +237,8 @@ export type Feature = {
   screen: React.ReactNode;
   stat?: { value: string; label: string };
   label?: string;
+  // phone pan per step (entry first), see PhoneLayout
+  pans?: number[];
 };
 
 export const OverviewScene: React.FC<{ features: Feature[] }> = ({ features }) => (
@@ -297,60 +299,68 @@ const Bullet: React.FC<{ delay: number; children: React.ReactNode }> = ({ delay,
 );
 
 const StatChip: React.FC<{ value: string; label: string; delay: number }> = ({ value, label, delay }) => {
-  const frame = useCurrentFrame();
   const p = useSpring(delay, 14);
   return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: 130,
-        right: -60,
-        transform: `scale(${p}) translateY(${Math.sin(frame / 25) * 6}px)`,
-        opacity: p,
-      }}
-    >
+    <div style={{ opacity: p, transform: `scale(${0.8 + 0.2 * p})`, transformOrigin: "right center" }}>
       <Glass
         style={{
-          padding: "18px 30px",
-          background: "rgba(10,25,80,0.85)",
+          display: "inline-flex",
+          alignItems: "baseline",
+          gap: 16,
+          padding: "10px 28px",
           border: `1.5px solid ${C.gold}`,
-          textAlign: "center",
         }}
       >
-        <div style={{ fontSize: 64, fontWeight: 900, color: C.gold, lineHeight: 1.1 }}>{value}</div>
-        <div style={{ fontSize: 24, fontWeight: 700 }}>{label}</div>
+        <span style={{ fontSize: 60, fontWeight: 900, color: C.gold, lineHeight: 1.2 }}>{value}</span>
+        <span style={{ fontSize: 30, fontWeight: 700 }}>{label}</span>
       </Glass>
     </div>
   );
 };
 
-// Phone drawn near full slide height so the app screen stays legible when projected
-const PHONE_SCALE = 1.11;
+// The phone is drawn taller than the slide so its screen reads well when projected; each step
+// pans it so the part being explained is in view (-1 shows the top of the phone, 1 the bottom)
+const PHONE_SCALE = 1.4;
+const PHONE_SHIFT = (916 * PHONE_SCALE - 1040) / 2;
+
+const usePan = (pans: number[]) => {
+  const frame = useCurrentFrame();
+  const at = useAt();
+  let i = 0;
+  pans.forEach((_, k) => {
+    if (k > 0 && frame >= at(k)) i = k;
+  });
+  if (i === 0) return pans[0] ?? 0;
+  const t = interpolate(frame, [at(i), at(i) + 18], [0, 1], {
+    ...clamp,
+    easing: Easing.inOut(Easing.cubic),
+  });
+  return pans[i - 1] + (pans[i] - pans[i - 1]) * t;
+};
 
 // Text column on the right, phone on the left; the phone screen is passed in
-const PhoneLayout: React.FC<{ children: React.ReactNode; screen: React.ReactNode; stat?: React.ReactNode }> = ({
+const PhoneLayout: React.FC<{ children: React.ReactNode; screen: React.ReactNode; pans?: number[] }> = ({
   children,
   screen,
-  stat,
-}) => (
-  <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 120px", gap: 70 }}>
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>{children}</div>
-    <div style={{ position: "relative", width: 620, display: "flex", justifyContent: "center" }}>
-      <div style={{ transform: `scale(${PHONE_SCALE})` }}>
-        <Phone delay={4}>{screen}</Phone>
+  pans = [0],
+}) => {
+  const pan = usePan(pans);
+  return (
+    <Scene style={{ display: "flex", flexDirection: "row", alignItems: "center", padding: "0 110px", gap: 60 }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 26 }}>{children}</div>
+      <div style={{ width: 440 * PHONE_SCALE, display: "flex", justifyContent: "center" }}>
+        <div style={{ transform: `translateY(${-pan * PHONE_SHIFT}px) scale(${PHONE_SCALE})` }}>
+          <Phone delay={4}>{screen}</Phone>
+        </div>
       </div>
-      {stat}
-    </div>
-  </Scene>
-);
+    </Scene>
+  );
+};
 
 export const FeatureScene: React.FC<{ feature: Feature; index: number }> = ({ feature, index }) => {
   const at = useAt();
   return (
-    <PhoneLayout
-      screen={feature.screen}
-      stat={feature.stat ? <StatChip {...feature.stat} delay={16} /> : null}
-    >
+    <PhoneLayout screen={feature.screen} pans={feature.pans}>
       <Reveal delay={0} x={60} y={0}>
         <Pill>{feature.label ?? `قابلیت ${fa(String(index + 1).padStart(2, "0"))}`}</Pill>
       </Reveal>
@@ -372,6 +382,7 @@ export const FeatureScene: React.FC<{ feature: Feature; index: number }> = ({ fe
           </Bullet>
         ))}
       </div>
+      {feature.stat ? <StatChip {...feature.stat} delay={16} /> : null}
     </PhoneLayout>
   );
 };
@@ -387,6 +398,7 @@ export const PlatformsScene: React.FC = () => {
   const popup: Box = { x: 148, y: 612, w: 627, h: 740 };
   return (
     <PhoneLayout
+      pans={[0, 0, 0, -1]}
       screen={
         <StepSwitch
           screens={[
@@ -530,6 +542,7 @@ export const ExampleScene: React.FC = () => {
   const current = steps.reduce((c, _, i) => (frame >= at(i + 1) ? i : c), -1);
   return (
     <PhoneLayout
+      pans={[-1, -1, 0, -1, -1]}
       screen={
         <StepSwitch
           screens={[

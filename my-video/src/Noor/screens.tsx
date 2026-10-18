@@ -44,7 +44,7 @@ const Spotlight: React.FC<{ shot: Shot; marks: Mark[] }> = ({ shot, marks }) => 
   const lerp = (a: number, b: number) => a + (b - a) * t;
   const k = SCREEN_W / shot.basis;
   const appear = interpolate(frame, [marks[0].at, marks[0].at + 10], [0, 1], clamp);
-  const glow = 14 + Math.sin(frame / 6) * 8;
+  const glow = 16;
   return (
     <div
       style={{

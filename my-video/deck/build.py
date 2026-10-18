@@ -64,7 +64,7 @@ def cut(i, start, end):
     run(
         "ffmpeg", "-y", "-ss", f"{start / FPS:.4f}", "-i", str(MASTER), "-frames:v", str(end - start),
         "-c:v", "libx264", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
-        "-crf", "18", "-preset", "slow", "-an", "-movflags", "+faststart", str(clip),
+        "-crf", "20", "-preset", "slow", "-an", "-movflags", "+faststart", str(clip),
     )
     run("ffmpeg", "-y", "-ss", f"{start / FPS:.4f}", "-i", str(MASTER), "-frames:v", "1", "-q:v", "2", str(poster))
     return clip, poster

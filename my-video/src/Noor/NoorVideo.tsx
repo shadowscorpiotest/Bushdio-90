@@ -31,6 +31,7 @@ const row = (y: number, h = 112): Box => ({ x: 30, y, w: 865, h });
 
 const home: Feature = {
   id: "home",
+  pans: [-1, -1, -0.5, 0, -1],
   icon: "home",
   label: "نگاه اول",
   title: "صفحه‌ی اصلی",
@@ -58,6 +59,7 @@ const home: Feature = {
 const features: Feature[] = [
   {
     id: "mushaf",
+    pans: [-1, -1, -1, -1, -1],
     icon: "book",
     title: "شیوه‌های نمایش مصحف",
     short: "نمایش مصحف",
@@ -73,6 +75,7 @@ const features: Feature[] = [
   },
   {
     id: "reciters",
+    pans: [0, 0.5, 0, 1, 0],
     icon: "headphones",
     title: "تلاوت و قاریان",
     short: "تلاوت و قاریان",
@@ -98,6 +101,7 @@ const features: Feature[] = [
   },
   {
     id: "recite",
+    pans: [-1, -1, -0.5, 0, 0.5],
     icon: "repeat",
     title: "تنظیمات قرائت و حفظ",
     short: "قرائت و حفظ",
@@ -115,6 +119,7 @@ const features: Feature[] = [
   },
   {
     id: "multimedia",
+    pans: [0, -1, 0, -1],
     icon: "speaker",
     title: "چندرسانه و ختم قرآن",
     short: "چندرسانه",
@@ -137,6 +142,7 @@ const features: Feature[] = [
   },
   {
     id: "translate",
+    pans: [1, 1, 0, 0],
     icon: "languages",
     title: "ترجمه",
     short: "ترجمه",
@@ -160,6 +166,7 @@ const features: Feature[] = [
   },
   {
     id: "tafsir",
+    pans: [1, 0, 0, 1],
     icon: "layers",
     title: "تفسیر و حدیث",
     short: "تفسیر و حدیث",
@@ -183,6 +190,7 @@ const features: Feature[] = [
   },
   {
     id: "words",
+    pans: [1, 1, 1, 1, 0],
     icon: "type",
     title: "واژگان، اعراب و واژه‌نامه",
     short: "واژگان و اعراب",
@@ -207,6 +215,7 @@ const features: Feature[] = [
   },
   {
     id: "farhang",
+    pans: [-1, -1, 0, 0, 1],
     icon: "tag",
     title: "فرهنگ موضوعی",
     short: "فرهنگ موضوعی",
@@ -231,6 +240,7 @@ const features: Feature[] = [
   },
   {
     id: "alam",
+    pans: [-1, -1, 0, 0],
     icon: "library",
     title: "اعلام و اسماء",
     short: "اعلام و اسماء",
@@ -253,6 +263,7 @@ const features: Feature[] = [
   },
   {
     id: "ai",
+    pans: [0, -1, 1, -1, 1],
     icon: "sparkles",
     title: "هوش مصنوعی و منابع",
     short: "هوش مصنوعی",
@@ -267,6 +278,7 @@ const features: Feature[] = [
   },
   {
     id: "search",
+    pans: [-1, -1, -1, 0],
     icon: "search",
     title: "جستجو",
     short: "جستجو",

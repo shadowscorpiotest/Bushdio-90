@@ -9,11 +9,11 @@ import {
 } from "remotion";
 import { A, C, FONT } from "./theme";
 
+// Static on purpose: a moving full-frame background makes every clip in the deck much larger
 export const Background: React.FC = () => {
-  const frame = useCurrentFrame();
-  const drift = frame * 0.25;
-  const g1 = 28 + Math.sin(frame / 90) * 8;
-  const g2 = 74 + Math.cos(frame / 110) * 8;
+  const drift = 0;
+  const g1 = 28;
+  const g2 = 74;
   return (
     <AbsoluteFill
       style={{
@@ -443,9 +443,7 @@ export const Phone: React.FC<{ children: React.ReactNode; delay?: number }> = ({
   children,
   delay = 0,
 }) => {
-  const frame = useCurrentFrame();
   const p = useSpring(delay, 18);
-  const float = Math.sin(frame / 30) * 4;
   return (
     <div
       style={{
@@ -456,7 +454,7 @@ export const Phone: React.FC<{ children: React.ReactNode; delay?: number }> = ({
         background: "linear-gradient(145deg, #2a3350, #080c1a)",
         boxShadow:
           "0 50px 120px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1), 0 0 90px rgba(47,107,255,0.35)",
-        transform: `translateY(${(1 - p) * 220 + float}px) rotate(${(1 - p) * -8}deg)`,
+        transform: `translateY(${(1 - p) * 220}px) rotate(${(1 - p) * -8}deg)`,
         opacity: Math.min(1, p * 1.5),
       }}
     >
