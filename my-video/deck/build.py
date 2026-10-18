@@ -133,11 +133,12 @@ def main():
         section = SECTIONS.get(scene_id) if step == 0 else None
         current = section or (slides[-1]["sectionTitle"] if slides else None)
         slide = {"notes": note_text(notes, scene_id, step), "section": section, "sectionTitle": current}
+        # stills are cut as clips too, for the MP4 versions (video.py)
+        clip, poster = cut(i, start, end, reuse="--reuse" in sys.argv)
         if scene_id in STILLS:
             slide["still"] = str(still(i, end))
             durations.append(None)
         else:
-            clip, poster = cut(i, start, end, reuse="--reuse" in sys.argv)
             slide.update(clip=str(clip), poster=str(poster))
             durations.append(round((end - start) * 1000 / FPS))
         slides.append(slide)

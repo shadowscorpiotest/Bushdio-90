@@ -1,21 +1,29 @@
 """Auto-playing MP4 of the deck, as a fallback to the click-through PowerPoint.
 
+    python3 deck/video.py [--brief]
+
 Each click step's clip (cut by build.py) is followed by a hold on its last frame, sized so the
 step lasts about as long as its speaker note takes to read: the scene's time from notes.json,
-shared between its steps by note length.
+shared between its steps by note length. --brief writes a version to watch without the talk:
+short holds, a little longer on slides that are mostly text.
 """
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from steps import DECK, clips
 
 ROOT = Path(__file__).resolve().parent.parent
 WORK = ROOT / "out/deck"
-OUT = ROOT / "out/quran-noor-presentation-auto.mp4"
+BRIEF = "--brief" in sys.argv
+OUT = ROOT / ("out/quran-noor-presentation-video.mp4" if BRIEF else "out/quran-noor-presentation-auto.mp4")
 FPS = DECK["fps"]
 MIN_HOLD = 2.5
-OUTRO_HOLD = 10
+OUTRO_HOLD = 6 if BRIEF else 10
+BRIEF_HOLD = 1.2
+TEXT_HOLD = 2.5
+TEXT_SCENES = {"intro", "agenda", "why", "developer", "overview", "findings", "quote", "critique"}
 
 
 def main():
@@ -24,11 +32,13 @@ def main():
     for i, (scene_id, step, start, end) in enumerate(clips()):
         scene = notes[scene_id]
         texts = scene["notes"]
-        if scene["seconds"]:
+        if not scene["seconds"]:
+            hold = OUTRO_HOLD
+        elif BRIEF:
+            hold = TEXT_HOLD if scene_id in TEXT_SCENES else BRIEF_HOLD
+        else:
             target = scene["seconds"] * len(texts[step]) / sum(len(t) for t in texts)
             hold = max(MIN_HOLD, target - (end - start) / FPS)
-        else:
-            hold = OUTRO_HOLD
         part = WORK / f"auto{i:02d}.mp4"
         subprocess.run(
             ["ffmpeg", "-y", "-i", str(WORK / f"clip{i:02d}.mp4"),
