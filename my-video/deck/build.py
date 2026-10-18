@@ -30,6 +30,10 @@ SECTIONS = {
     "quote": "جمع‌بندی و ارزیابی",
 }
 
+# Scenes shown as a still of their final frame, faded in, rather than as a video
+STILLS = {"outro"}
+FADE_IN = '<p:transition spd="med"><p:fade/></p:transition>'
+
 # PowerPoint's own markup for a video set to "Start: Automatically"
 TIMING = (
     '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst>'
@@ -78,6 +82,12 @@ def cut(i, start, end, reuse=False):
     return clip, poster
 
 
+def still(i, end):
+    image = WORK / f"still{i:02d}.png"
+    run("ffmpeg", "-y", "-ss", f"{(end - 1.5) / FPS:.4f}", "-i", str(MASTER), "-frames:v", "1", str(image))
+    return image
+
+
 def note_text(notes, scene_id, step):
     scene = notes["scenes"][scene_id]
     text = scene["notes"][step]
@@ -93,7 +103,11 @@ def add_autoplay(src, dst, durations_ms):
         for item in zin.infolist():
             data = zin.read(item.filename)
             m = re.fullmatch(r"ppt/slides/slide(\d+)\.xml", item.filename)
-            if m:
+            if m and durations_ms[int(m.group(1)) - 1] is None:
+                xml = data.decode("utf8").replace("</p:clrMapOvr>", "</p:clrMapOvr>" + FADE_IN, 1)
+                assert FADE_IN in xml, item.filename
+                data = xml.encode("utf8")
+            elif m:
                 xml = data.decode("utf8")
                 spid = re.search(r'<p:cNvPr id="(\d+)" name="clip"', xml).group(1)
                 # pptxgenjs gives the overlay the video's shape id; ids must be unique per slide
@@ -116,19 +130,17 @@ def main():
     notes = json.loads((Path(__file__).parent / "notes.json").read_text())
     slides, durations = [], []
     for i, (scene_id, step, start, end) in enumerate(clips()):
-        clip, poster = cut(i, start, end, reuse="--reuse" in sys.argv)
         section = SECTIONS.get(scene_id) if step == 0 else None
         current = section or (slides[-1]["sectionTitle"] if slides else None)
-        slides.append(
-            {
-                "clip": str(clip),
-                "poster": str(poster),
-                "notes": note_text(notes, scene_id, step),
-                "section": section,
-                "sectionTitle": current,
-            }
-        )
-        durations.append(round((end - start) * 1000 / FPS))
+        slide = {"notes": note_text(notes, scene_id, step), "section": section, "sectionTitle": current}
+        if scene_id in STILLS:
+            slide["still"] = str(still(i, end))
+            durations.append(None)
+        else:
+            clip, poster = cut(i, start, end, reuse="--reuse" in sys.argv)
+            slide.update(clip=str(clip), poster=str(poster))
+            durations.append(round((end - start) * 1000 / FPS))
+        slides.append(slide)
     manifest = WORK / "manifest.json"
     manifest.write_text(json.dumps({"slides": slides}, ensure_ascii=False, indent=1))
     raw = WORK / "raw.pptx"

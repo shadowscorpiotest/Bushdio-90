@@ -1,6 +1,8 @@
 // Builds the click-through deck from the clips listed in out/deck/manifest.json:
 // one slide per click, a full-bleed video whose cover is its own first frame, a transparent
 // overlay so mouse clicks advance the slide instead of pausing the video, and speaker notes.
+// A slide with `still` instead shows that image, so it reads the same in thumbnails and in
+// viewers that do not play video.
 const fs = require("fs");
 const path = require("path");
 const PptxGenJS = require("pptxgenjs");
@@ -19,6 +21,11 @@ for (const s of manifest.slides) {
   if (s.section) pres.addSection({ title: s.section });
   const slide = pres.addSlide({ sectionTitle: s.sectionTitle });
   slide.background = { color: "040B22" };
+  if (s.still) {
+    slide.addImage({ path: path.resolve(s.still), x: 0, y: 0, w: 13.333, h: 7.5, objectName: "still" });
+    slide.addNotes(s.notes);
+    continue;
+  }
   const cover = fs.readFileSync(s.poster).toString("base64");
   slide.addMedia({
     type: "video",
