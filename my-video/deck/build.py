@@ -66,12 +66,15 @@ def cut(i, start, end, reuse=False):
     poster = WORK / f"clip{i:02d}.jpg"
     if reuse and clip.exists() and poster.exists():
         return clip, poster
+    # seek half a frame early: a rounded-up timestamp would skip the first frame and end the clip on
+    # the next step's first frame
+    ss = f"{(start - 0.5) / FPS:.4f}"
     run(
-        "ffmpeg", "-y", "-ss", f"{start / FPS:.4f}", "-i", str(MASTER), "-frames:v", str(end - start),
+        "ffmpeg", "-y", "-ss", ss, "-i", str(MASTER), "-frames:v", str(end - start),
         "-c:v", "libx264", "-profile:v", "high", "-level", "4.1", "-pix_fmt", "yuv420p",
         "-crf", "20", "-preset", "slow", "-an", "-movflags", "+faststart", str(clip),
     )
-    run("ffmpeg", "-y", "-ss", f"{start / FPS:.4f}", "-i", str(MASTER), "-frames:v", "1", "-q:v", "2", str(poster))
+    run("ffmpeg", "-y", "-ss", ss, "-i", str(MASTER), "-frames:v", "1", "-q:v", "2", str(poster))
     return clip, poster
 
 

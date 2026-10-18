@@ -305,8 +305,8 @@ const features: Feature[] = [
       <RecSteps
         segs={[
           { v: "v5", from: 81, to: 83.5 },
-          { v: "v5", from: 83.5, to: 87.4 },
-          { v: "v5", from: 87.4, to: 90.9 },
+          { v: "v5", from: 83.5, to: 86.3 },
+          { v: "v5", from: 86.3, to: 90.9 },
           { v: "v6", from: 8.3, to: 11 },
           { v: "v6", from: 19.8, to: 27 },
         ]}
